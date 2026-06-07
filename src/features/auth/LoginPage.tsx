@@ -69,7 +69,7 @@ const LoginPage = () => {
                 required
                 maxLength={180}
                 className="cl-input"
-                placeholder="admin@flehty.tn"
+                placeholder="admin@flehty.com"
               />
             </div>
             <div>
