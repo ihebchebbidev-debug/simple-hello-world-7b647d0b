@@ -1,6 +1,6 @@
 export const en = {
   app: {
-    title: 'Agri-Sync — Administration',
+    title: 'Flehty — Administration',
     tagline: 'Admin console',
     console: 'Admin console',
     logout: 'Sign out',
@@ -139,7 +139,7 @@ export const en = {
   },
 
   login: {
-    title: 'Agri-Sync Admin',
+    title: 'Flehty Admin',
     subtitle: 'Sign in to the console',
     email: 'Email',
     password: 'Password',
@@ -162,7 +162,7 @@ export const en = {
 
   dashboard: {
     title: 'Dashboard',
-    subtitle: 'Overview of Agri-Sync operations — live data.',
+    subtitle: 'Overview of Flehty operations — live data.',
     statsLoadFailed: 'Could not load statistics.',
     plotsActive: 'Active plots',
     fertilizers: 'Fertilizers',
@@ -352,7 +352,7 @@ export const en = {
 
   users: {
     title: 'Users',
-    subtitle: 'Administrators, managers and technicians connected to Agri-Sync.',
+    subtitle: 'Administrators, managers and technicians connected to Flehty.',
     countOne: '{{count}} user',
     countOther: '{{count}} users',
     new: '+ New user',
@@ -467,8 +467,8 @@ export const en = {
   },
   help: {
     title: 'Help', subtitle: 'How each module works and what data it manages.',
-    aboutTitle: 'About Agri-Sync Admin',
-    aboutBody: 'Agri-Sync Admin is the back-office for managing plots, inputs, operations, users and reports. All data flows live through the API.',
+    aboutTitle: 'About Flehty Admin',
+    aboutBody: 'Flehty Admin is the back-office for managing plots, inputs, operations, users and reports. All data flows live through the API.',
     sections: {
       dashboard:    { title: 'Dashboard',    body: 'KPIs and recent activity across operations.' },
       plots:        { title: 'Plots',        body: 'Manage agricultural plots, surface and crop.' },

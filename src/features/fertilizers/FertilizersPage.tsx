@@ -146,7 +146,7 @@ const FertilizersPage = () => {
 
       if (all.length === 0) { toast.info(t('common.noData')); return; }
       downloadCsv(
-        `agri-sync-fertilizers-${new Date().toISOString().slice(0, 10)}.csv`,
+        `flehty-fertilizers-${new Date().toISOString().slice(0, 10)}.csv`,
         all.map((f) => ({
           name: f.name, unit: f.unit, n: f.n_percent, p: f.p_percent, k: f.k_percent,
           status: f.is_active ? t('common.active') : t('common.inactive'),

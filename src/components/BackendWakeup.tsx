@@ -61,8 +61,8 @@ export default function BackendWakeup({ children }: Props) {
         }}
       />
       <div className="relative w-full max-w-md bg-card rounded-xl p-8 text-center animate-fade-in shadow-xl">
-        <img src={logoIcon} alt="Agri-Sync" className="h-16 w-16 mx-auto mb-4" />
-        <h1 className="display-md text-foreground mb-2">Agri-Sync</h1>
+        <img src={logoIcon} alt="Flehty" className="h-16 w-16 mx-auto mb-4" />
+        <h1 className="display-md text-foreground mb-2">Flehty</h1>
         <p className="text-sm text-muted-foreground mb-6">
           Réveil du serveur backend en cours…
         </p>

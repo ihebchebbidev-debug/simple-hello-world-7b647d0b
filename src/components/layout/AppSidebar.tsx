@@ -72,10 +72,10 @@ const AppSidebar = ({ onClose, collapsed = false }: Props) => {
   return (
     <aside className="flex h-screen w-full flex-col shrink-0 bg-[hsl(var(--sidebar-background))] transition-[width] duration-200">
       <div className={`flex items-center gap-3 py-5 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
-        <img src={logoIcon} alt="Agri-Sync" className="h-9 w-9 shrink-0 rounded-lg" />
+        <img src={logoIcon} alt="Flehty" className="h-9 w-9 shrink-0 rounded-lg" />
         {!collapsed && (
           <div className="min-w-0">
-            <h1 className="text-[14px] font-bold tracking-wide leading-tight text-[hsl(var(--primary-glow))]">Agri-Sync</h1>
+            <h1 className="text-[14px] font-bold tracking-wide leading-tight text-[hsl(var(--primary-glow))]">Flehty</h1>
             <span className="text-[10px] font-medium leading-tight text-muted-foreground">Administration</span>
           </div>
         )}

@@ -134,7 +134,7 @@ const PlotsPage = () => {
 
       if (all.length === 0) { toast.info(t('common.noData')); return; }
       downloadCsv(
-        `agri-sync-plots-${new Date().toISOString().slice(0, 10)}.csv`,
+        `flehty-plots-${new Date().toISOString().slice(0, 10)}.csv`,
         all.map((p) => ({
           name: p.name,
           surface: p.surface_area_ha,

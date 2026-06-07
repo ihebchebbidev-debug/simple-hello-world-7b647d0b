@@ -129,7 +129,7 @@ const PesticidesPage = () => {
         cp += 1;
       } while (cp <= lp);
       if (all.length === 0) { toast.info(t('common.noData')); return; }
-      downloadCsv(`agri-sync-pesticides-${new Date().toISOString().slice(0, 10)}.csv`,
+      downloadCsv(`flehty-pesticides-${new Date().toISOString().slice(0, 10)}.csv`,
         all.map((f) => ({
           name: f.name, unit: f.unit, composition: f.chemical_composition ?? '',
           status: f.is_active ? t('common.active') : t('common.inactive'),

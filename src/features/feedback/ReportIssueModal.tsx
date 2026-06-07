@@ -74,7 +74,7 @@ const ReportIssueModal = ({ open, onClose }: ReportIssueModalProps) => {
       open={open}
       onClose={handleClose}
       title={t('feedback.modal.title', 'Report a bug or feature')}
-      description={t('feedback.modal.description', 'Help us improve Agri-Sync — your message goes straight to the team.')}
+      description={t('feedback.modal.description', 'Help us improve Flehty — your message goes straight to the team.')}
       size="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">

@@ -35,7 +35,7 @@ const LoginPage = () => {
       <IonContent fullscreen>
         <div className="flex flex-col min-h-screen px-5 pt-12 pb-8">
           <header className="text-center mb-10 space-y-2">
-            <img src={logoIcon} alt="Agri-Sync" className="h-16 w-16 rounded-2xl mx-auto" />
+            <img src={logoIcon} alt="Flehty" className="h-16 w-16 rounded-2xl mx-auto" />
             <h1 className="text-2xl font-bold text-primary">{t('auth.title')}</h1>
             <p className="text-xs text-muted-foreground">{t('auth.subtitle')}</p>
           </header>

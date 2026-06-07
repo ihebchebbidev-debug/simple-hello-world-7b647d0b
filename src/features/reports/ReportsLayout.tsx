@@ -27,7 +27,7 @@ const ReportsLayout = () => {
 
       {/* Print-only header */}
       <div className="print-only" style={{ marginBottom: 12 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111' }}>Agri-Sync — {t('reports.title')}</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111' }}>Flehty — {t('reports.title')}</h1>
         <p style={{ fontSize: 11, color: '#444' }}>{new Date().toLocaleString('fr-FR')}</p>
       </div>
 

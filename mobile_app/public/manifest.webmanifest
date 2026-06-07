@@ -1,7 +1,7 @@
 {
-  "name": "Agri-Sync",
-  "short_name": "Agri-Sync",
-  "description": "Saisie terrain Agri-Sync — irrigation, fertilisation, phytosanitaire, récolte.",
+  "name": "Flehty",
+  "short_name": "Flehty",
+  "description": "Saisie terrain Flehty — irrigation, fertilisation, phytosanitaire, récolte.",
   "lang": "fr",
   "start_url": "/",
   "scope": "/",
