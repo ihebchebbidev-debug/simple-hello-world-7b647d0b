@@ -10,7 +10,7 @@
 import axios, { type AxiosError } from 'axios';
 import i18n from '@/i18n';
 
-const DEFAULT_BASE_URL = 'http://vps-cf5a8c99.vps.ovh.net:8000/';
+const DEFAULT_BASE_URL = 'https://api.flehty.com/';
 
 function normalise(raw: string | undefined): string {
   return (raw?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '').replace(/\/api$/, '');
