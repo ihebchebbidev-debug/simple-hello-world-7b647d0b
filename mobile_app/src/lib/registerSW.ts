@@ -23,6 +23,7 @@ function isPreviewHost(): boolean {
 export async function registerServiceWorker(): Promise<void> {
   if (typeof window === 'undefined') return;
   if (Capacitor.isNativePlatform()) return;
+  if (import.meta.env.VITE_PWA_ENABLED === 'false') return;
 
   // Hard guard: in iframes / preview hosts, actively *unregister* any
   // previously-installed SW so we never serve a stale build.
