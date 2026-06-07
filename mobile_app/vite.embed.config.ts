@@ -15,7 +15,10 @@ export default defineConfig({
   base: '/mobileapp/',
   plugins: [react()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, 'src') },
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+      'virtual:pwa-register': path.resolve(__dirname, 'src/lib/registerSW.noop.ts'),
+    },
   },
   define: {
     'import.meta.env.VITE_USE_HASH_ROUTER': JSON.stringify('false'),
