@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const DEFAULT_BACKEND_URL = 'https://hello-world-first-steps.onrender.com';
+const DEFAULT_BACKEND_URL = 'http://vps-cf5a8c99.vps.ovh.net:8000/';
 export const TOKEN_KEY = 'agri-sync.auth.token';
 const LEGACY_TOKEN_KEY = 'agrysync.token';
 

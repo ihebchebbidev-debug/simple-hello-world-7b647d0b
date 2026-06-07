@@ -4,7 +4,6 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import AppLayout from './AppLayout';
 import RequireAuth from '@/components/RequireAuth';
-import BackendWakeup from '@/components/BackendWakeup';
 import { ThemeProvider } from '@/hooks/useTheme';
 import SetupGate from '@/components/SetupGate';
 
@@ -69,8 +68,7 @@ const App = () => (
   <ThemeProvider>
     <QueryClientProvider client={queryClient}>
       <Toaster theme="dark" position="top-right" richColors closeButton />
-      <BackendWakeup>
-        <BrowserRouter>
+      <BrowserRouter>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<Navigate to="/login" replace />} />
