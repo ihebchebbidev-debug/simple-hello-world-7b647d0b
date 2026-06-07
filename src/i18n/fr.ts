@@ -467,7 +467,7 @@ export const fr = {
   },
   help: {
     title: 'Aide', subtitle: 'Comment fonctionne chaque module.',
-    aboutTitle: 'À propos d\'Flehty Admin',
+    aboutTitle: 'À propos de Flehty Admin',
     aboutBody: 'Flehty Admin est le back-office de gestion des parcelles, intrants, opérations, utilisateurs et rapports. Toutes les données sont en direct via l\'API.',
     sections: {
       dashboard:    { title: 'Tableau de bord', body: 'KPIs et activité récente sur les opérations.' },
