@@ -1,0 +1,14 @@
+.git
+.gitignore
+vendor
+node_modules
+storage/framework/cache
+storage/framework/sessions
+storage/framework/views
+storage/logs
+*.log
+.env
+.env.*
+!.env.example
+tests
+README.md

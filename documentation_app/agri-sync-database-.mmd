@@ -1,0 +1,234 @@
+erDiagram
+    users {
+        UUID id PK
+        VARCHAR name
+        VARCHAR email UK
+        VARCHAR password_hash
+        BOOLEAN is_active
+        TIMESTAMPTZ last_login_at
+        VARCHAR preferred_lang
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        UUID created_by FK
+        UUID updated_by FK
+    }
+
+    user_roles {
+        UUID id PK
+        UUID user_id FK
+        app_role role
+        TIMESTAMPTZ assigned_at
+        UUID assigned_by FK
+    }
+
+    plots {
+        UUID id PK
+        VARCHAR name
+        DECIMAL surface_area_ha
+        VARCHAR crop_type
+        VARCHAR variety
+        DATE season_start_date
+        BOOLEAN is_active
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        UUID created_by FK
+        UUID updated_by FK
+    }
+
+    water_config {
+        UUID id PK
+        VARCHAR unit
+        BOOLEAN is_active
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        UUID created_by FK
+        UUID updated_by FK
+    }
+
+    fertilizers {
+        UUID id PK
+        VARCHAR name
+        VARCHAR unit
+        DECIMAL n_percent
+        DECIMAL p_percent
+        DECIMAL k_percent
+        BOOLEAN is_active
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        UUID created_by FK
+        UUID updated_by FK
+    }
+
+    pesticides {
+        UUID id PK
+        VARCHAR name
+        VARCHAR unit
+        TEXT chemical_composition
+        BOOLEAN is_active
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        UUID created_by FK
+        UUID updated_by FK
+    }
+
+    labor_config {
+        UUID id PK
+        BOOLEAN is_active
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        UUID created_by FK
+        UUID updated_by FK
+    }
+
+    price_history {
+        UUID id PK
+        price_entity_type entity_type
+        UUID entity_id
+        DECIMAL price_per_unit
+        VARCHAR unit
+        DATE effective_from
+        DATE effective_to
+        TIMESTAMPTZ created_at
+        UUID created_by FK
+    }
+
+    entity_custom_fields {
+        UUID id PK
+        VARCHAR entity_type
+        VARCHAR field_name
+        VARCHAR field_label
+        field_type field_type
+        BOOLEAN is_required
+        JSONB select_options
+        INTEGER display_order
+        BOOLEAN is_active
+        TIMESTAMPTZ created_at
+        UUID created_by FK
+    }
+
+    entity_custom_values {
+        UUID id PK
+        UUID custom_field_id FK
+        VARCHAR entity_type
+        UUID entity_id
+        TEXT value_text
+        DECIMAL value_number
+        DATE value_date
+        BOOLEAN value_bool
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    irrigation_operations {
+        UUID id PK
+        UUID plot_id FK
+        DATE operation_date
+        DECIMAL water_quantity
+        VARCHAR unit_at_entry
+        DECIMAL price_at_entry
+        UUID posting_id FK
+        TIMESTAMPTZ created_at
+        UUID created_by FK
+        TIMESTAMPTZ updated_at
+        UUID updated_by FK
+    }
+
+    fertilization_operations {
+        UUID id PK
+        UUID plot_id FK
+        UUID fertilizer_id FK
+        DATE operation_date
+        DECIMAL quantity_applied
+        DECIMAL n_at_entry
+        DECIMAL p_at_entry
+        DECIMAL k_at_entry
+        DECIMAL price_at_entry
+        UUID posting_id FK
+        TIMESTAMPTZ created_at
+        UUID created_by FK
+        TIMESTAMPTZ updated_at
+        UUID updated_by FK
+    }
+
+    phytosanitary_operations {
+        UUID id PK
+        UUID plot_id FK
+        UUID pesticide_id FK
+        DATE operation_date
+        DECIMAL quantity_applied
+        VARCHAR target_pest
+        TEXT remarks
+        DECIMAL price_at_entry
+        UUID posting_id FK
+        TIMESTAMPTZ created_at
+        UUID created_by FK
+        TIMESTAMPTZ updated_at
+        UUID updated_by FK
+    }
+
+    harvest_operations {
+        UUID id PK
+        UUID plot_id FK
+        DATE operation_date
+        INTEGER num_workers
+        DECIMAL days_worked
+        DECIMAL quantity_harvested
+        DECIMAL daily_rate_at_entry
+        UUID posting_id FK
+        TIMESTAMPTZ created_at
+        UUID created_by FK
+        TIMESTAMPTZ updated_at
+        UUID updated_by FK
+    }
+
+    postings {
+        UUID id PK
+        VARCHAR client_id UK
+        operation_type operation_type
+        JSONB payload
+        posting_status status
+        TEXT error_message
+        INTEGER retry_count
+        JSONB device_info
+        TIMESTAMPTZ submitted_at
+        TIMESTAMPTZ synced_at
+        UUID created_by FK
+    }
+
+    system_logs {
+        BIGSERIAL id PK
+        log_level level
+        VARCHAR category
+        VARCHAR action
+        VARCHAR entity_type
+        UUID entity_id
+        JSONB details
+        INET ip_address
+        TEXT user_agent
+        UUID user_id FK
+        TIMESTAMPTZ created_at
+    }
+
+    users ||--o{ user_roles : "has roles"
+    users ||--o{ system_logs : "generates"
+    users ||--o{ price_history : "sets prices"
+
+    plots ||--o{ irrigation_operations : "receives"
+    plots ||--o{ fertilization_operations : "receives"
+    plots ||--o{ phytosanitary_operations : "receives"
+    plots ||--o{ harvest_operations : "receives"
+
+    fertilizers ||--o{ fertilization_operations : "used in"
+    pesticides ||--o{ phytosanitary_operations : "used in"
+
+    water_config ||--o{ price_history : "price history"
+    fertilizers ||--o{ price_history : "price history"
+    pesticides ||--o{ price_history : "price history"
+    labor_config ||--o{ price_history : "rate history"
+
+    postings ||--o| irrigation_operations : "syncs to"
+    postings ||--o| fertilization_operations : "syncs to"
+    postings ||--o| phytosanitary_operations : "syncs to"
+    postings ||--o| harvest_operations : "syncs to"
+
+    entity_custom_fields ||--o{ entity_custom_values : "defines"

@@ -1,0 +1,556 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════
+   THE CULTIVATED LEDGER — Design System
+   ═══════════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    /* Surface Architecture — tonal layering, no pure black/white */
+    --background: 0 0% 7.5%;           /* #131313 — Level 0 Base */
+    --foreground: 30 6% 89%;            /* #e5e2e1 — on_surface */
+
+    --card: 0 0% 12.5%;                 /* #201f1f — Level 2 Content */
+    --card-foreground: 30 6% 89%;
+
+    --popover: 0 0% 16.5%;              /* #2a2a2a — Level 3 */
+    --popover-foreground: 30 6% 89%;
+
+    /* Primary — agricultural green */
+    --primary: 142 72% 29%;             /* #15803d */
+    --primary-foreground: 0 0% 100%;
+
+    /* Primary Glow / Inverse */
+    --primary-glow: 142 54% 67%;        /* #79db8d */
+
+    --secondary: 0 0% 11%;              /* #1c1b1b — Level 1 */
+    --secondary-foreground: 60 5% 74%;  /* #becabc */
+
+    --muted: 0 0% 14%;                  /* #242323 */
+    --muted-foreground: 60 5% 74%;      /* #becabc — on_surface_variant */
+
+    --accent: 142 72% 29%;
+    --accent-foreground: 0 0% 100%;
+
+    --accent-warning: 35 92% 50%;
+    --accent-warning-foreground: 0 0% 100%;
+
+    --accent-danger: 12 60% 75%;        /* #ffb4ab — softer error */
+    --accent-danger-foreground: 0 0% 10%;
+
+    --accent-info: 217 91% 60%;
+    --accent-info-foreground: 0 0% 100%;
+
+    --destructive: 12 60% 75%;
+    --destructive-foreground: 0 0% 10%;
+
+    /* No-Line Rule: ghost borders only */
+    --border: 120 5% 15%;               /* #3f493f at ~15% feel */
+    --input: 0 0% 20.5%;                /* #353534 — surface-container-highest */
+    --ring: 142 54% 67%;                /* primary glow */
+
+    --radius: 0.5rem;
+
+    /* Sidebar — vertical spine */
+    --sidebar-background: 0 0% 11%;     /* #1c1b1b */
+    --sidebar-foreground: 60 5% 60%;
+    --sidebar-primary: 142 54% 67%;     /* #79db8d — surface-tint */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 14%;         /* hover bg */
+    --sidebar-accent-foreground: 120 10% 90%;
+    --sidebar-border: 0 0% 13%;         /* ghost */
+    --sidebar-ring: 142 54% 67%;
+    --sidebar-muted: 60 5% 42%;
+
+    /* Chart tokens */
+    --chart-green: 142 60% 40%;
+    --chart-blue: 217 91% 60%;
+    --chart-orange: 35 92% 50%;
+    --chart-red: 12 60% 65%;
+    --chart-gray: 0 0% 40%;
+
+    /* Surface containers for tonal nesting */
+    --surface-container-lowest: 0 0% 9%;    /* #171616 */
+    --surface-container-low: 0 0% 11%;      /* #1c1b1b */
+    --surface-container: 0 0% 12.5%;        /* #201f1f */
+    --surface-container-high: 0 0% 16.5%;   /* #2a2a2a */
+    --surface-container-highest: 0 0% 20.5%;/* #353534 */
+    --surface-bright: 0 0% 24%;             /* hover glow */
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     LIGHT THEME — The Cultivated Ledger (Daylight Edition)
+     ═══════════════════════════════════════════════════════ */
+  [data-theme="light"] {
+    /* Light theme — higher contrast surfaces so cards/tables stand out */
+    --background: 220 14% 93%;
+    --foreground: 0 0% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    --primary: 142 72% 29%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 142 54% 40%;
+
+    --secondary: 220 13% 88%;
+    --secondary-foreground: 0 0% 25%;
+
+    --muted: 220 13% 90%;
+    --muted-foreground: 0 0% 38%;
+
+    --accent: 142 72% 29%;
+    --accent-foreground: 0 0% 100%;
+
+    --accent-warning: 35 92% 45%;
+    --accent-warning-foreground: 0 0% 100%;
+    --accent-danger: 0 72% 45%;
+    --accent-danger-foreground: 0 0% 100%;
+    --accent-info: 217 91% 45%;
+    --accent-info-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 78%;
+    --input: 0 0% 100%;
+    --ring: 142 72% 29%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 35%;
+    --sidebar-primary: 142 72% 29%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 93%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-border: 220 13% 85%;
+    --sidebar-ring: 142 72% 29%;
+    --sidebar-muted: 0 0% 50%;
+
+    --chart-green: 142 60% 35%;
+    --chart-blue: 217 91% 50%;
+    --chart-orange: 35 92% 50%;
+    --chart-red: 0 72% 51%;
+    --chart-gray: 0 0% 55%;
+
+    --surface-container-lowest: 0 0% 100%;
+    --surface-container-low: 0 0% 99%;
+    --surface-container: 0 0% 100%;
+    --surface-container-high: 0 0% 100%;
+    --surface-container-highest: 220 14% 96%;
+    --surface-bright: 220 14% 88%;
+  }
+
+  /* Light-mode surface refinements: cards/tables get a real border + soft shadow */
+  [data-theme="light"] .stat-card,
+  [data-theme="light"] .surface-level-1,
+  [data-theme="light"] .surface-level-2,
+  [data-theme="light"] .surface-level-3 {
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 1px 2px 0 hsl(220 13% 50% / 0.06), 0 1px 3px 0 hsl(220 13% 50% / 0.04);
+  }
+  [data-theme="light"] .stat-card:hover {
+    background: hsl(0 0% 100%);
+    box-shadow: 0 4px 12px -2px hsl(220 13% 40% / 0.12);
+  }
+  [data-theme="light"] .data-table tbody tr:hover td {
+    background: hsl(220 14% 96%);
+  }
+  [data-theme="light"] .data-table th {
+    color: hsl(0 0% 30%);
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  [data-theme="light"] .filter-select,
+  [data-theme="light"] .filter-date,
+  [data-theme="light"] .cl-input {
+    background: hsl(0 0% 100%);
+    border: 1px solid hsl(var(--border));
+  }
+  [data-theme="light"] .ghost-border {
+    border: 1px solid hsl(var(--border));
+  }
+  [data-theme="light"] .bg-card {
+    box-shadow: 0 1px 2px 0 hsl(220 13% 50% / 0.06), 0 1px 3px 0 hsl(220 13% 50% / 0.04);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar styling for dark theme */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--surface-container-highest));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--surface-bright));
+  }
+}
+
+@layer components {
+  /* ── Sidebar nav item — vertical spine ─────────────── */
+  .sidebar-nav-item {
+    @apply relative flex items-center gap-3 px-3 py-2.5 text-[13px] font-medium rounded-md transition-all duration-200;
+    color: hsl(var(--sidebar-foreground));
+  }
+  .sidebar-nav-item:hover {
+    background: hsl(var(--sidebar-accent));
+    color: hsl(var(--sidebar-accent-foreground));
+  }
+  .sidebar-nav-item.active {
+    background: hsl(var(--sidebar-accent));
+    color: hsl(var(--sidebar-primary));
+  }
+  .sidebar-nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: hsl(var(--sidebar-primary));
+  }
+  .sidebar-nav-item.active .nav-icon {
+    color: hsl(var(--sidebar-primary));
+  }
+
+  /* ── Stat card — glassmorphism + tonal layering ────── */
+  .stat-card {
+    @apply relative rounded-xl p-3 sm:p-5 transition-all duration-300 overflow-hidden;
+    background: hsl(var(--surface-container-high));
+  }
+  .stat-card:hover {
+    background: hsl(var(--surface-bright) / 0.6);
+  }
+  .stat-card-glass {
+    @apply relative rounded-xl p-3 sm:p-5 overflow-hidden;
+    background: hsl(var(--primary) / 0.12);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  /* ── Data table — NO dividers, row spacing ──────────── */
+  .data-table {
+    @apply w-full text-[13px];
+    border-collapse: separate;
+    border-spacing: 0 2px;
+  }
+  .data-table th {
+    @apply px-4 py-3 text-left font-semibold text-[10px] uppercase tracking-[0.05em];
+    color: hsl(var(--muted-foreground));
+  }
+  .data-table td {
+    @apply px-4 py-3 text-[13px];
+    color: hsl(var(--muted-foreground));
+  }
+  .data-table tbody tr {
+    transition: background 0.15s;
+    border-radius: 0.375rem;
+  }
+  .data-table tbody tr:hover td {
+    background: hsl(var(--surface-container-lowest));
+  }
+  .data-table tbody tr:hover td:first-child {
+    border-radius: 0.375rem 0 0 0.375rem;
+  }
+  .data-table tbody tr:hover td:last-child {
+    border-radius: 0 0.375rem 0.375rem 0;
+  }
+
+  /* ── Filter bar ─────────────────────────────────────── */
+  .filter-select {
+    @apply h-9 rounded-md px-3 text-[13px] text-foreground transition-colors;
+    background: hsl(var(--surface-container-highest));
+    border: none;
+    @apply focus:outline-none focus:ring-1 focus:ring-ring;
+  }
+  .filter-date {
+    @apply h-9 rounded-md px-3 text-[13px] text-foreground transition-colors;
+    background: hsl(var(--surface-container-highest));
+    border: none;
+    @apply focus:outline-none focus:ring-1 focus:ring-ring;
+  }
+
+  /* ── Badges — low-sat bg, high-sat text ────────────── */
+  .badge {
+    @apply inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold leading-tight;
+  }
+  .badge-synced {
+    @apply badge;
+    background: hsl(var(--primary) / 0.12);
+    color: hsl(var(--primary-glow));
+  }
+  .badge-pending {
+    @apply badge;
+    background: hsl(var(--accent-warning) / 0.12);
+    color: hsl(var(--accent-warning));
+  }
+  .badge-error {
+    @apply badge;
+    background: hsl(var(--accent-danger) / 0.12);
+    color: hsl(var(--accent-danger));
+  }
+  .badge-admin {
+    @apply badge;
+    background: hsl(var(--accent-danger) / 0.12);
+    color: hsl(var(--accent-danger));
+  }
+  .badge-manager {
+    @apply badge;
+    background: hsl(var(--accent-info) / 0.12);
+    color: hsl(var(--accent-info));
+  }
+  .badge-technician {
+    @apply badge;
+    background: hsl(var(--primary) / 0.12);
+    color: hsl(var(--primary-glow));
+  }
+  .badge-active {
+    @apply badge;
+    background: hsl(var(--primary) / 0.12);
+    color: hsl(var(--primary-glow));
+  }
+  .badge-inactive {
+    @apply badge;
+    background: hsl(var(--muted-foreground) / 0.12);
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* ── Glass CTA button ──────────────────────────────── */
+  .btn-primary-glass {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-[13px] font-semibold text-primary-foreground transition-all duration-200;
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    box-shadow: 0 0 24px -4px hsl(var(--primary) / 0.3);
+  }
+  .btn-primary-glass::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: hsl(0 0% 100% / 0.1);
+    border-radius: inherit;
+  }
+  .btn-primary-glass:hover {
+    box-shadow: 0 0 32px -4px hsl(var(--primary) / 0.45);
+    transform: translateY(-1px);
+  }
+
+  /* ── Section surface — tonal layering ──────────────── */
+  .surface-level-1 {
+    background: hsl(var(--surface-container-low));
+  }
+  .surface-level-2 {
+    background: hsl(var(--surface-container));
+  }
+  .surface-level-3 {
+    background: hsl(var(--surface-container-high));
+  }
+
+  /* ── Typography — editorial precision ──────────────── */
+  .display-md {
+    @apply text-3xl font-bold tracking-tight;
+    letter-spacing: -0.02em;
+  }
+  .headline-lg {
+    @apply text-2xl font-bold;
+    letter-spacing: -0.02em;
+  }
+  .label-md {
+    @apply text-xs font-semibold uppercase;
+    letter-spacing: 0.05em;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* ── Ambient shadow for floating elements ──────────── */
+  .ambient-shadow {
+    box-shadow: 0 8px 48px -8px hsl(var(--surface-container-highest) / 0.08);
+  }
+
+  /* ── Ghost border for a11y when needed ─────────────── */
+  .ghost-border {
+    border: 1px solid hsl(var(--border) / 0.15);
+  }
+
+  /* ── Destructive icon button (red tint for delete actions) ─── */
+  .btn-icon-danger {
+    @apply rounded-md p-1.5 transition-colors;
+    color: hsl(var(--accent-danger));
+  }
+  .btn-icon-danger:hover {
+    background: hsl(var(--accent-danger) / 0.15);
+  }
+  .btn-icon-danger img {
+    /* Tint a black PNG to the danger token color */
+    filter: brightness(0) saturate(100%) invert(72%) sepia(45%) saturate(720%) hue-rotate(316deg) brightness(102%) contrast(101%);
+  }
+
+  /* ── Input — Cultivated Ledger style ───────────────── */
+  .cl-input {
+    @apply h-10 w-full rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground transition-colors;
+    background: hsl(var(--surface-container-highest));
+    border: none;
+    @apply focus:outline-none focus:ring-1 focus:ring-ring;
+  }
+  .cl-input-error {
+    border-bottom: 2px solid hsl(var(--accent-danger));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PRINT — Manager-friendly PDF export (Ctrl+P / Save as PDF)
+   ═══════════════════════════════════════════════════════════ */
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+
+  html, body {
+    background: #ffffff !important;
+    color: #111111 !important;
+    font-size: 11pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  aside, nav, header,
+  [data-sidebar], [data-topbar],
+  .app-sidebar, .top-bar, .topbar,
+  .no-print { display: none !important; }
+
+  main, .main, .app-content, .app-shell, .layout-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: #ffffff !important;
+  }
+
+  .print-only { display: block !important; }
+
+  .stat-card, .stat-card-glass {
+    background: #ffffff !important;
+    border: 1px solid #d1d5db !important;
+    box-shadow: none !important;
+    padding: 8mm !important;
+    page-break-inside: avoid;
+    color: #111 !important;
+  }
+
+  table.data-table, table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    background: #ffffff !important;
+    color: #111 !important;
+    font-size: 10pt !important;
+  }
+  table.data-table th, table.data-table td,
+  table th, table td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+    color: #111 !important;
+    background: #ffffff !important;
+  }
+  table.data-table thead th, table thead th {
+    background: #f1f5f9 !important;
+    font-weight: 600 !important;
+  }
+  table tr { page-break-inside: avoid; }
+
+  .report-toolbar,
+  .table-search,
+  .table-pagination,
+  button, select, input[type="search"], input[type="text"], input[type="date"] {
+    display: none !important;
+  }
+
+  .reports-subnav { display: none !important; }
+
+  h1, h2, h3 { color: #111 !important; }
+  a { color: #111 !important; text-decoration: none !important; }
+
+  .stat-card, section { break-inside: avoid; }
+}
+
+.print-only { display: none; }
+
+@media print {
+  /* Empty toolbar wrapper cards (contain only the hidden toolbar) */
+  .stat-card:has(> .report-toolbar:only-child) { display: none !important; }
+
+  /* ── Recharts A4 readability ──────────────────────────────────
+     Force a deterministic chart size, dark text, visible axes,
+     readable tick labels and legend, and avoid page-breaks inside
+     a chart. Applies to all report chart types (bar/line/area/pie). */
+  .recharts-responsive-container,
+  .recharts-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 260px !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    background: #ffffff !important;
+  }
+  /* The actual <svg> surface keeps the pixel width/height attributes Recharts
+     measured on screen, so on a narrower A4 page it overflowed / collapsed and
+     the chart looked empty (client bug: graphs missing in the PDF). Pin it to
+     fill the print container so it scales down to the page. */
+  .recharts-surface {
+    overflow: visible !important;
+    width: 100% !important;
+    height: 260px !important;
+  }
+
+  .recharts-text,
+  .recharts-cartesian-axis-tick text,
+  .recharts-cartesian-axis-tick-value,
+  .recharts-label,
+  .recharts-label-list text,
+  .recharts-legend-item-text,
+  .recharts-pie-label-text,
+  .recharts-polar-angle-axis-tick-value,
+  .recharts-polar-radius-axis-tick-value {
+    fill: #111 !important;
+    color: #111 !important;
+    font-size: 10pt !important;
+    font-weight: 500 !important;
+  }
+
+  .recharts-cartesian-axis-line,
+  .recharts-cartesian-axis-tick-line {
+    stroke: #111 !important;
+    stroke-width: 1 !important;
+  }
+
+  .recharts-cartesian-grid line,
+  .recharts-cartesian-grid-horizontal line,
+  .recharts-cartesian-grid-vertical line {
+    stroke: #d1d5db !important;
+    stroke-dasharray: 2 2 !important;
+  }
+
+  .recharts-default-legend { padding: 4px 0 !important; }
+  .recharts-legend-item { margin-right: 12px !important; }
+  .recharts-legend-item-text { margin-left: 4px !important; }
+
+  .recharts-tooltip-wrapper,
+  .recharts-tooltip-cursor { display: none !important; }
+}

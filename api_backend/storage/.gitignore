@@ -1,0 +1,9 @@
+app/public
+debugbar
+framework/cache/data
+framework/sessions
+framework/testing
+framework/views
+logs
+*.log
+!.gitignore

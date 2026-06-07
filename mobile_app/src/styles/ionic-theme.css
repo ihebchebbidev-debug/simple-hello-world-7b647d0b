@@ -1,0 +1,46 @@
+/* Map Ionic CSS variables to the project's HSL design tokens. */
+
+:root,
+ion-app {
+  --ion-background-color: hsl(var(--background));
+  --ion-text-color: hsl(var(--foreground));
+
+  --ion-color-primary: hsl(var(--primary));
+  --ion-color-primary-contrast: hsl(var(--primary-foreground));
+  --ion-color-primary-shade: hsl(var(--primary) / 0.85);
+  --ion-color-primary-tint: hsl(var(--primary-glow));
+
+  --ion-toolbar-background: hsl(var(--surface-container));
+  --ion-toolbar-color: hsl(var(--foreground));
+  --ion-tab-bar-background: hsl(var(--surface-container));
+  --ion-tab-bar-color: hsl(var(--muted-foreground));
+  --ion-tab-bar-color-selected: hsl(var(--primary-glow));
+
+  --ion-item-background: transparent;
+  --ion-item-border-color: hsl(var(--border));
+  --ion-card-background: hsl(var(--surface-container-high));
+}
+
+ion-app,
+ion-content,
+ion-toolbar,
+ion-title,
+ion-button,
+ion-label,
+ion-input,
+ion-item {
+  font-family: inherit;
+}
+
+ion-content::part(scroll) {
+  background: hsl(var(--background));
+}
+
+/* Constrain to a phone-width frame in the web preview only */
+@media (min-width: 768px) {
+  ion-app {
+    max-width: 28rem;
+    margin: 0 auto;
+    box-shadow: 0 0 0 1px hsl(var(--border));
+  }
+}

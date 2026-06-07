@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0f0d" />
+    <title>Agri-Sync</title>
+    <meta name="description" content="Saisie terrain Agri-Sync — irrigation, fertilisation, phytosanitaire, récolte." />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Agri-Sync" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <script>
+      // Normalize legacy URLs like /mobileapp/index.html#/login or
+      // /mobileapp/#/login into the clean BrowserRouter form
+      // /mobileapp/login before React mounts.
+      (function () {
+        try {
+          var loc = window.location;
+          var path = loc.pathname;
+          var hash = loc.hash || '';
+          var needsRewrite = false;
+          // Strip trailing index.html
+          if (/\/index\.html$/.test(path)) {
+            path = path.replace(/\/index\.html$/, '') || '/';
+            needsRewrite = true;
+          }
+          // Promote hash route (#/foo) into real path
+          if (hash.indexOf('#/') === 0) {
+            var hashPath = hash.slice(1); // "/login..."
+            path = path.replace(/\/$/, '') + hashPath;
+            hash = '';
+            needsRewrite = true;
+          }
+          if (needsRewrite) {
+            window.history.replaceState(null, '', path + loc.search + hash);
+          }
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

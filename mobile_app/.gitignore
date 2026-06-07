@@ -1,0 +1,17 @@
+node_modules
+dist
+.vite
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+coverage
+
+# Capacitor native projects (generated)
+android
+ios
+
+.idea
+.vscode/*
+!.vscode/extensions.json
