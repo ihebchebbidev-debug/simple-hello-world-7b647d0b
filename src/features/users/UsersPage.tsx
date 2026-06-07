@@ -144,7 +144,7 @@ const UsersPage = () => {
       return;
     }
     downloadCsv(
-      `agri-sync-utilisateurs-${new Date().toISOString().slice(0, 10)}.csv`,
+      `flehty-utilisateurs-${new Date().toISOString().slice(0, 10)}.csv`,
       users.map((u) => ({
         nom: u.name,
         email: u.email,

@@ -48,9 +48,9 @@ const LoginPage = () => {
 
       <div className="relative w-full max-w-sm px-4 animate-fade-in">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <img src={logoIcon} alt="Agri-Sync" className="h-14 w-14 rounded-xl" />
+          <img src={logoIcon} alt="Flehty" className="h-14 w-14 rounded-xl" />
           <div className="text-center">
-            <h1 className="text-xl font-bold tracking-wide text-[hsl(var(--primary-glow))]">Agri-Sync</h1>
+            <h1 className="text-xl font-bold tracking-wide text-[hsl(var(--primary-glow))]">Flehty</h1>
             <p className="text-[11px] mt-0.5 text-muted-foreground">Administration</p>
           </div>
         </div>
@@ -69,7 +69,7 @@ const LoginPage = () => {
                 required
                 maxLength={180}
                 className="cl-input"
-                placeholder="admin@agri-sync.tn"
+                placeholder="admin@flehty.tn"
               />
             </div>
             <div>

@@ -1,5 +1,5 @@
 export const en = {
-  app: { title: 'Agri-Sync', tagline: 'Field entry' },
+  app: { title: 'Flehty', tagline: 'Field entry' },
   common: {
     loading: 'Loading…',
     save: 'Save', cancel: 'Cancel', back: 'Back',
@@ -10,7 +10,7 @@ export const en = {
     networkError: 'Network unavailable. Your entries are stored locally.',
   },
   auth: {
-    title: 'Agri-Sync',
+    title: 'Flehty',
     subtitle: 'Field app',
     email: 'Email', password: 'Password',
     signIn: 'Sign in', signingIn: 'Signing in…',

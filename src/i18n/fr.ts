@@ -1,6 +1,6 @@
 export const fr = {
   app: {
-    title: 'Agri-Sync — Administration',
+    title: 'Flehty — Administration',
     tagline: "Console d'administration",
     console: "Console d'administration",
     logout: 'Déconnexion',
@@ -139,7 +139,7 @@ export const fr = {
   },
 
   login: {
-    title: 'Agri-Sync Admin',
+    title: 'Flehty Admin',
     subtitle: 'Connectez-vous à la console',
     email: 'Email',
     password: 'Mot de passe',
@@ -162,7 +162,7 @@ export const fr = {
 
   dashboard: {
     title: 'Tableau de bord',
-    subtitle: "Vue d'ensemble des opérations Agri-Sync — données en direct.",
+    subtitle: "Vue d'ensemble des opérations Flehty — données en direct.",
     statsLoadFailed: 'Impossible de charger les statistiques.',
     plotsActive: 'Parcelles actives',
     fertilizers: 'Engrais',
@@ -352,7 +352,7 @@ export const fr = {
 
   users: {
     title: 'Utilisateurs',
-    subtitle: 'Administrateurs, gestionnaires et techniciens connectés à Agri-Sync.',
+    subtitle: 'Administrateurs, gestionnaires et techniciens connectés à Flehty.',
     countOne: '{{count}} utilisateur',
     countOther: '{{count}} utilisateurs',
     new: '+ Nouvel utilisateur',
@@ -467,8 +467,8 @@ export const fr = {
   },
   help: {
     title: 'Aide', subtitle: 'Comment fonctionne chaque module.',
-    aboutTitle: 'À propos d\'Agri-Sync Admin',
-    aboutBody: 'Agri-Sync Admin est le back-office de gestion des parcelles, intrants, opérations, utilisateurs et rapports. Toutes les données sont en direct via l\'API.',
+    aboutTitle: 'À propos de Flehty Admin',
+    aboutBody: 'Flehty Admin est le back-office de gestion des parcelles, intrants, opérations, utilisateurs et rapports. Toutes les données sont en direct via l\'API.',
     sections: {
       dashboard:    { title: 'Tableau de bord', body: 'KPIs et activité récente sur les opérations.' },
       plots:        { title: 'Parcelles',       body: 'Gestion des parcelles, surface et culture.' },

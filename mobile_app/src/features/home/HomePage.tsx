@@ -44,7 +44,7 @@ const HomePage = () => {
             <div className="flex items-center gap-3">
               <img src={logoIcon} alt="" className="h-10 w-10 rounded-xl" />
               <div>
-                <h1 className="text-base font-bold text-foreground">Agri-Sync</h1>
+                <h1 className="text-base font-bold text-foreground">Flehty</h1>
                 <p className="text-[11px] text-muted-foreground">
                   {user ? t('home.welcome', { name: user.name }) : t('app.tagline')}
                 </p>

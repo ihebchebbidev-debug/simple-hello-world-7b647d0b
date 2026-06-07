@@ -1,5 +1,5 @@
 export const fr = {
-  app: { title: 'Agri-Sync', tagline: 'Saisie terrain' },
+  app: { title: 'Flehty', tagline: 'Saisie terrain' },
   common: {
     loading: 'Chargement…',
     save: 'Enregistrer', cancel: 'Annuler', back: 'Retour',
@@ -10,7 +10,7 @@ export const fr = {
     networkError: 'Réseau indisponible. Vos données sont enregistrées localement.',
   },
   auth: {
-    title: 'Agri-Sync',
+    title: 'Flehty',
     subtitle: 'Application terrain',
     email: 'Email', password: 'Mot de passe',
     signIn: 'Se connecter', signingIn: 'Connexion…',

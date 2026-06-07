@@ -138,7 +138,7 @@ const WaterPage = () => {
     const date = new Date().toISOString().slice(0, 10);
     if (units.length > 0) {
       downloadCsv(
-        `agri-sync-eau-unites-${date}.csv`,
+        `flehty-eau-unites-${date}.csv`,
         units.map((u) => ({
           libelle: u.unit,
           statut: u.is_active ? t('common.active') : t('common.inactive'),
@@ -153,7 +153,7 @@ const WaterPage = () => {
     }
     if (prices.length > 0) {
       downloadCsv(
-        `agri-sync-eau-tarifs-${date}.csv`,
+        `flehty-eau-tarifs-${date}.csv`,
         prices.map((p) => ({
           prix: p.price_per_unit,
           unite: p.unit ?? '',

@@ -138,7 +138,7 @@ const LaborPage = () => {
     const date = new Date().toISOString().slice(0, 10);
     if (rates.length > 0) {
       downloadCsv(
-        `agri-sync-main-oeuvre-tarifs-${date}.csv`,
+        `flehty-main-oeuvre-tarifs-${date}.csv`,
         rates.map((p) => ({
           tarif: p.price_per_unit,
           du: p.effective_from,
