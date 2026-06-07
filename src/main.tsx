@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import App from './app/App';
 import './i18n';
 import './styles/index.css';
+import { initVersionCheck } from './lib/versionCheck';
 
 document.documentElement.classList.add('dark');
 
@@ -18,3 +19,7 @@ document.addEventListener(
 );
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+// Poll /version.json so a new Vercel deployment triggers a one-shot reload
+// and the user always sees the latest bundle.
+void initVersionCheck();
