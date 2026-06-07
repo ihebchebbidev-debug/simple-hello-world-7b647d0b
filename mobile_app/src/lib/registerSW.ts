@@ -39,10 +39,10 @@ export async function registerServiceWorker(): Promise<void> {
 
   if (!('serviceWorker' in navigator)) return;
   try {
-    // Indirect specifier so Vite cannot statically resolve the virtual
-    // module — embed builds (no vite-plugin-pwa) won't fail.
-    const mod = 'virtual:pwa-register';
-    const { registerSW } = await import(/* @vite-ignore */ mod);
+    // Use a literal module specifier so Vite can resolve the virtual PWA
+    // module during build. If the PWA plugin is not present at runtime,
+    // the import will fail and the error is ignored.
+    const { registerSW } = await import('virtual:pwa-register');
     registerSW({ immediate: true });
   } catch { /* PWA module unavailable in this build — ignore */ }
 }
