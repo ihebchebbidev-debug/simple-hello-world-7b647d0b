@@ -19,3 +19,7 @@ document.addEventListener(
 );
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+// Poll /version.json so a new Vercel deployment triggers a one-shot reload
+// and the user always sees the latest bundle.
+void initVersionCheck();
