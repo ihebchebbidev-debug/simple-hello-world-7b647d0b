@@ -9,7 +9,7 @@ const OpenMobileAppButton = () => {
   const { t } = useTranslation();
   return (
     <a
-      href="https://agrysync.vercel.app/mobileapp/login"
+      href="https://flehty.com/mobileapp/login"
       className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent hover:text-accent-foreground transition-colors backdrop-blur"
       title={t('common.openMobileApp', 'Open Mobile App')}
     >

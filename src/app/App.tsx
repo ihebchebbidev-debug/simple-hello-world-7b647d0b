@@ -69,44 +69,43 @@ const App = () => (
     <QueryClientProvider client={queryClient}>
       <Toaster theme="dark" position="top-right" richColors closeButton />
       <BrowserRouter>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/" element={<Navigate to="/login" replace />} />
-              <Route path="/login" element={<SetupGate />} />
-              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-              <Route path="/developer" element={<DeveloperPage />} />
-              <Route path="/mobileapp" element={<MobileAppRedirect />} />
-              <Route path="/mobileapp/*" element={<MobileAppRedirect />} />
-              <Route path="/" element={<RequireAuth><AppLayout /></RequireAuth>}>
-                <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="configuration" element={<ConfigurationPage />} />
-                <Route path="plots" element={<PlotsPage />} />
-                <Route path="fertilizers" element={<FertilizersPage />} />
-                <Route path="pesticides" element={<PesticidesPage />} />
-                <Route path="water" element={<WaterPage />} />
-                <Route path="labor" element={<LaborPage />} />
-                <Route path="campaigns" element={<CampaignsPage />} />
-                <Route path="pests" element={<PestsPage />} />
-                <Route path="reports" element={<ReportsLayout />}>
-                  <Route index element={<Navigate to="/reports/irrigation" replace />} />
-                  <Route path="irrigation" element={<IrrigationReport />} />
-                  <Route path="fertilization" element={<FertilizationReport />} />
-                  <Route path="phytosanitary" element={<PhytosanitaryReport />} />
-                  <Route path="harvesting" element={<HarvestingReport />} />
-                  <Route path="production-cost" element={<ProductionCostReport />} />
-                  <Route path="history/:type/:plotId" element={<PlotOperationsHistoryPage />} />
-                </Route>
-                <Route path="users" element={<UsersPage />} />
-                <Route path="notifications" element={<NotificationsPage />} />
-                <Route path="sync" element={<SyncPage />} />
-                <Route path="logs" element={<LogsPage />} />
-                <Route path="help" element={<HelpPage />} />
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/login" replace />} />
+            <Route path="/login" element={<SetupGate />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/developer" element={<DeveloperPage />} />
+            <Route path="/mobileapp" element={<MobileAppRedirect />} />
+            <Route path="/mobileapp/*" element={<MobileAppRedirect />} />
+            <Route path="/" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="configuration" element={<ConfigurationPage />} />
+              <Route path="plots" element={<PlotsPage />} />
+              <Route path="fertilizers" element={<FertilizersPage />} />
+              <Route path="pesticides" element={<PesticidesPage />} />
+              <Route path="water" element={<WaterPage />} />
+              <Route path="labor" element={<LaborPage />} />
+              <Route path="campaigns" element={<CampaignsPage />} />
+              <Route path="pests" element={<PestsPage />} />
+              <Route path="reports" element={<ReportsLayout />}>
+                <Route index element={<Navigate to="/reports/irrigation" replace />} />
+                <Route path="irrigation" element={<IrrigationReport />} />
+                <Route path="fertilization" element={<FertilizationReport />} />
+                <Route path="phytosanitary" element={<PhytosanitaryReport />} />
+                <Route path="harvesting" element={<HarvestingReport />} />
+                <Route path="production-cost" element={<ProductionCostReport />} />
+                <Route path="history/:type/:plotId" element={<PlotOperationsHistoryPage />} />
               </Route>
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
-      </BackendWakeup>
+              <Route path="users" element={<UsersPage />} />
+              <Route path="notifications" element={<NotificationsPage />} />
+              <Route path="sync" element={<SyncPage />} />
+              <Route path="logs" element={<LogsPage />} />
+              <Route path="help" element={<HelpPage />} />
+            </Route>
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
     </QueryClientProvider>
   </ThemeProvider>
 );
