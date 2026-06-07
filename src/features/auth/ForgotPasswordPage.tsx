@@ -110,7 +110,7 @@ const ForgotPasswordPage = () => {
                   autoFocus
                   autoComplete="email"
                   className="cl-input"
-                  placeholder="admin@flehty.tn"
+                  placeholder="admin@flehty.com"
                 />
               </div>
               {error && (
