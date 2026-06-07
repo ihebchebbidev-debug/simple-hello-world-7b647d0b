@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import App from './app/App';
 import './i18n';
 import './styles/index.css';
+import { initVersionCheck } from './lib/versionCheck';
 
 document.documentElement.classList.add('dark');
 
