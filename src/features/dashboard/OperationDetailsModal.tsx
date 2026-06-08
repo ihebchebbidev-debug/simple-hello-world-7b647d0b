@@ -111,9 +111,8 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
       onClose();
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        ?? t('common.saveFailed', 'Save failed');
-      toast.error(msg);
+      const r = (err as { response?: { data?: { error?: { message?: string }, message?: string } } })?.response?.data;
+      toast.error(r?.error?.message ?? r?.message ?? t('common.saveFailed', 'Save failed'));
     },
   });
 
@@ -125,9 +124,9 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
       onClose();
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        ?? t('common.deleteFailed', 'Delete failed');
-      toast.error(msg);
+      const r = (err as { response?: { data?: { error?: { message?: string }, message?: string }, status?: number } })?.response;
+      const msg = r?.data?.error?.message ?? r?.data?.message;
+      toast.error(msg ?? t('common.deleteFailed', 'Delete failed'));
     },
   });
 
