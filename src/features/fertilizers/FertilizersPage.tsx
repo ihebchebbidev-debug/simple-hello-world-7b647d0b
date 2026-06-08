@@ -252,20 +252,18 @@ const FertilizersPage = () => {
                         className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
                         {t('prices.button', 'Prices')}
                       </button>
-                      <AdminOnly>
-                        <button type="button" onClick={() => { setFormError(null); setEditing(item); }}
-                          className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
-                          {t('common.edit')}
-                        </button>
-                        <button type="button" disabled={isToggling} onClick={() => toggleActiveMutation.mutate(item)}
-                          className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
-                          {item.is_active ? t('common.deactivate') : t('common.activate')}
-                        </button>
-                        <button type="button" onClick={() => setDeleting(item)}
-                          className="rounded-md border border-rose-500/40 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/10">
-                          {t('common.delete')}
-                        </button>
-                      </AdminOnly>
+                      <button type="button" onClick={() => { setFormError(null); setEditing(item); }}
+                        className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+                        {t('common.edit')}
+                      </button>
+                      <button type="button" disabled={isToggling} onClick={() => toggleActiveMutation.mutate(item)}
+                        className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+                        {item.is_active ? t('common.deactivate') : t('common.activate')}
+                      </button>
+                      <button type="button" onClick={() => setDeleting(item)}
+                        className="rounded-md border border-rose-500/40 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/10">
+                        {t('common.delete')}
+                      </button>
                     </div>
                   </td>
                 </tr>

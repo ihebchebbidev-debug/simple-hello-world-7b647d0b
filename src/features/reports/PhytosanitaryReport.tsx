@@ -119,6 +119,8 @@ const PhytosanitaryReport = () => {
         });
       });
     });
+    // Newest operations first (client feedback).
+    out.sort((a, b) => (b.operation_date > a.operation_date ? 1 : b.operation_date < a.operation_date ? -1 : 0));
     return out;
   }, [reportQuery.data, plotsQuery.data]);
 

@@ -25,6 +25,7 @@ interface ApiData { plots: ApiPlotCost[]; grand_total: number }
 
 interface CostRow {
   plot: string;
+  surface: number;
   irrigation: number;
   fertilization: number;
   phytosanitary: number;
@@ -33,6 +34,7 @@ interface CostRow {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const perHa = (cost: number, surface: number) => (surface > 0 ? round2(cost / surface) : 0);
 
 const ProductionCostReport = () => {
   const { t } = useTranslation();
@@ -64,14 +66,18 @@ const ProductionCostReport = () => {
     const rows = reportQuery.data?.plots ?? [];
     return rows
       .filter((r) => !cropPlotIds || cropPlotIds.has(r.plot_id))
-      .map((r) => ({
-        plot: r.plot_name,
-        irrigation: round2(r.irrigation_cost),
-        fertilization: round2(r.fertilization_cost),
-        phytosanitary: round2(r.phytosanitary_cost),
-        harvest: round2(r.harvest_cost),
-        total: round2(r.total_cost),
-      }));
+      .map((r) => {
+        const surface = Number(r.surface_area_ha) || 0;
+        return {
+          plot: r.plot_name,
+          surface,
+          irrigation: perHa(r.irrigation_cost, surface),
+          fertilization: perHa(r.fertilization_cost, surface),
+          phytosanitary: perHa(r.phytosanitary_cost, surface),
+          harvest: perHa(r.harvest_cost, surface),
+          total: perHa(r.total_cost, surface),
+        };
+      });
   }, [reportQuery.data, cropPlotIds]);
 
   const filteredCosts = useMemo(() => {
@@ -88,17 +94,14 @@ const ProductionCostReport = () => {
     resetKey: `${search}|${filters.resetKey}`,
   });
 
-  const sumOf = (key: keyof Omit<CostRow, 'plot'>) =>
-    round2(costs.reduce((s, r) => s + r[key], 0));
-
   const handleExport = () => exportCSV(
     costs.map((r) => ({
       [t('table.plot', 'Plot')]: r.plot,
-      [t('table.irrigationCost', 'Irrigation')]: `${r.irrigation} TND`,
-      [t('table.fertilizationCost', 'Fertilization')]: `${r.fertilization} TND`,
-      [t('table.phytosanitaryCost', 'Phytosanitary')]: `${r.phytosanitary} TND`,
-      [t('table.harvestCost', 'Harvest')]: `${r.harvest} TND`,
-      [t('table.totalCost', 'Total')]: `${r.total} TND`,
+      [t('table.irrigationCost', 'Irrigation') + ' /ha']: `${r.irrigation} TND/ha`,
+      [t('table.fertilizationCost', 'Fertilization') + ' /ha']: `${r.fertilization} TND/ha`,
+      [t('table.phytosanitaryCost', 'Phytosanitary') + ' /ha']: `${r.phytosanitary} TND/ha`,
+      [t('table.harvestCost', 'Harvest') + ' /ha']: `${r.harvest} TND/ha`,
+      [t('table.totalCost', 'Total') + ' /ha']: `${r.total} TND/ha`,
     })),
     'production-costs',
   );
@@ -120,24 +123,8 @@ const ProductionCostReport = () => {
         )}
       />
 
-
-      <div className="stat-card-glass">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="label-md">{t('table.totalCost', 'Total cost')}</p>
-            <p className="display-md text-foreground mt-1">
-              {sumOf('total').toLocaleString()}{' '}
-              <span className="text-sm font-normal text-muted-foreground">TND</span>
-            </p>
-          </div>
-          <p className="text-[13px] text-muted-foreground">
-            {t('reports.plotsCount', { count: costs.length, defaultValue: '{{count}} plot(s)' })}
-          </p>
-        </div>
-      </div>
-
       <ReportTableCard
-        title={t('reports.costBreakdown', 'Cost breakdown')}
+        title={t('reports.costBreakdown', 'Cost breakdown per hectare')}
         search={search}
         onSearchChange={setSearch}
         filteredCount={filteredCosts.length}
@@ -149,22 +136,22 @@ const ProductionCostReport = () => {
           <thead>
             <tr>
               <th>{t('table.plot', 'Plot')}</th>
-              <th>{t('table.irrigationCost', 'Irrigation')}</th>
-              <th>{t('table.fertilizationCost', 'Fertilization')}</th>
-              <th>{t('table.phytosanitaryCost', 'Phytosanitary')}</th>
-              <th>{t('table.harvestCost', 'Harvest')}</th>
-              <th>{t('table.totalCost', 'Total')}</th>
+              <th>{t('table.irrigationCost', 'Irrigation')} (TND/ha)</th>
+              <th>{t('table.fertilizationCost', 'Fertilization')} (TND/ha)</th>
+              <th>{t('table.phytosanitaryCost', 'Phytosanitary')} (TND/ha)</th>
+              <th>{t('table.harvestCost', 'Harvest')} (TND/ha)</th>
+              <th>{t('table.totalCost', 'Total')} (TND/ha)</th>
             </tr>
           </thead>
           <tbody>
             {pagination.pageRows.map((row) => (
               <tr key={row.plot}>
                 <td className="font-medium text-foreground">{row.plot}</td>
-                <td>{row.irrigation.toLocaleString()} TND</td>
-                <td>{row.fertilization.toLocaleString()} TND</td>
-                <td>{row.phytosanitary.toLocaleString()} TND</td>
-                <td>{row.harvest.toLocaleString()} TND</td>
-                <td className="font-bold text-foreground">{row.total.toLocaleString()} TND</td>
+                <td>{row.irrigation.toLocaleString()} TND/ha</td>
+                <td>{row.fertilization.toLocaleString()} TND/ha</td>
+                <td>{row.phytosanitary.toLocaleString()} TND/ha</td>
+                <td>{row.harvest.toLocaleString()} TND/ha</td>
+                <td className="font-bold text-foreground">{row.total.toLocaleString()} TND/ha</td>
               </tr>
             ))}
             <TableSkeletonRows
@@ -174,18 +161,6 @@ const ProductionCostReport = () => {
               isEmpty={filters.filtersReady && !reportQuery.isLoading && !reportQuery.isError && costs.length === 0}
               onRetry={() => reportQuery.refetch()}
             />
-            {costs.length > 0 && (
-              <tr>
-                <td className="font-bold text-foreground">{t('common.total', 'Total')}</td>
-                <td className="font-semibold">{sumOf('irrigation').toLocaleString()} TND</td>
-                <td className="font-semibold">{sumOf('fertilization').toLocaleString()} TND</td>
-                <td className="font-semibold">{sumOf('phytosanitary').toLocaleString()} TND</td>
-                <td className="font-semibold">{sumOf('harvest').toLocaleString()} TND</td>
-                <td className="font-bold" style={{ color: 'hsl(var(--primary-glow))' }}>
-                  {sumOf('total').toLocaleString()} TND
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </ReportTableCard>

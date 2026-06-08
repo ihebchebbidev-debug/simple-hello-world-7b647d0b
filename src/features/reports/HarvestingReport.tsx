@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import ReportTableCard from '@/components/reports/ReportTableCard';
 import ReportToolbar from '@/components/reports/ReportToolbar';
@@ -8,8 +9,6 @@ import TableSkeletonRows from '@/components/reports/TableSkeletonRows';
 import { usePagination } from '@/hooks/usePagination';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import { exportCSV } from '@/lib/export';
-import { formatDateFr } from '@/lib/format';
-import OperationDetailsModal from '@/features/dashboard/OperationDetailsModal';
 
 interface HarvestItem {
   id: string;
@@ -22,21 +21,18 @@ interface HarvestItem {
 interface PlotGroup { plot_id: string; plot_name: string; harvests: HarvestItem[] }
 interface ApiData { plots: PlotGroup[] }
 
-interface FlatRow {
-  id: string;
+interface PlotRow {
   plot_id: string;
   plot_name: string;
-  operation_date: string;
-  num_workers: number;
-  days_worked: number;
-  quantity_harvested: number;
+  total_workers: number;
+  total_quantity: number;
 }
 
 const HarvestingReport = () => {
   const { t } = useTranslation();
   const filters = useReportFilters();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [editId, setEditId] = useState<string | null>(null);
 
   const reportQuery = useQuery<ApiData>({
     queryKey: ['report-harvest', filters.apiParams],
@@ -47,41 +43,38 @@ const HarvestingReport = () => {
     },
   });
 
-  const flat = useMemo<FlatRow[]>(() => {
+  const rows = useMemo<PlotRow[]>(() => {
     const groups = reportQuery.data?.plots ?? [];
-    const out: FlatRow[] = [];
-    groups.forEach((g) => g.harvests.forEach((h) => out.push({
-      id: h.id,
+    return groups.map((g) => ({
       plot_id: g.plot_id,
       plot_name: g.plot_name,
-      operation_date: h.date,
-      num_workers: h.num_workers,
-      days_worked: h.days_worked,
-      quantity_harvested: h.quantity_harvested,
-    })));
-    return out;
+      total_workers: Math.round(
+        g.harvests.reduce((s, h) => s + h.num_workers * h.days_worked, 0) * 100,
+      ) / 100,
+      total_quantity: Math.round(
+        g.harvests.reduce((s, h) => s + Number(h.quantity_harvested || 0), 0) * 100,
+      ) / 100,
+    }));
   }, [reportQuery.data]);
 
-  const filteredOps = useMemo(() => {
+  const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return flat;
-    return flat.filter((op) =>
-      `${op.operation_date} ${op.plot_name} ${op.num_workers} ${op.quantity_harvested}`
-        .toLowerCase().includes(q),
+    if (!q) return rows;
+    return rows.filter((r) =>
+      `${r.plot_name} ${r.total_workers} ${r.total_quantity}`.toLowerCase().includes(q),
     );
-  }, [flat, search]);
+  }, [rows, search]);
 
   const pagination = usePagination({
-    rows: filteredOps,
+    rows: filteredRows,
     resetKey: `${search}|${filters.resetKey}`,
   });
 
   const handleExport = () => exportCSV(
-    filteredOps.map((r) => ({
-      [t('table.date', 'Date')]: formatDateFr(r.operation_date),
+    filteredRows.map((r) => ({
       [t('table.plot', 'Plot')]: r.plot_name,
-      "Main d'œuvre (homme/jour)": Math.round(r.num_workers * r.days_worked * 100) / 100,
-      'Quantité récoltée (kg)': r.quantity_harvested,
+      "Main d'œuvre (homme/jour)": r.total_workers,
+      'Quantité récoltée (kg)': r.total_quantity,
     })),
     'harvest-report',
   );
@@ -94,41 +87,35 @@ const HarvestingReport = () => {
         title={t('reports.harvestLog', 'Harvest log')}
         search={search}
         onSearchChange={setSearch}
-        filteredCount={filteredOps.length}
-        totalCount={flat.length}
+        filteredCount={filteredRows.length}
+        totalCount={rows.length}
         pagination={pagination}
         minWidth={420}
       >
         <table className="data-table min-w-[420px]">
           <thead>
             <tr>
-              <th>{t('table.date', 'Date')}</th>
               <th>{t('table.plot', 'Plot')}</th>
               <th>{t('table.workerDays', "Main d'œuvre (homme/jour)")}</th>
               <th>{t('table.quantityHarvested', 'Quantité récoltée (kg)')}</th>
             </tr>
           </thead>
           <tbody>
-            {pagination.pageRows.map((row) => {
-              const workerDays = Math.round(row.num_workers * row.days_worked * 100) / 100;
-              return (
-                <tr
-                  key={row.id}
-                  onDoubleClick={() => setEditId(row.id)}
-                  title={t('reports.dblClickEdit', 'Double-click to edit')}
-                  className="cursor-pointer"
-                >
-
-                  <td className="font-medium text-foreground whitespace-nowrap">{formatDateFr(row.operation_date)}</td>
-                  <td>{row.plot_name}</td>
-                  <td>{workerDays}</td>
-                  <td className="font-semibold text-foreground">{row.quantity_harvested.toLocaleString()} kg</td>
-                </tr>
-              );
-            })}
+            {pagination.pageRows.map((row) => (
+              <tr
+                key={row.plot_id}
+                onClick={() => navigate(`/reports/history/harvest/${row.plot_id}`)}
+                title={t('reports.clickHistory', 'Click to view harvest history')}
+                className="cursor-pointer"
+              >
+                <td className="font-medium text-foreground">{row.plot_name}</td>
+                <td>{row.total_workers}</td>
+                <td className="font-semibold text-foreground">{row.total_quantity.toLocaleString()} kg</td>
+              </tr>
+            ))}
             <TableSkeletonRows
-              colSpan={4}
-              isLoading={!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && flat.length === 0)}
+              colSpan={3}
+              isLoading={!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && rows.length === 0)}
               isError={reportQuery.isError && !reportQuery.isFetching}
               isEmpty={filters.filtersReady && !reportQuery.isLoading && !reportQuery.isError && pagination.pageRows.length === 0}
               onRetry={() => reportQuery.refetch()}
@@ -136,14 +123,6 @@ const HarvestingReport = () => {
           </tbody>
         </table>
       </ReportTableCard>
-
-
-      <OperationDetailsModal
-        open={!!editId}
-        type="harvest"
-        id={editId}
-        onClose={() => setEditId(null)}
-      />
     </div>
   );
 };
