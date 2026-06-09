@@ -31,6 +31,8 @@ use Illuminate\Support\Facades\DB;
 
 final class ReportController extends Controller
 {
+
+
     public function irrigation(ReportRequest $request): JsonResponse
     {
         [$plotIds, $campaignId, $from, $to, $campaign] = $this->commonFilters($request);
