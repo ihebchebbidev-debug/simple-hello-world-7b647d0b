@@ -11,8 +11,8 @@
 
 declare(strict_types=1);
 
-use App\Http\Middleware\CacheResponse;
 use App\Http\Middleware\DeveloperToken;
+
 
 use App\Http\Middleware\RoleMiddleware;
 use App\Http\Middleware\SetLocale;
@@ -48,9 +48,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => RoleMiddleware::class,
             'locale' => SetLocale::class,
             'developer.token' => DeveloperToken::class,
-            'cache.response' => CacheResponse::class,
         ]);
     })
+
 
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
