@@ -6,16 +6,10 @@
  * Returns lightweight aggregates for the landing page — counts of plots
  * and operations, this-month totals, and the latest activity feed.
  *
- * Performance notes
- * -----------------
- *  • `stats` and `recentActivity` are wrapped in a short-lived cache
- *    (CACHE_TTL seconds). Dashboards reload often; the underlying ops
- *    tables change at most a few times per minute, so a 30–60s cache
- *    cuts DB load by ~95% with no visible staleness.
- *  • `recentActivity` is one UNION ALL query ordered + limited at the
- *    database, instead of 4 queries × limit rows + a PHP sort.
- *  • Response gets `Cache-Control: private, max-age=…` so the browser
- *    avoids the round-trip entirely on quick re-renders.
+ * No response caching: the client needs to see new entries instantly
+ * after a technician posts one. Perf is improved purely by reducing
+ * work at the database layer (single UNION ALL for the activity feed
+ * instead of 4 queries + a PHP sort).
  */
 
 declare(strict_types=1);
@@ -26,78 +20,68 @@ use App\Http\Controllers\Controller;
 use App\Support\Http\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 final class DashboardController extends Controller
 {
-    private const CACHE_TTL = 60; // seconds
-
     public function stats(Request $request): JsonResponse
     {
-        $payload = Cache::remember('dash:stats:v1', self::CACHE_TTL, function (): array {
-            $monthStart = now()->startOfMonth()->toDateString();
+        $monthStart = now()->startOfMonth()->toDateString();
 
-            $waterThisMonth = (float) DB::table('irrigation_operations')
-                ->where('operation_date', '>=', $monthStart)
-                ->sum('water_quantity');
+        $waterThisMonth = (float) DB::table('irrigation_operations')
+            ->where('operation_date', '>=', $monthStart)
+            ->sum('water_quantity');
 
-            $fertThisMonth = (float) DB::table('fertilization_operations')
-                ->where('operation_date', '>=', $monthStart)
-                ->sum('quantity_applied');
+        $fertThisMonth = (float) DB::table('fertilization_operations')
+            ->where('operation_date', '>=', $monthStart)
+            ->sum('quantity_applied');
 
-            $treatmentsThisMonth = (int) DB::table('phytosanitary_operations')
-                ->where('operation_date', '>=', $monthStart)
-                ->count();
+        $treatmentsThisMonth = (int) DB::table('phytosanitary_operations')
+            ->where('operation_date', '>=', $monthStart)
+            ->count();
 
-            $harvestThisMonth = (float) DB::table('harvest_operations')
-                ->where('operation_date', '>=', $monthStart)
-                ->sum('quantity_harvested');
+        $harvestThisMonth = (float) DB::table('harvest_operations')
+            ->where('operation_date', '>=', $monthStart)
+            ->sum('quantity_harvested');
 
-            $pendingPostings = Schema::hasTable('postings')
-                ? (int) DB::table('postings')->whereIn('status', ['pending', 'failed'])->count()
-                : 0;
+        $pendingPostings = Schema::hasTable('postings')
+            ? (int) DB::table('postings')->whereIn('status', ['pending', 'failed'])->count()
+            : 0;
 
-            return [
-                'counts' => [
-                    'plots_active'       => (int) DB::table('plots')->where('is_active', true)->count(),
-                    'fertilizers_active' => (int) DB::table('fertilizers')->where('is_active', true)->count(),
-                    'pesticides_active'  => (int) DB::table('pesticides')->where('is_active', true)->count(),
-                    'campaigns_active'   => Schema::hasTable('campaigns')
-                        ? (int) DB::table('campaigns')->where('is_active', true)->count() : 0,
-                    'pending_postings'   => $pendingPostings,
-                ],
-                'this_month' => [
-                    'period_start'        => $monthStart,
-                    'water_quantity'      => $waterThisMonth,
-                    'fertilizer_quantity' => $fertThisMonth,
-                    'treatments'          => $treatmentsThisMonth,
-                    'harvest_quantity'    => $harvestThisMonth,
-                ],
-            ];
-        });
-
-        return ApiResponse::ok($payload)
-            ->header('Cache-Control', 'private, max-age=' . self::CACHE_TTL);
+        return ApiResponse::ok([
+            'counts' => [
+                'plots_active'       => (int) DB::table('plots')->where('is_active', true)->count(),
+                'fertilizers_active' => (int) DB::table('fertilizers')->where('is_active', true)->count(),
+                'pesticides_active'  => (int) DB::table('pesticides')->where('is_active', true)->count(),
+                'campaigns_active'   => Schema::hasTable('campaigns')
+                    ? (int) DB::table('campaigns')->where('is_active', true)->count() : 0,
+                'pending_postings'   => $pendingPostings,
+            ],
+            'this_month' => [
+                'period_start'        => $monthStart,
+                'water_quantity'      => $waterThisMonth,
+                'fertilizer_quantity' => $fertThisMonth,
+                'treatments'          => $treatmentsThisMonth,
+                'harvest_quantity'    => $harvestThisMonth,
+            ],
+        ])->header('Cache-Control', 'no-store');
     }
 
     public function recentActivity(Request $request): JsonResponse
     {
         $limit = max(1, min((int) $request->query('limit', 10), 50));
 
-        $items = Cache::remember(
-            'dash:recent:v1:' . $limit,
-            self::CACHE_TTL,
-            fn (): array => $this->fetchRecent($limit),
-        );
-
-        return ApiResponse::ok(['items' => $items])
-            ->header('Cache-Control', 'private, max-age=' . self::CACHE_TTL);
+        return ApiResponse::ok(['items' => $this->fetchRecent($limit)])
+            ->header('Cache-Control', 'no-store');
     }
 
     /**
      * Build the recent-activity feed in a single round-trip.
+     *
+     * Each branch is pre-LIMITed so the planner uses the per-table
+     * (plot_id, operation_date) / created_at indexes instead of
+     * materialising every row before the UNION.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -116,9 +100,6 @@ final class DashboardController extends Controller
                 continue;
             }
 
-            // Pre-LIMIT each branch so the planner can use the
-            // (plot_id, operation_date) / created_at indexes per table
-            // instead of materialising every row before the UNION.
             $unions[] = DB::table($table . ' as op')
                 ->leftJoin('plots', 'plots.id', '=', 'op.plot_id')
                 ->select([
