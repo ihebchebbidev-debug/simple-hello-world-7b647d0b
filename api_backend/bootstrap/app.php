@@ -11,8 +11,8 @@
 
 declare(strict_types=1);
 
-use App\Http\Middleware\CacheResponse;
 use App\Http\Middleware\DeveloperToken;
+
 
 use App\Http\Middleware\RoleMiddleware;
 use App\Http\Middleware\SetLocale;
