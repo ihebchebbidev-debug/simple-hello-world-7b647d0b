@@ -27,32 +27,11 @@ use App\Http\Requests\Report\ReportRequest;
 use App\Support\Http\ApiResponse;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 final class ReportController extends Controller
 {
-    /**
-     * Short server-side cache for report aggregates.
-     *
-     * Reports run heavy SUM/GROUP BY + correlated subqueries (productionCost
-     * does a price_history lookup per row). Aggregates change at most a few
-     * times per minute, so a 60s cache keyed by (endpoint, validated filters)
-     * eliminates ~95% of the work for repeat loads and tab-switches without
-     * showing visibly stale data.
-     */
-    private const CACHE_TTL = 60;
 
-    private function cached(string $endpoint, array $filters, \Closure $builder): JsonResponse
-    {
-        ksort($filters);
-        $key = 'report:' . $endpoint . ':' . md5(json_encode($filters));
-
-        $payload = Cache::remember($key, self::CACHE_TTL, fn () => $builder());
-
-        return ApiResponse::ok($payload)
-            ->header('Cache-Control', 'private, max-age=' . self::CACHE_TTL);
-    }
 
     public function irrigation(ReportRequest $request): JsonResponse
     {
