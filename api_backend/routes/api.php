@@ -227,10 +227,11 @@ $registerGroup(['notifications', 'v1/notifications'], 'auth:sanctum', function (
 
 // ─── Dashboard (technician/manager/admin) ─────────────────────────────────────
 
-$registerGroup(['dashboard', 'v1/dashboard'], ['auth:sanctum', 'role:technician,manager,admin', 'cache.response:30'], function (): void {
+$registerGroup(['dashboard', 'v1/dashboard'], ['auth:sanctum', 'role:technician,manager,admin'], function (): void {
     Route::get('stats',           [DashboardController::class, 'stats']);
     Route::get('recent-activity', [DashboardController::class, 'recentActivity']);
 });
+
 
 
 // ─── Offline sync queue ───────────────────────────────────────────────────────
