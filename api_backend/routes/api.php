@@ -248,7 +248,7 @@ $registerGroup(['postings', 'v1/postings'], 'auth:sanctum', function (): void {
 // Access intentionally open to all authenticated roles (admin / manager /
 // technician). Per-report row-level filtering is enforced inside the
 // controllers when needed.
-$registerGroup(['reports', 'v1/reports'], ['auth:sanctum', 'cache.response:60'], function (): void {
+$registerGroup(['reports', 'v1/reports'], 'auth:sanctum', function (): void {
     Route::get('irrigation',       [ReportController::class, 'irrigation']);
     Route::get('fertilization',    [ReportController::class, 'fertilization']);
     Route::get('phytosanitary',    [ReportController::class, 'phytosanitary']);
