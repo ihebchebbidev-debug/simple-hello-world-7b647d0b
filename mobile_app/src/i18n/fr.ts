@@ -27,7 +27,7 @@ export const fr = {
     chooseOp: 'Choisissez une opération à saisir.',
     irrigation: 'Irrigation',
     fertilization: 'Fertilisation',
-    phytosanitary: 'Phytosanitaire',
+    phytosanitary: 'Traitements',
     harvest: 'Récolte',
     pendingNone: 'Aucune saisie en attente',
     pendingSome: '{{count}} saisie(s) en attente',
@@ -60,7 +60,7 @@ export const fr = {
     invalid: 'Veuillez vérifier les champs.',
     title: {
       irrigation: 'Irrigation', fertilization: 'Fertilisation',
-      phytosanitary: 'Phytosanitaire', harvest: 'Récolte',
+      phytosanitary: 'Traitements', harvest: 'Récolte',
     },
   },
   recent: {

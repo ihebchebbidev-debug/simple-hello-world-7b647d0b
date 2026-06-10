@@ -27,7 +27,7 @@ export const en = {
     chooseOp: 'Pick an operation to record.',
     irrigation: 'Irrigation',
     fertilization: 'Fertilization',
-    phytosanitary: 'Phytosanitary',
+    phytosanitary: 'Treatments',
     harvest: 'Harvest',
     pendingNone: 'No pending entries',
     pendingSome: '{{count}} pending entry(ies)',
@@ -60,7 +60,7 @@ export const en = {
     invalid: 'Please review the fields.',
     title: {
       irrigation: 'Irrigation', fertilization: 'Fertilization',
-      phytosanitary: 'Phytosanitary', harvest: 'Harvest',
+      phytosanitary: 'Treatments', harvest: 'Harvest',
     },
   },
   recent: {

@@ -492,6 +492,28 @@
 
 .print-only { display: none; }
 
+/* ───────────────────────────────────────────────────────────────
+   Unified native <select> chevron — one consistent caret app-wide.
+   `select[class]` (0,1,1) intentionally outscores the `px-*` utilities
+   and `.filter-select`'s `background` shorthand so the caret + right
+   padding land identically on every dropdown (filter bars, form modals,
+   list-page status filters, pagination, …). Placed after `@tailwind
+   utilities` so source order also favours it.
+   ─────────────────────────────────────────────────────────────── */
+select[class] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%2394a3b8'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 1rem 1rem;
+  padding-right: 2.1rem;
+}
+[data-theme="light"] select[class] {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%2364748b'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
 @media print {
   /* Empty toolbar wrapper cards (contain only the hidden toolbar) */
   .stat-card:has(> .report-toolbar:only-child) { display: none !important; }

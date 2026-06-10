@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { formatDate } from '@/lib/locale';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import AdminOnly from '@/components/AdminOnly';
+import WriteAccess from '@/components/WriteAccess';
 import LaborConfigFormModal, { type LaborConfigSubmit } from './LaborConfigFormModal';
 import LaborRateFormModal, { type LaborRateSubmit } from './LaborRateFormModal';
 import type { LaborConfig, PaginatedResponse, PriceHistoryItem } from './types';
@@ -190,7 +190,7 @@ const LaborPage = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">{t('labor.configsTitle')}</h2>
-          <AdminOnly>
+          <WriteAccess>
             <button
               type="button"
               onClick={() => { setConfigFormError(null); setConfigModal({ mode: 'create' }); }}
@@ -198,7 +198,7 @@ const LaborPage = () => {
             >
               {t('labor.newConfig')}
             </button>
-          </AdminOnly>
+          </WriteAccess>
         </div>
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[760px] text-left text-sm">
@@ -225,7 +225,7 @@ const LaborPage = () => {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{formatDate(c.created_at)}</td>
                   <td className="px-4 py-3 text-right">
-                    <AdminOnly fallback={<span className="text-xs text-muted-foreground">—</span>}>
+                    <WriteAccess fallback={<span className="text-xs text-muted-foreground">—</span>}>
                       <div className="flex justify-end gap-1.5">
                         <button type="button"
                           onClick={() => { setConfigFormError(null); setConfigModal({ mode: 'edit', data: c }); }}
@@ -244,7 +244,7 @@ const LaborPage = () => {
                           {t('common.delete')}
                         </button>
                       </div>
-                    </AdminOnly>
+                    </WriteAccess>
                   </td>
                 </tr>
               ))}
@@ -257,7 +257,7 @@ const LaborPage = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">{t('labor.ratesTitle')}</h2>
-          <AdminOnly>
+          <WriteAccess>
             <button
               type="button"
               onClick={() => { setRateFormError(null); setRateModal({ mode: 'create' }); }}
@@ -265,7 +265,7 @@ const LaborPage = () => {
             >
               {t('labor.newRate')}
             </button>
-          </AdminOnly>
+          </WriteAccess>
         </div>
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[760px] text-left text-sm">
@@ -297,7 +297,7 @@ const LaborPage = () => {
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(p.effective_from)}</td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(p.effective_to)}</td>
                     <td className="px-4 py-3 text-right">
-                      <AdminOnly fallback={<span className="text-xs text-muted-foreground">—</span>}>
+                      <WriteAccess fallback={<span className="text-xs text-muted-foreground">—</span>}>
                         <div className="flex justify-end gap-1.5">
                           <button type="button"
                             onClick={() => { setRateFormError(null); setRateModal({ mode: 'edit', data: p }); }}
@@ -310,7 +310,7 @@ const LaborPage = () => {
                             {t('common.delete')}
                           </button>
                         </div>
-                      </AdminOnly>
+                      </WriteAccess>
                     </td>
                   </tr>
                 );

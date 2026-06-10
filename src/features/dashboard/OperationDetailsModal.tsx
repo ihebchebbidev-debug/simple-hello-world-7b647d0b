@@ -41,6 +41,7 @@ interface AnyOp {
   quantity_harvested?: number;
   num_workers?: number;
   days_worked?: number;
+  water_volume_l?: number | null;
   target_pest?: string | null;
   remarks?: string | null;
   fertilizer?: { name?: string };
@@ -73,6 +74,7 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
       quantity_harvested: d.quantity_harvested ?? '',
       num_workers: d.num_workers ?? '',
       days_worked: d.days_worked ?? '',
+      water_volume_l: d.water_volume_l ?? '',
       target_pest: d.target_pest ?? '',
       remarks: d.remarks ?? '',
     });
@@ -95,6 +97,9 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
       if (type === 'fertilization') payload.quantity_applied = Number(form.quantity_applied);
       if (type === 'phytosanitary') {
         payload.quantity_applied = Number(form.quantity_applied);
+        payload.water_volume_l = form.water_volume_l === '' || form.water_volume_l == null
+          ? null
+          : Number(form.water_volume_l);
         payload.target_pest = form.target_pest || null;
         payload.remarks = form.remarks || null;
       }
@@ -226,6 +231,14 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
                   type="number" step="0.001" className={inputCls}
                   value={form.quantity_applied}
                   onChange={(e) => setForm((p) => ({ ...p, quantity_applied: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{t('table.sprayVolume', 'Volume de bouillie (L)')}</label>
+                <input
+                  type="number" step="0.001" min="0" className={inputCls}
+                  value={String(form.water_volume_l ?? '')}
+                  onChange={(e) => setForm((p) => ({ ...p, water_volume_l: e.target.value }))}
                 />
               </div>
               <div>

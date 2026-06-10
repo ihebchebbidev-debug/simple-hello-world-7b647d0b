@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -14,6 +14,7 @@ import { usePagination } from '@/hooks/usePagination';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import { usePlotsForFilter } from '@/hooks/usePlotsForFilter';
 import { exportCSV } from '@/lib/export';
+import { chartToDataUrl } from '@/lib/chartPrint';
 
 const PALETTE = [
   'hsl(142, 60%, 42%)', 'hsl(217, 91%, 60%)', 'hsl(35, 92%, 50%)',

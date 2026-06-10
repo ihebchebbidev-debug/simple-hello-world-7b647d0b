@@ -83,20 +83,15 @@ final class IrrigationCrudTest extends TestCase
         ])->assertForbidden();
     }
 
-    public function test_only_admin_can_update_or_delete(): void
+    public function test_all_roles_can_update_or_delete(): void
     {
         $this->seedWaterPricing();
 
         $plot = Plot::factory()->create();
         $op   = IrrigationOperation::factory()->for($plot)->create();
 
-        // Technician → 403 on update/delete.
+        // Technician → allowed (multiple workstations must all be able to fix entries).
         $this->actingAsRole('technician');
-        $this->putJson("/api/v1/irrigation-operations/{$op->id}", ['water_quantity' => 99])->assertForbidden();
-        $this->deleteJson("/api/v1/irrigation-operations/{$op->id}")->assertForbidden();
-
-        // Admin → allowed.
-        $this->actingAsRole('admin');
         $this->putJson("/api/v1/irrigation-operations/{$op->id}", ['water_quantity' => 99])->assertOk();
         $this->assertDatabaseHas('irrigation_operations', ['id' => $op->id, 'water_quantity' => '99.00']);
 

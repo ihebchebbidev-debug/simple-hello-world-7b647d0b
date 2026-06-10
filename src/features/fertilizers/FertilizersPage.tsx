@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 import { useDebounce } from '@/lib/useDebounce';
 import { formatDate } from '@/lib/locale';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import AdminOnly from '@/components/AdminOnly';
+import WriteAccess from '@/components/WriteAccess';
 import { downloadCsv } from '@/lib/csv';
 import FertilizerFormModal, { type FertilizerFormSubmit } from './FertilizerFormModal';
 import EntityPriceHistoryModal from '@/components/EntityPriceHistoryModal';
@@ -186,12 +186,12 @@ const FertilizersPage = () => {
             className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
             {exporting ? t('common.exporting') : t('common.exportCsv')}
           </button>
-          <AdminOnly>
+          <WriteAccess>
             <button type="button" onClick={() => { setFormError(null); setCreateOpen(true); }}
               className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90">
               {t('fertilizers.new')}
             </button>
-          </AdminOnly>
+          </WriteAccess>
         </div>
       </header>
 

@@ -92,7 +92,7 @@ $registerGroup(['fertilizers', 'v1/fertilizers'], 'auth:sanctum', function (): v
     Route::get('/', [FertilizerController::class, 'index'])->middleware('role:technician,manager,admin');
     Route::get('{fertilizer}', [FertilizerController::class, 'show'])->middleware('role:technician,manager,admin');
 
-    Route::middleware('role:admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::post('/', [FertilizerController::class, 'store']);
         Route::put('{fertilizer}', [FertilizerController::class, 'update']);
         Route::delete('{fertilizer}', [FertilizerController::class, 'destroy']);
@@ -103,7 +103,7 @@ $registerGroup(['pesticides', 'v1/pesticides'], 'auth:sanctum', function (): voi
     Route::get('/', [PesticideController::class, 'index'])->middleware('role:technician,manager,admin');
     Route::get('{pesticide}', [PesticideController::class, 'show'])->middleware('role:technician,manager,admin');
 
-    Route::middleware('role:admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::post('/', [PesticideController::class, 'store']);
         Route::put('{pesticide}', [PesticideController::class, 'update']);
         Route::delete('{pesticide}', [PesticideController::class, 'destroy']);
@@ -114,7 +114,7 @@ $registerGroup(['water-config', 'v1/water-config'], 'auth:sanctum', function ():
     Route::get('/', [WaterConfigController::class, 'index'])->middleware('role:technician,manager,admin');
     Route::get('{waterConfig}', [WaterConfigController::class, 'show'])->middleware('role:technician,manager,admin');
 
-    Route::middleware('role:admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::post('/', [WaterConfigController::class, 'store']);
         Route::put('{waterConfig}', [WaterConfigController::class, 'update']);
         Route::delete('{waterConfig}', [WaterConfigController::class, 'destroy']);
@@ -125,7 +125,7 @@ $registerGroup(['labor-config', 'v1/labor-config'], 'auth:sanctum', function ():
     Route::get('/', [LaborConfigController::class, 'index'])->middleware('role:technician,manager,admin');
     Route::get('{laborConfig}', [LaborConfigController::class, 'show'])->middleware('role:technician,manager,admin');
 
-    Route::middleware('role:admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::post('/', [LaborConfigController::class, 'store']);
         Route::put('{laborConfig}', [LaborConfigController::class, 'update']);
         Route::delete('{laborConfig}', [LaborConfigController::class, 'destroy']);
@@ -136,7 +136,7 @@ $registerGroup(['prices', 'v1/prices'], 'auth:sanctum', function (): void {
     Route::get('/', [PriceHistoryController::class, 'index'])->middleware('role:technician,manager,admin');
     Route::get('{priceHistory}', [PriceHistoryController::class, 'show'])->middleware('role:technician,manager,admin');
 
-    Route::middleware('role:admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::post('/', [PriceHistoryController::class, 'store']);
         Route::put('{priceHistory}', [PriceHistoryController::class, 'update']);
         Route::delete('{priceHistory}', [PriceHistoryController::class, 'destroy']);
@@ -150,7 +150,7 @@ $registerGroup(['irrigation-operations', 'v1/irrigation-operations'], 'auth:sanc
     Route::get('{irrigationOperation}', [IrrigationOperationController::class, 'show'])->middleware('role:technician,manager,admin');
     Route::post('/', [IrrigationOperationController::class, 'store'])->middleware('role:technician,admin');
 
-    Route::middleware('role:manager,admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::put('{irrigationOperation}', [IrrigationOperationController::class, 'update']);
         Route::delete('{irrigationOperation}', [IrrigationOperationController::class, 'destroy']);
     });
@@ -161,7 +161,7 @@ $registerGroup(['fertilization-operations', 'v1/fertilization-operations'], 'aut
     Route::get('{fertilizationOperation}', [FertilizationOperationController::class, 'show'])->middleware('role:technician,manager,admin');
     Route::post('/', [FertilizationOperationController::class, 'store'])->middleware('role:technician,admin');
 
-    Route::middleware('role:manager,admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::put('{fertilizationOperation}', [FertilizationOperationController::class, 'update']);
         Route::delete('{fertilizationOperation}', [FertilizationOperationController::class, 'destroy']);
     });
@@ -172,7 +172,7 @@ $registerGroup(['phytosanitary-operations', 'v1/phytosanitary-operations'], 'aut
     Route::get('{phytosanitaryOperation}', [PhytosanitaryOperationController::class, 'show'])->middleware('role:technician,manager,admin');
     Route::post('/', [PhytosanitaryOperationController::class, 'store'])->middleware('role:technician,admin');
 
-    Route::middleware('role:manager,admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::put('{phytosanitaryOperation}', [PhytosanitaryOperationController::class, 'update']);
         Route::delete('{phytosanitaryOperation}', [PhytosanitaryOperationController::class, 'destroy']);
     });
@@ -183,7 +183,7 @@ $registerGroup(['harvest-operations', 'v1/harvest-operations'], 'auth:sanctum', 
     Route::get('{harvestOperation}', [HarvestOperationController::class, 'show'])->middleware('role:technician,manager,admin');
     Route::post('/', [HarvestOperationController::class, 'store'])->middleware('role:technician,admin');
 
-    Route::middleware('role:manager,admin')->group(function (): void {
+    Route::middleware('role:technician,manager,admin')->group(function (): void {
         Route::put('{harvestOperation}', [HarvestOperationController::class, 'update']);
         Route::delete('{harvestOperation}', [HarvestOperationController::class, 'destroy']);
     });

@@ -111,7 +111,7 @@ const ProductionCostReport = () => {
       <ReportToolbar
         filters={filters}
         onExport={handleExport}
-        extras={(
+        cropFilter={(
           <select
             className="filter-select w-44 sm:w-48"
             value={cropFilter}
@@ -147,11 +147,11 @@ const ProductionCostReport = () => {
             {pagination.pageRows.map((row) => (
               <tr key={row.plot}>
                 <td className="font-medium text-foreground">{row.plot}</td>
-                <td>{row.irrigation.toLocaleString()} TND/ha</td>
-                <td>{row.fertilization.toLocaleString()} TND/ha</td>
-                <td>{row.phytosanitary.toLocaleString()} TND/ha</td>
-                <td>{row.harvest.toLocaleString()} TND/ha</td>
-                <td className="font-bold text-foreground">{row.total.toLocaleString()} TND/ha</td>
+                <td>{Math.round(row.irrigation).toLocaleString()}</td>
+                <td>{Math.round(row.fertilization).toLocaleString()}</td>
+                <td>{Math.round(row.phytosanitary).toLocaleString()}</td>
+                <td>{Math.round(row.harvest).toLocaleString()}</td>
+                <td className="font-bold text-foreground">{Math.round(row.total).toLocaleString()}</td>
               </tr>
             ))}
             <TableSkeletonRows

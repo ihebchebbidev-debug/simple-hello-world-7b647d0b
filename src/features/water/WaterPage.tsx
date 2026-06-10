@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { formatDate } from '@/lib/locale';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import AdminOnly from '@/components/AdminOnly';
+import WriteAccess from '@/components/WriteAccess';
 import WaterConfigFormModal, { type WaterConfigSubmit } from './WaterConfigFormModal';
 import WaterPriceFormModal, { type WaterPriceSubmit } from './WaterPriceFormModal';
 import type { PaginatedResponse, PriceHistoryItem, WaterConfig } from './types';
@@ -207,7 +207,7 @@ const WaterPage = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">{t('water.unitsTitle')}</h2>
-          <AdminOnly>
+          <WriteAccess>
             <button
               type="button"
               onClick={() => { setUnitFormError(null); setUnitModal({ mode: 'create' }); }}
@@ -215,7 +215,7 @@ const WaterPage = () => {
             >
               {t('water.newUnit')}
             </button>
-          </AdminOnly>
+          </WriteAccess>
         </div>
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[760px] text-left text-sm">
@@ -244,7 +244,7 @@ const WaterPage = () => {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{formatDate(u.created_at)}</td>
                   <td className="px-4 py-3 text-right">
-                    <AdminOnly fallback={<span className="text-xs text-muted-foreground">—</span>}>
+                    <WriteAccess fallback={<span className="text-xs text-muted-foreground">—</span>}>
                       <div className="flex justify-end gap-1.5">
                         <button type="button"
                           onClick={() => { setUnitFormError(null); setUnitModal({ mode: 'edit', data: u }); }}
@@ -263,7 +263,7 @@ const WaterPage = () => {
                           {t('common.delete')}
                         </button>
                       </div>
-                    </AdminOnly>
+                    </WriteAccess>
                   </td>
                 </tr>
               ))}
@@ -276,7 +276,7 @@ const WaterPage = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">{t('water.pricesTitle')}</h2>
-          <AdminOnly>
+          <WriteAccess>
             <button
               type="button"
               onClick={() => { setPriceFormError(null); setPriceModal({ mode: 'create' }); }}
@@ -284,7 +284,7 @@ const WaterPage = () => {
             >
               {t('water.newPrice')}
             </button>
-          </AdminOnly>
+          </WriteAccess>
         </div>
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[760px] text-left text-sm">
@@ -317,7 +317,7 @@ const WaterPage = () => {
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(p.effective_from)}</td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(p.effective_to)}</td>
                     <td className="px-4 py-3 text-right">
-                      <AdminOnly fallback={<span className="text-xs text-muted-foreground">—</span>}>
+                      <WriteAccess fallback={<span className="text-xs text-muted-foreground">—</span>}>
                         <div className="flex justify-end gap-1.5">
                           <button type="button"
                             onClick={() => { setPriceFormError(null); setPriceModal({ mode: 'edit', data: p }); }}
@@ -330,7 +330,7 @@ const WaterPage = () => {
                             {t('common.delete')}
                           </button>
                         </div>
-                      </AdminOnly>
+                      </WriteAccess>
                     </td>
                   </tr>
                 );
