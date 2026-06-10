@@ -118,6 +118,7 @@ const App = () => {
       </BrowserRouter>
     </QueryClientProvider>
   </ThemeProvider>
-);
+  );
+};
 
 export default App;
