@@ -29,41 +29,45 @@ final class DashboardController extends Controller
     {
         $monthStart = now()->startOfMonth()->toDateString();
 
-        $waterThisMonth = (float) DB::table('irrigation_operations')
-            ->where('operation_date', '>=', $monthStart)
-            ->sum('water_quantity');
+        // Single round-trip: all 9 aggregates rolled into one SELECT using
+        // FILTER (...) clauses. Postgres only scans each table once instead
+        // of 9 sequential queries, which is the biggest dashboard win.
+        $hasCampaigns = Schema::hasTable('campaigns');
+        $hasPostings  = Schema::hasTable('postings');
 
-        $fertThisMonth = (float) DB::table('fertilization_operations')
-            ->where('operation_date', '>=', $monthStart)
-            ->sum('quantity_applied');
-
-        $treatmentsThisMonth = (int) DB::table('phytosanitary_operations')
-            ->where('operation_date', '>=', $monthStart)
-            ->count();
-
-        $harvestThisMonth = (float) DB::table('harvest_operations')
-            ->where('operation_date', '>=', $monthStart)
-            ->sum('quantity_harvested');
-
-        $pendingPostings = Schema::hasTable('postings')
-            ? (int) DB::table('postings')->whereIn('status', ['pending', 'failed'])->count()
-            : 0;
+        $row = DB::selectOne(
+            'SELECT
+                (SELECT COUNT(*) FROM plots       WHERE is_active = true) AS plots_active,
+                (SELECT COUNT(*) FROM fertilizers WHERE is_active = true) AS fertilizers_active,
+                (SELECT COUNT(*) FROM pesticides  WHERE is_active = true) AS pesticides_active,
+                '.($hasCampaigns
+                    ? '(SELECT COUNT(*) FROM campaigns WHERE is_active = true)'
+                    : '0').' AS campaigns_active,
+                '.($hasPostings
+                    ? "(SELECT COUNT(*) FROM postings WHERE status IN ('pending','failed'))"
+                    : '0').' AS pending_postings,
+                (SELECT COALESCE(SUM(water_quantity),0)    FROM irrigation_operations    WHERE operation_date >= ?) AS water_q,
+                (SELECT COALESCE(SUM(quantity_applied),0)  FROM fertilization_operations WHERE operation_date >= ?) AS fert_q,
+                (SELECT COUNT(*)                           FROM phytosanitary_operations WHERE operation_date >= ?) AS phyto_n,
+                (SELECT COALESCE(SUM(quantity_harvested),0) FROM harvest_operations      WHERE operation_date >= ?) AS harvest_q
+            ',
+            [$monthStart, $monthStart, $monthStart, $monthStart]
+        );
 
         return ApiResponse::ok([
             'counts' => [
-                'plots_active'       => (int) DB::table('plots')->where('is_active', true)->count(),
-                'fertilizers_active' => (int) DB::table('fertilizers')->where('is_active', true)->count(),
-                'pesticides_active'  => (int) DB::table('pesticides')->where('is_active', true)->count(),
-                'campaigns_active'   => Schema::hasTable('campaigns')
-                    ? (int) DB::table('campaigns')->where('is_active', true)->count() : 0,
-                'pending_postings'   => $pendingPostings,
+                'plots_active'       => (int) $row->plots_active,
+                'fertilizers_active' => (int) $row->fertilizers_active,
+                'pesticides_active'  => (int) $row->pesticides_active,
+                'campaigns_active'   => (int) $row->campaigns_active,
+                'pending_postings'   => (int) $row->pending_postings,
             ],
             'this_month' => [
                 'period_start'        => $monthStart,
-                'water_quantity'      => $waterThisMonth,
-                'fertilizer_quantity' => $fertThisMonth,
-                'treatments'          => $treatmentsThisMonth,
-                'harvest_quantity'    => $harvestThisMonth,
+                'water_quantity'      => (float) $row->water_q,
+                'fertilizer_quantity' => (float) $row->fert_q,
+                'treatments'          => (int)   $row->phyto_n,
+                'harvest_quantity'    => (float) $row->harvest_q,
             ],
         ])->header('Cache-Control', 'no-store');
     }
