@@ -40,12 +40,17 @@ const DeveloperPage        = lazy(() => import('@/features/developer/DeveloperPa
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 60_000,
-      gcTime: 5 * 60_000,
+      // Aggressive cache: revisiting a page within 5 min serves from memory
+      // (no network roundtrip). Mutations explicitly invalidate keys so
+      // freshness is preserved where it matters.
+      staleTime: 5 * 60_000,
+      gcTime: 30 * 60_000,
       refetchOnWindowFocus: false,
-      // Render free tier cold-starts can take 30-60s. Retry generously
-      // (network + 5xx only — TanStack already skips 4xx) so the report
-      // pages don't flash "Impossible de charger" during dyno wake-up.
+      refetchOnMount: false,
+      refetchOnReconnect: false,
+      // Keep the previous page's data on screen while a new fetch resolves
+      // — no white flash when changing filters / paginating.
+      placeholderData: (prev: unknown) => prev,
       retry: (failureCount, error: unknown) => {
         const status = (error as { response?: { status?: number } } | undefined)?.response?.status;
         if (status && status >= 400 && status < 500) return false;
