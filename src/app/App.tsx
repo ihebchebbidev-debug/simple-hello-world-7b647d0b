@@ -70,7 +70,11 @@ const RouteFallback = () => (
   </div>
 );
 
-const App = () => (
+const App = () => {
+  // Warm every route chunk in the background once the main bundle is idle
+  // so navigations after login feel instant (no Suspense flash).
+  useEffect(() => { preloadAllRoutesOnIdle(); }, []);
+  return (
   <ThemeProvider>
     <QueryClientProvider client={queryClient}>
       <Toaster theme="dark" position="top-right" richColors closeButton />
