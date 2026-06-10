@@ -62,6 +62,8 @@ const IrrigationReport = () => {
   const [cropFilter, setCropFilter] = useState('all');
   const [chartMode, setChartMode] = useState<'bar' | 'line'>('line');
   const [search, setSearch] = useState('');
+  const chartRef = useRef<HTMLDivElement>(null);
+  const printImgRef = useRef<HTMLImageElement>(null);
 
   const openHistory = (plotId: string, plotName: string) => {
     const qs = new URLSearchParams({ plot_name: plotName });
@@ -141,6 +143,26 @@ const IrrigationReport = () => {
     resetKey: `${search}|${filters.resetKey}|${cropFilter}`,
   });
 
+  // Keep a print-only PNG/SVG snapshot of the chart in sync. The live Recharts
+  // ResponsiveContainer doesn't paint into the print canvas (exports as a grey
+  // box), so we render this image instead when printing / saving to PDF.
+  const refreshChartSnapshot = () => {
+    const src = chartToDataUrl(chartRef.current);
+    if (src && printImgRef.current) printImgRef.current.src = src;
+  };
+
+  useEffect(() => {
+    // Wait a frame for Recharts to finish laying out before snapshotting.
+    const id = window.setTimeout(refreshChartSnapshot, 350);
+    return () => window.clearTimeout(id);
+  }, [chartData, chartMode, chartPlotsList]);
+
+  useEffect(() => {
+    // Capture the freshest chart synchronously the moment a print is requested.
+    window.addEventListener('beforeprint', refreshChartSnapshot);
+    return () => window.removeEventListener('beforeprint', refreshChartSnapshot);
+  }, []);
+
   const handleExport = () => exportCSV(
     totalByPlot.map((r) => ({
       [t('table.plot', 'Plot')]: r.plot,
@@ -201,7 +223,7 @@ const IrrigationReport = () => {
             {t('reports.plotsCount', { count: chartPlotsList.length, defaultValue: '{{count}} plot(s)' })} · {cropFilter === 'all' ? t('reports.allCropTypes', 'All crops') : cropFilter}
           </p>
         </div>
-        <div style={{ width: '100%', height: 320 }}>
+        <div ref={chartRef} className="no-print" style={{ width: '100%', height: 320 }}>
           {!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && !reportQuery.data) ? (
             <div className="flex items-center justify-center h-full">
               <div className="w-full max-w-md space-y-3 px-6">
@@ -229,13 +251,28 @@ const IrrigationReport = () => {
                 {chartPlotsList.map((plot, i) => {
                   const color = PALETTE[i % PALETTE.length];
                   return chartMode === 'bar'
-                    ? <Bar key={plot.name} dataKey={plot.name} fill={color} radius={[4, 4, 0, 0]} maxBarSize={20} />
-                    : <Line key={plot.name} type="monotone" dataKey={plot.name} stroke={color} strokeWidth={2.2} dot={{ r: 3 }} activeDot={{ r: 5 }} />;
+                    ? <Bar key={plot.name} dataKey={plot.name} fill={color} radius={[4, 4, 0, 0]} maxBarSize={20} isAnimationActive={false} />
+                    : <Line key={plot.name} type="monotone" dataKey={plot.name} stroke={color} strokeWidth={2.2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />;
                 })}
               </ChartComponent>
             </ResponsiveContainer>
           )}
         </div>
+        {/* Print/PDF fallback — a flattened snapshot of the chart above. */}
+        <img ref={printImgRef} alt="" className="print-only" style={{ width: '100%', height: 'auto' }} />
+        {chartPlotsList.length > 0 && (
+          <div className="print-only" style={{ marginTop: '8px' }}>
+            {chartPlotsList.map((plot, i) => (
+              <span
+                key={plot.id}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '14px', fontSize: '11px', color: '#111' }}
+              >
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: PALETTE[i % PALETTE.length], display: 'inline-block' }} />
+                {plot.name}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <ReportTableCard
