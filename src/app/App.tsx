@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
@@ -6,6 +6,7 @@ import AppLayout from './AppLayout';
 import RequireAuth from '@/components/RequireAuth';
 import { ThemeProvider } from '@/hooks/useTheme';
 import SetupGate from '@/components/SetupGate';
+import { preloadAllRoutesOnIdle } from './preloadRoutes';
 
 // Route-level code splitting — each chunk loads on demand, shrinking the
 // initial bundle (login + dashboard shell) dramatically.
