@@ -30,6 +30,13 @@ return [
             'prefix_indexes' => true,
             'search_path'    => 'public',
             'sslmode'        => env('DB_SSLMODE', 'require'),
+            // Persistent PDO connections eliminate the TCP+TLS handshake on
+            // every request (saves 5-50ms per API call depending on DB
+            // location). Safe with PHP-FPM because each worker keeps its
+            // own pinned connection.
+            'options'        => [
+                PDO::ATTR_PERSISTENT => filter_var(env('DB_PERSISTENT', true), FILTER_VALIDATE_BOOLEAN),
+            ],
         ],
 
         'sqlite' => [
