@@ -1,16 +1,20 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import logoIcon from '@/assets/logo-icon.png';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import OpenMobileAppButton from '@/components/OpenMobileAppButton';
 import { auth } from '@/lib/auth';
+import { api } from '@/lib/api';
 import PasswordInput from '@/components/PasswordInput';
+import { preloadRoute } from '@/app/preloadRoutes';
 
 const LoginPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +27,19 @@ const LoginPage = () => {
     setError(null);
     try {
       await auth.login({ email, password });
+      // Fire-and-forget: warm the dashboard chunk + its two queries so the
+      // landing page renders instantly after navigation instead of showing
+      // skeletons while two HTTP calls round-trip.
+      preloadRoute('/dashboard');
+      qc.prefetchQuery({
+        queryKey: ['admin-dashboard-stats'],
+        queryFn: async () => (await api.get('/dashboard/stats')).data.data,
+      });
+      qc.prefetchQuery({
+        queryKey: ['admin-dashboard-activity'],
+        queryFn: async () =>
+          (await api.get('/dashboard/recent-activity', { params: { limit: 24 } })).data.data.items,
+      });
       navigate('/dashboard', { replace: true });
     } catch {
       setError(t('login.error'));
