@@ -63,6 +63,20 @@ fi
 # ── nginx gzip: ~80% smaller JSON responses ──────────────────────────────────
 echo "==> Configuring nginx gzip"
 if [ -d /etc/nginx/conf.d ]; then
+  # The stock /etc/nginx/nginx.conf ships `gzip on;` (and sometimes
+  # `gzip_vary on;`) in the http{} context. Files in conf.d/ are *included* in
+  # that same context, so re-declaring those toggles makes `nginx -t` fail with
+  # "gzip directive is duplicate". Comment out the stock lines so our tuned
+  # block below is the single source of truth. Guarded + idempotent: a line
+  # that's already commented starts with `#` and won't match again.
+  if [ -f /etc/nginx/nginx.conf ]; then
+    for directive in 'gzip on;' 'gzip_vary on;'; do
+      if grep -qE "^[[:space:]]*${directive}" /etc/nginx/nginx.conf; then
+        sudo sed -i -E "s|^([[:space:]]*)(${directive})|\1# \2  # superseded by conf.d/zz-gzip.conf|" /etc/nginx/nginx.conf
+      fi
+    done
+  fi
+
   sudo tee /etc/nginx/conf.d/zz-gzip.conf > /dev/null <<'EOF'
 gzip on;
 gzip_vary on;
