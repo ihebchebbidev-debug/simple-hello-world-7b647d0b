@@ -5,7 +5,7 @@
 Agri-Sync is a private farm management system for three user roles:
 - **Field Technician** (mobile PWA): records farming operations in the field — requires full offline-first capability (read + write offline, sync on reconnect).
 - **Manager** (web admin): consults analytics reports, charts, and cost breakdowns per plot; views configuration in read-only mode.
-- **Administrator** (web admin): inherits all Technician and Manager permissions; additionally manages user accounts, roles, and system configuration.
+- **Administrator** (web admin): inherits all Technician and Manager permissions; additionally manages user accounts, roles, and system configuration.j
 
 **Tech stack:** Laravel + PostgreSQL (API) · Mobile: Ionic/React as a Progressive Web App (PWA) · Admin: Refine Core/React  
 **Team:** 1 solo developer  
