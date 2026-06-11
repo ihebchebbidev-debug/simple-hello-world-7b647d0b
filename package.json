@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && npm run build:mobile && vite build",
-    "build:mobile": "cd mobile_app && npm install --no-audit --no-fund --legacy-peer-deps && npm run build:embed",
+    "build:mobile": "npm --prefix mobile_app install --no-audit --no-fund --legacy-peer-deps && npm --prefix mobile_app run build:embed",
+    "vercel-build": "npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run"
