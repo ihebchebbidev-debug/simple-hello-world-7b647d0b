@@ -5,7 +5,7 @@ Field technician application — Android-first, offline-capable.
 ## Stack
 
 - **Ionic React 8** + **Capacitor 6**
-- **Vite 5** + **React 18** + **TypeScript 5**
+- **Vite 5** + **React 18e"** + **TypeScript 5**
 - **react-router-dom v6** (matches the admin/web app — Ionic page animations
   via `<IonPage>` per route, no `IonReactRouter`)
 - **TanStack Query** for server cache, **react-i18next** (FR/EN)
