@@ -40,7 +40,12 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->statefulApi();
+        // Pure stateless token auth: both the admin SPA and the mobile app
+        // authenticate with bearer tokens (Authorization header) via the
+        // `auth:sanctum` guard. We intentionally do NOT call statefulApi() —
+        // no client uses cookie/session/CSRF auth, so booting the session +
+        // CSRF stack on every API request was pure overhead. Token auth via
+        // the Authorization header is unaffected (it never needed it).
         $middleware->api(prepend: [
             SetLocale::class,
         ]);
