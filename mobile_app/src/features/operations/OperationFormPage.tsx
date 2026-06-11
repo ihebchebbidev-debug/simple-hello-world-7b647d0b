@@ -44,6 +44,9 @@ const OperationFormPage = ({ kind }: Props) => {
   const { online } = useOfflineQueue();
 
   const [plotId, setPlotId] = useState('');
+  // Treatments are applied to several plots from one tank — phytosanitary uses
+  // a multi-select; the other op types stay single-plot.
+  const [plotIds, setPlotIds] = useState<string[]>([]);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{ syncedOnline: boolean } | null>(null);
@@ -59,56 +62,66 @@ const OperationFormPage = ({ kind }: Props) => {
   const [harvestWorkerDays, setHarvestWorkerDays] = useState('');
 
 
-  const buildPayload = (): Record<string, unknown> => {
+  // Plots selected for a treatment + their total surface (drives the split).
+  const selectedPlots = (refs?.plots ?? []).filter((p) => plotIds.includes(p.id));
+  const totalSurface = selectedPlots.reduce((s, p) => s + (Number(p.surface_area_ha) || 0), 0);
+
+  // Returns ONE payload per operation to enqueue. All op types yield a single
+  // payload except a multi-plot treatment, which yields one operation per plot
+  // with the spray volume and each product quantity split by surface ratio
+  // (plotShare = surfaceᵢ / Σsurface). The customer enters the TOTAL volume and
+  // TOTAL product quantity once; the app does the proportional maths.
+  const buildPayloads = (): Record<string, unknown>[] => {
+    if (kind === 'phytosanitary') {
+      const vol = Number(waterTotalL) || 0;
+      const validItems = pestItems.filter((it) => it.pesticide_id && Number(it.quantity) > 0);
+      return selectedPlots.map((plot) => {
+        const ratio = totalSurface > 0 ? (Number(plot.surface_area_ha) || 0) / totalSurface : 0;
+        const plotVol = Number((vol * ratio).toFixed(3));
+        return {
+          plot_id: plot.id,
+          operation_date: date,
+          water_total_l: plotVol,
+          items: validItems.map((it) => ({
+            pesticide_id: it.pesticide_id,
+            quantity_applied: Number((Number(it.quantity) * ratio).toFixed(3)),
+            water_volume_l: plotVol,
+            target_pest: it.target_pest || null,
+          })),
+          remarks: remarks || null,
+        };
+      });
+    }
+
     const base = { plot_id: plotId, operation_date: date };
     switch (kind) {
       case 'irrigation':
-        return { ...base, water_quantity: Number(waterQty) };
+        return [{ ...base, water_quantity: Number(waterQty) }];
       case 'fertilization':
-        return {
+        return [{
           ...base,
           items: fertItems
             .filter((it) => it.fertilizer_id && it.quantity)
             .map((it) => ({ fertilizer_id: it.fertilizer_id, quantity_applied: Number(it.quantity) })),
-        };
-      case 'phytosanitary': {
-        const vol = Number(waterTotalL) || 0;
-        return {
-          ...base,
-          // Each pesticide row stores a dose (Qté/100L); the absolute product
-          // quantity is derived as volume × dose ÷ 100 and sent as
-          // quantity_applied. Each row also carries its own bioagresseur.
-          items: pestItems
-            .filter((it) => it.pesticide_id && it.quantity)
-            .map((it) => {
-              const dose = Number(it.quantity) || 0;
-              return {
-                pesticide_id: it.pesticide_id,
-                dose_per_100l: dose,
-                quantity_applied: Number(((vol * dose) / 100).toFixed(3)),
-                water_volume_l: vol,
-                target_pest: it.target_pest || null,
-              };
-            }),
-          water_total_l: vol,
-          remarks: remarks || null,
-        };
-      }
+        }];
       case 'harvest':
-        return {
+        return [{
           ...base,
           quantity_harvested: Number(harvestQty),
           // v4: single "Main d'œuvre (homme/jour)" input stored as N x 1.
           num_workers: Math.max(1, Math.round(Number(harvestWorkerDays) || 1)),
           days_worked: 1,
-        };
+        }];
     }
-
-
+    return [];
   };
 
   const validate = (): string | null => {
-    if (!plotId) return t('form.invalid');
+    if (kind === 'phytosanitary') {
+      if (plotIds.length === 0) return t('form.invalid');
+    } else if (!plotId) {
+      return t('form.invalid');
+    }
     if (!date) return t('form.invalid');
     if (kind === 'irrigation' && !(Number(waterQty) > 0)) return t('form.invalid');
     if (kind === 'fertilization') {
@@ -119,7 +132,7 @@ const OperationFormPage = ({ kind }: Props) => {
     }
     if (kind === 'phytosanitary') {
       if (!(Number(waterTotalL) > 0)) return t('form.invalid');
-      const filled = pestItems.filter((i) => i.pesticide_id && i.quantity);
+      const filled = pestItems.filter((i) => i.pesticide_id && Number(i.quantity) > 0);
       if (filled.length === 0) return t('form.invalid');
       // One targeted bioagresseur is required per pesticide.
       if (filled.some((i) => !i.target_pest)) return t('form.invalid');
@@ -140,7 +153,10 @@ const OperationFormPage = ({ kind }: Props) => {
     if (err) { setError(err); return; }
     setError(null); setSubmitting(true);
     try {
-      await enqueue(kind, buildPayload());
+      // A multi-plot treatment enqueues one operation per plot; everything else
+      // is a single payload. Each enqueue() gets its own client_id, so offline
+      // replay stays idempotent per plot.
+      for (const payload of buildPayloads()) await enqueue(kind, payload);
       // Try to flush immediately so the user gets accurate online/offline feedback.
       const result = online ? await flushOutbox().catch(() => ({ sent: 0, failed: 0, remaining: 0 })) : null;
       setSubmitted({ syncedOnline: Boolean(result && result.sent > 0) });
@@ -211,16 +227,47 @@ const OperationFormPage = ({ kind }: Props) => {
             </div>
           ) : (
           <form onSubmit={onSubmit} className="flex-1 px-5 space-y-5">
-            <div>
-              <label className="label-md mb-2 block">{t('form.plot')}</label>
-              <select value={plotId} onChange={(e) => setPlotId(e.target.value)}
-                disabled={isLoading} required className="cl-input h-12 rounded-xl text-base">
-                <option value="">{t('form.selectPlot')}</option>
-                {refs.plots.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} — {p.surface_area_ha} ha</option>
-                ))}
-              </select>
-            </div>
+            {kind === 'phytosanitary' ? (
+              <div>
+                <label className="label-md mb-1 block">{t('form.plots')}</label>
+                <p className="text-[11px] text-muted-foreground mb-2">{t('form.selectPlotsHint')}</p>
+                <div className="rounded-xl border border-[hsl(var(--border))] divide-y divide-[hsl(var(--border))] max-h-60 overflow-y-auto">
+                  {refs.plots.map((p) => {
+                    const checked = plotIds.includes(p.id);
+                    return (
+                      <button
+                        type="button"
+                        key={p.id}
+                        onClick={() => setPlotIds((prev) => checked ? prev.filter((x) => x !== p.id) : [...prev, p.id])}
+                        className="w-full flex items-center gap-3 px-3 h-12 text-left"
+                      >
+                        <span className={`h-5 w-5 shrink-0 rounded-md border flex items-center justify-center ${checked ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]' : 'border-[hsl(var(--border))]'}`}>
+                          {checked && <Check className="h-3.5 w-3.5 text-[hsl(var(--primary-foreground))]" />}
+                        </span>
+                        <span className="flex-1 text-sm text-foreground">{p.name}</span>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">{p.surface_area_ha} ha</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {plotIds.length > 0 && (
+                  <p className="mt-2 text-xs font-medium" style={{ color: 'hsl(var(--primary-glow))' }}>
+                    {t('form.plotsSelected', { count: plotIds.length, ha: Number(totalSurface.toFixed(3)) })}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label className="label-md mb-2 block">{t('form.plot')}</label>
+                <select value={plotId} onChange={(e) => setPlotId(e.target.value)}
+                  disabled={isLoading} required className="cl-input h-12 rounded-xl text-base">
+                  <option value="">{t('form.selectPlot')}</option>
+                  {refs.plots.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} — {p.surface_area_ha} ha</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="label-md mb-2 block">{t('form.date')}</label>
               <input type="date" required value={date} onChange={(e) => setDate(e.target.value)}
@@ -242,6 +289,7 @@ const OperationFormPage = ({ kind }: Props) => {
                 pesticides={refs.pesticides} pests={refs.pests}
                 waterTotalL={waterTotalL} onWaterChange={setWaterTotalL}
                 remarks={remarks} onRemarksChange={setRemarks}
+                selectedPlots={selectedPlots}
               />
             )}
             {kind === 'harvest' && (
