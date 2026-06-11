@@ -7,13 +7,38 @@
  *  - PWA / Service Worker disabled — we never want the embedded mobile
  *    SW to fight with the dashboard's own routing
  */
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
+/**
+ * Emits `/mobileapp/version.json` so the runtime version checker can detect a
+ * new deployment and force-reload stale tabs. A new build id is produced on
+ * every push (Vercel commit SHA, else a timestamp) — this is what guarantees
+ * "every code push ⇒ the customer's app updates to the new version".
+ */
+function emitVersionJson(): Plugin {
+  const buildId =
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.VERCEL_DEPLOYMENT_ID ||
+    process.env.COMMIT_SHA ||
+    String(Date.now());
+  return {
+    name: 'emit-version-json',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify({ buildId, builtAt: new Date().toISOString() }),
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: '/mobileapp/',
-  plugins: [react()],
+  plugins: [react(), emitVersionJson()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
