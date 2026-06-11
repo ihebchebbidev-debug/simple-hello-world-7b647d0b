@@ -20,10 +20,39 @@ function isPreviewHost(): boolean {
   return SW_DISABLED_HOSTS.some((needle) => h.includes(needle));
 }
 
+/**
+ * Remove any service worker + caches left over from an earlier PWA-enabled
+ * build. Without this, a customer whose browser still has the old SW would keep
+ * being served the stale cached bundle and never see new deployments. One-time
+ * reload (guarded) so the page comes back fresh from the network.
+ */
+async function purgeStaleServiceWorkers(): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    if (regs.length === 0) return; // nothing stale — common case, do nothing
+    await Promise.all(regs.map((r) => r.unregister()));
+    if (typeof caches !== 'undefined') {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    const KEY = 'sw-purged-once';
+    if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem(KEY)) {
+      sessionStorage.setItem(KEY, '1');
+      window.location.reload();
+    }
+  } catch { /* ignore */ }
+}
+
 export async function registerServiceWorker(): Promise<void> {
   if (typeof window === 'undefined') return;
   if (Capacitor.isNativePlatform()) return;
-  if (import.meta.env.VITE_PWA_ENABLED === 'false') return;
+  // PWA is disabled in the embedded /mobileapp build — make sure no stale SW
+  // from a previous PWA build keeps pinning the customer to an old bundle.
+  if (import.meta.env.VITE_PWA_ENABLED === 'false') {
+    await purgeStaleServiceWorkers();
+    return;
+  }
 
   // Hard guard: in iframes / preview hosts, actively *unregister* any
   // previously-installed SW so we never serve a stale build.

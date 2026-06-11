@@ -5,7 +5,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/mobileapp/:path((?!assets|icons).*)", "destination": "/mobileapp/index.html" },
+    { "source": "/mobileapp/:path((?!assets|icons|version.json).*)", "destination": "/mobileapp/index.html" },
     { "source": "/((?!mobileapp/).*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -45,6 +45,20 @@
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Content-Type", "value": "application/manifest+json" }
+      ]
+    },
+    {
+      "source": "/mobileapp/version.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Content-Type", "value": "application/json" }
+      ]
+    },
+    {
+      "source": "/version.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Content-Type", "value": "application/json" }
       ]
     },
     {

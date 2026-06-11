@@ -6,7 +6,9 @@
  * Safe in dev: if `/version.json` is missing, the checker no-ops.
  */
 
-const VERSION_URL = '/version.json';
+// Resolve against the app's own base ('/mobileapp/') so the mobile PWA checks
+// its OWN build id, independent of the dashboard's root /version.json.
+const VERSION_URL = `${import.meta.env.BASE_URL ?? '/'}version.json`;
 const POLL_MS = 2 * 60 * 1000;
 const LOOP_GUARD_KEY = 'vc.lastReloadAt';
 const LOOP_GUARD_MS = 30_000;
