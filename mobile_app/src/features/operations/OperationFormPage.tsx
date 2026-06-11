@@ -240,18 +240,22 @@ const OperationFormPage = ({ kind }: Props) => {
                   {refs.plots.map((p) => {
                     const checked = plotIds.includes(p.id);
                     return (
-                      <button
-                        type="button"
+                      <label
                         key={p.id}
-                        onClick={() => setPlotIds((prev) => checked ? prev.filter((x) => x !== p.id) : [...prev, p.id])}
-                        className="w-full flex items-center gap-3 px-3 h-12 text-left"
+                        className={`w-full flex items-center gap-3 px-3 h-12 text-left cursor-pointer ${checked ? 'bg-[hsl(var(--primary)/0.08)]' : ''}`}
                       >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setPlotIds((prev) => checked ? prev.filter((x) => x !== p.id) : [...prev, p.id])}
+                          className="sr-only"
+                        />
                         <span className={`h-5 w-5 shrink-0 rounded-md border flex items-center justify-center ${checked ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]' : 'border-[hsl(var(--border))]'}`}>
                           {checked && <Check className="h-3.5 w-3.5 text-[hsl(var(--primary-foreground))]" />}
                         </span>
                         <span className="flex-1 text-sm text-foreground">{p.name}</span>
                         <span className="text-xs text-muted-foreground whitespace-nowrap">{p.surface_area_ha} ha</span>
-                      </button>
+                      </label>
                     );
                   })}
                 </div>
