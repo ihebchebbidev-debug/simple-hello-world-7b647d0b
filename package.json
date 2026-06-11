@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && npm run build:mobile",
+    "build": "tsc --noEmit && npm run build:mobile && vite build",
     "build:mobile": "cd mobile_app && npm install --no-audit --no-fund --legacy-peer-deps && npx vite build --config vite.embed.config.ts",
     "preview": "vite preview",
     "lint": "eslint .",
