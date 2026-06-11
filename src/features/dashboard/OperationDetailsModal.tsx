@@ -62,6 +62,10 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
       const { data } = await api.get<{ data: AnyOp }>(`${baseUrl}/${id}`);
       return (data as { data?: AnyOp }).data ?? (data as unknown as AnyOp);
     },
+    // Fetches fresh each time the modal opens (so reopening after an edit
+    // shows the latest), but never on window refocus — that would overwrite
+    // the user's unsaved changes while they're editing.
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
@@ -81,12 +85,18 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
   }, [detail.data]);
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['admin-dashboard-activity'] });
-    qc.invalidateQueries({ queryKey: ['admin-dashboard-stats'] });
-    qc.invalidateQueries({ queryKey: ['report-irrigation'] });
-    qc.invalidateQueries({ queryKey: ['report-fertilization'] });
-    qc.invalidateQueries({ queryKey: ['report-phyto'] });
-    qc.invalidateQueries({ queryKey: ['report-harvest'] });
+    // Refresh every screen this operation can appear on. A prefix predicate
+    // catches ALL report tabs — irrigation / fertilization / phyto / harvest
+    // AND production-cost (report-cost), which was previously left stale after
+    // an edit or delete — plus the dashboard stats + activity feed. New report
+    // keys are covered automatically.
+    qc.invalidateQueries({
+      predicate: (q) => {
+        const key = q.queryKey[0];
+        return typeof key === 'string'
+          && (key.startsWith('report-') || key.startsWith('admin-dashboard'));
+      },
+    });
   };
 
   const save = useMutation({

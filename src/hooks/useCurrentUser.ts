@@ -14,7 +14,7 @@ export function useCurrentUser() {
     queryKey: ['auth', 'me'],
     queryFn: () => auth.me() as Promise<AuthUser & { roles?: unknown; role?: unknown }>,
     enabled,
-    staleTime: 5 * 60_000,
+    staleTime: 60_000,
     gcTime: 30 * 60_000,
     retry: 0,
   });

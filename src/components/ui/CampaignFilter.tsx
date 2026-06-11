@@ -26,7 +26,7 @@ const CampaignFilter = ({ value, onChange }: CampaignFilterProps) => {
       const payload = (data as unknown as { data?: CampaignLite[] }).data;
       return Array.isArray(payload) ? payload : [];
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30_000,
   });
 
   return (

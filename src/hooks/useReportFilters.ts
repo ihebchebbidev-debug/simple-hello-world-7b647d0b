@@ -75,7 +75,7 @@ export function useReportFilters({
       const payload = (data as unknown as { data?: CampaignLite[] }).data;
       return Array.isArray(payload) ? payload : [];
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30_000,
   });
 
   // Auto-select the campaign whose interval contains today, unless the user has changed it.

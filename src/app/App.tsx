@@ -41,23 +41,33 @@ const DeveloperPage        = lazy(() => import('@/features/developer/DeveloperPa
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Aggressive cache: revisiting a page within 5 min serves from memory
-      // (no network roundtrip). Mutations explicitly invalidate keys so
-      // freshness is preserved where it matters.
-      staleTime: 5 * 60_000,
+      // Freshness-first: data is stale immediately, so every page mount, tab
+      // refocus, and network reconnect refetches. This guarantees you always
+      // see current data — including operations added or deleted on another
+      // workstation — instead of a stale 5-minute cache. keepPreviousData
+      // (below) means the refetch happens in the background with no white
+      // flash; gcTime keeps the prior result around to serve as that
+      // placeholder.
+      staleTime: 0,
+      // Keep inactive results cached for a while so revisiting a page paints
+      // instantly from the prior data while the (always-on) refetch runs in
+      // the background — fast *and* fresh. Freshness comes from staleTime: 0,
+      // not from dropping the cache.
       gcTime: 30 * 60_000,
-      refetchOnWindowFocus: false,
-      refetchOnMount: false,
-      refetchOnReconnect: false,
-      // Keep the previous page's data on screen while a new fetch resolves
-      // — no white flash when changing filters / paginating.
+      refetchOnWindowFocus: true,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+      // Show the previous data while the fresh fetch resolves — no flash.
       placeholderData: (prev: unknown) => prev,
+      // Backend is an always-warm VPS now (not a Render cold-start), so fail
+      // fast: a couple of quick retries for transient blips, then surface the
+      // error instead of spinning for ~a minute.
       retry: (failureCount, error: unknown) => {
         const status = (error as { response?: { status?: number } } | undefined)?.response?.status;
         if (status && status >= 400 && status < 500) return false;
-        return failureCount < 8;
+        return failureCount < 2;
       },
-      retryDelay: (attempt) => Math.min(1500 * 2 ** attempt, 10_000),
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 4000),
     },
   },
 });
