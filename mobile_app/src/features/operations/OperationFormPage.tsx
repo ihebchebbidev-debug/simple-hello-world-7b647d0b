@@ -43,10 +43,8 @@ const OperationFormPage = ({ kind }: Props) => {
   const { data: refs, isLoading } = useReferenceData();
   const { online } = useOfflineQueue();
 
-  const [plotId, setPlotId] = useState('');
-  // Treatments are applied to several plots from one tank — phytosanitary uses
-  // a multi-select; the other op types stay single-plot.
   const [plotIds, setPlotIds] = useState<string[]>([]);
+  const [plotSearch, setPlotSearch] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{ syncedOnline: boolean } | null>(null);
@@ -64,14 +62,14 @@ const OperationFormPage = ({ kind }: Props) => {
 
   // Plots selected for a treatment + their total surface (drives the split).
   const selectedPlots = (refs?.plots ?? []).filter((p) => plotIds.includes(p.id));
+  const filteredPlots = (refs?.plots ?? [])
+    .filter((p) => p.name.toLowerCase().includes(plotSearch.trim().toLowerCase()));
   const totalSurface = selectedPlots.reduce((s, p) => s + (Number(p.surface_area_ha) || 0), 0);
 
-  // Returns ONE payload per operation to enqueue. All op types yield a single
-  // payload except a multi-plot treatment, which yields one operation per plot
-  // with the spray volume and each product quantity split by surface ratio
-  // (plotShare = surfaceᵢ / Σsurface). The customer enters the TOTAL volume and
-  // TOTAL product quantity once; the app does the proportional maths.
+  // Returns one payload per selected plot so every selected plot is recorded.
   const buildPayloads = (): Record<string, unknown>[] => {
+    if (selectedPlots.length === 0) return [];
+
     if (kind === 'phytosanitary') {
       const vol = Number(waterTotalL) || 0;
       const validItems = pestItems.filter((it) => it.pesticide_id && Number(it.quantity) > 0);
@@ -94,39 +92,36 @@ const OperationFormPage = ({ kind }: Props) => {
       });
     }
 
-    const base = {
-      plot_id: plotId,
-      plot_name: refs.plots.find((p) => p.id === plotId)?.name ?? '',
-      operation_date: date,
-    };
-    switch (kind) {
-      case 'irrigation':
-        return [{ ...base, water_quantity: Number(waterQty) }];
-      case 'fertilization':
-        return [{
-          ...base,
-          items: fertItems
-            .filter((it) => it.fertilizer_id && it.quantity)
-            .map((it) => ({ fertilizer_id: it.fertilizer_id, quantity_applied: Number(it.quantity) })),
-        }];
-      case 'harvest':
-        return [{
-          ...base,
-          quantity_harvested: Number(harvestQty),
-          // v4: single "Main d'œuvre (homme/jour)" input stored as N x 1.
-          num_workers: Math.max(1, Math.round(Number(harvestWorkerDays) || 1)),
-          days_worked: 1,
-        }];
-    }
-    return [];
+    return selectedPlots.map((plot) => {
+      const base = {
+        plot_id: plot.id,
+        plot_name: plot.name,
+        operation_date: date,
+      };
+      switch (kind) {
+        case 'irrigation':
+          return { ...base, water_quantity: Number(waterQty) };
+        case 'fertilization':
+          return {
+            ...base,
+            items: fertItems
+              .filter((it) => it.fertilizer_id && it.quantity)
+              .map((it) => ({ fertilizer_id: it.fertilizer_id, quantity_applied: Number(it.quantity) })),
+          };
+        case 'harvest':
+          return {
+            ...base,
+            quantity_harvested: Number(harvestQty),
+            num_workers: Math.max(1, Math.round(Number(harvestWorkerDays) || 1)),
+            days_worked: 1,
+          };
+      }
+      return base;
+    });
   };
 
   const validate = (): string | null => {
-    if (kind === 'phytosanitary') {
-      if (plotIds.length === 0) return t('form.invalid');
-    } else if (!plotId) {
-      return t('form.invalid');
-    }
+    if (plotIds.length === 0) return t('form.invalid');
     if (!date) return t('form.invalid');
     if (kind === 'irrigation' && !(Number(waterQty) > 0)) return t('form.invalid');
     if (kind === 'fertilization') {
@@ -232,66 +227,64 @@ const OperationFormPage = ({ kind }: Props) => {
             </div>
           ) : (
           <form onSubmit={onSubmit} className="flex-1 px-5 space-y-5">
-            {kind === 'phytosanitary' ? (
-              <div>
-                <label className="label-md mb-1 block">{t('form.plots')}</label>
-                <p className="text-[11px] text-muted-foreground mb-2">{t('form.selectPlotsHint')}</p>
-                <div className="rounded-2xl border border-[hsl(var(--border))] overflow-hidden">
-                  {refs.plots.length === 0 ? (
-                    <div className="px-4 py-5 text-sm text-muted-foreground">{t('form.noPlotsAvailable')}</div>
-                  ) : (
-                    <div className="divide-y divide-[hsl(var(--border))] max-h-60 overflow-y-auto">
-                      {refs.plots.map((p) => {
-                        const checked = plotIds.includes(p.id);
-                        return (
-                          <label
-                            key={p.id}
-                            className={`group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${checked ? 'bg-[hsl(var(--primary)/0.08)] hover:bg-[hsl(var(--primary)/0.12)]' : 'hover:bg-[hsl(var(--border)/0.08)]'}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => setPlotIds((prev) => checked ? prev.filter((x) => x !== p.id) : [...prev, p.id])}
-                              className="h-5 w-5 rounded border border-[hsl(var(--border))] text-[hsl(var(--primary))] accent-[hsl(var(--primary))]"
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium text-foreground truncate">{p.name}</div>
-                              <div className="text-[11px] text-muted-foreground truncate">{p.surface_area_ha} ha</div>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                {plotIds.length > 0 && (
-                  <div className="mt-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.8)] p-3 text-xs text-muted-foreground">
-                    <p className="font-medium text-[11px] text-[hsl(var(--primary-glow))] mb-2">
-                      {t('form.plotsSelected', { count: plotIds.length, ha: Number(totalSurface.toFixed(3)) })}
-                    </p>
-                    <div className="space-y-1">
-                      {selectedPlots.map((plot) => (
-                        <div key={plot.id} className="flex items-center justify-between gap-2">
-                          <span className="truncate">{plot.name}</span>
-                          <span className="text-[11px] text-muted-foreground">{plot.surface_area_ha} ha</span>
-                        </div>
-                      ))}
-                    </div>
+            <div>
+              <label className="label-md mb-1 block">{t('form.plots')}</label>
+              <p className="text-[11px] text-muted-foreground mb-2">
+                {kind === 'phytosanitary' ? t('form.selectPlotsHint') : t('form.selectPlotsMultipleHint')}
+              </p>
+              <div className="mb-3">
+                <input
+                  type="search"
+                  value={plotSearch}
+                  onChange={(e) => setPlotSearch(e.target.value)}
+                  placeholder={t('form.searchPlots')}
+                  className="cl-input h-12 w-full rounded-xl text-sm"
+                />
+              </div>
+              <div className="rounded-2xl border border-[hsl(var(--border))] overflow-hidden">
+                {filteredPlots.length === 0 ? (
+                  <div className="px-4 py-5 text-sm text-muted-foreground">{t('form.noPlotsAvailable')}</div>
+                ) : (
+                  <div className="divide-y divide-[hsl(var(--border))] max-h-60 overflow-y-auto">
+                    {filteredPlots.map((p) => {
+                      const checked = plotIds.includes(p.id);
+                      return (
+                        <label
+                          key={p.id}
+                          className={`group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${checked ? 'bg-[hsl(var(--primary)/0.08)] hover:bg-[hsl(var(--primary)/0.12)]' : 'hover:bg-[hsl(var(--border)/0.08)]'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setPlotIds((prev) => checked ? prev.filter((x) => x !== p.id) : [...prev, p.id])}
+                            className="h-5 w-5 rounded border border-[hsl(var(--border))] text-[hsl(var(--primary))] accent-[hsl(var(--primary))]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-foreground truncate">{p.name}</div>
+                            <div className="text-[11px] text-muted-foreground truncate">{p.surface_area_ha} ha</div>
+                          </div>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
-            ) : (
-              <div>
-                <label className="label-md mb-2 block">{t('form.plot')}</label>
-                <select value={plotId} onChange={(e) => setPlotId(e.target.value)}
-                  disabled={isLoading} required className="cl-input h-12 rounded-xl text-base">
-                  <option value="">{t('form.selectPlot')}</option>
-                  {refs.plots.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} — {p.surface_area_ha} ha</option>
-                  ))}
-                </select>
-              </div>
-            )}
+              {plotIds.length > 0 && (
+                <div className="mt-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.8)] p-3 text-xs text-muted-foreground">
+                  <p className="font-medium text-[11px] text-[hsl(var(--primary-glow))] mb-2">
+                    {t('form.plotsSelected', { count: plotIds.length, ha: Number(totalSurface.toFixed(3)) })}
+                  </p>
+                  <div className="space-y-1">
+                    {selectedPlots.map((plot) => (
+                      <div key={plot.id} className="flex items-center justify-between gap-2">
+                        <span className="truncate">{plot.name}</span>
+                        <span className="text-[11px] text-muted-foreground">{plot.surface_area_ha} ha</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div>
               <label className="label-md mb-2 block">{t('form.date')}</label>
               <input type="date" required value={date} onChange={(e) => setDate(e.target.value)}
@@ -304,7 +297,7 @@ const OperationFormPage = ({ kind }: Props) => {
                 items={fertItems}
                 onChange={setFertItems}
                 fertilizers={refs.fertilizers}
-                surfaceHa={refs.plots.find((p) => p.id === plotId)?.surface_area_ha}
+                surfaceHa={totalSurface}
               />
             )}
             {kind === 'phytosanitary' && (
