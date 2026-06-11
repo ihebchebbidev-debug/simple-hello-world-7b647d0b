@@ -49,6 +49,7 @@ export const en = {
     plots: 'Treated plots',
     plotsSelected: '{{count}} plot(s) · {{ha}} ha total',
     selectPlotsHint: 'Select every plot treated with this spray volume.',
+    noPlotsAvailable: 'No plots available to select.',
     splitPreview: 'Automatic per-plot split',
     targetPest: 'Target pest',
     selectPest: '— Select —',

@@ -236,43 +236,48 @@ const OperationFormPage = ({ kind }: Props) => {
               <div>
                 <label className="label-md mb-1 block">{t('form.plots')}</label>
                 <p className="text-[11px] text-muted-foreground mb-2">{t('form.selectPlotsHint')}</p>
-                <div className="rounded-xl border border-[hsl(var(--border))] divide-y divide-[hsl(var(--border))] max-h-60 overflow-y-auto">
-                  {refs.plots.map((p) => {
-                    const checked = plotIds.includes(p.id);
-                    return (
-                      <label
-                        key={p.id}
-                        className={`w-full flex items-center gap-3 px-3 h-12 text-left cursor-pointer ${checked ? 'bg-[hsl(var(--primary)/0.08)]' : ''}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => setPlotIds((prev) => checked ? prev.filter((x) => x !== p.id) : [...prev, p.id])}
-                          className="sr-only"
-                        />
-                        <span className={`h-5 w-5 shrink-0 rounded-md border flex items-center justify-center ${checked ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]' : 'border-[hsl(var(--border))]'}`}>
-                          {checked && <Check className="h-3.5 w-3.5 text-[hsl(var(--primary-foreground))]" />}
-                        </span>
-                        <span className="flex-1 text-sm text-foreground">{p.name}</span>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">{p.surface_area_ha} ha</span>
-                      </label>
-                    );
-                  })}
+                <div className="rounded-2xl border border-[hsl(var(--border))] overflow-hidden">
+                  {refs.plots.length === 0 ? (
+                    <div className="px-4 py-5 text-sm text-muted-foreground">{t('form.noPlotsAvailable')}</div>
+                  ) : (
+                    <div className="divide-y divide-[hsl(var(--border))] max-h-60 overflow-y-auto">
+                      {refs.plots.map((p) => {
+                        const checked = plotIds.includes(p.id);
+                        return (
+                          <label
+                            key={p.id}
+                            className={`group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${checked ? 'bg-[hsl(var(--primary)/0.08)] hover:bg-[hsl(var(--primary)/0.12)]' : 'hover:bg-[hsl(var(--border)/0.08)]'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setPlotIds((prev) => checked ? prev.filter((x) => x !== p.id) : [...prev, p.id])}
+                              className="h-5 w-5 rounded border border-[hsl(var(--border))] text-[hsl(var(--primary))] accent-[hsl(var(--primary))]"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium text-foreground truncate">{p.name}</div>
+                              <div className="text-[11px] text-muted-foreground truncate">{p.surface_area_ha} ha</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
                 {plotIds.length > 0 && (
-                  <>
-                    <p className="mt-2 text-xs font-medium" style={{ color: 'hsl(var(--primary-glow))' }}>
+                  <div className="mt-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.8)] p-3 text-xs text-muted-foreground">
+                    <p className="font-medium text-[11px] text-[hsl(var(--primary-glow))] mb-2">
                       {t('form.plotsSelected', { count: plotIds.length, ha: Number(totalSurface.toFixed(3)) })}
                     </p>
-                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    <div className="space-y-1">
                       {selectedPlots.map((plot) => (
                         <div key={plot.id} className="flex items-center justify-between gap-2">
                           <span className="truncate">{plot.name}</span>
-                          <span className="shrink-0">{plot.surface_area_ha} ha</span>
+                          <span className="text-[11px] text-muted-foreground">{plot.surface_area_ha} ha</span>
                         </div>
                       ))}
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             ) : (

@@ -49,6 +49,7 @@ export const fr = {
     plots: 'Parcelles traitées',
     plotsSelected: '{{count}} parcelle(s) · {{ha}} ha au total',
     selectPlotsHint: 'Sélectionnez toutes les parcelles traitées avec ce volume de bouillie.',
+    noPlotsAvailable: 'Aucune parcelle disponible pour sélection.',
     splitPreview: 'Répartition automatique par parcelle',
     targetPest: 'Bioagresseur ciblé',
     selectPest: '— Sélectionner —',
