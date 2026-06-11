@@ -24,9 +24,12 @@ const RecentEntriesList = ({ type }: Props) => {
   const [plotFilter, setPlotFilter] = useState<string>('all');
 
 
-  const plotName = (id: unknown): string => {
+  const plotName = (id: unknown, payload?: Record<string, unknown>): string => {
     const p = refs.plots.find((pl) => pl.id === String(id));
-    return p ? p.name : (id ? String(id) : '—');
+    if (p) return p.name;
+    const fallback = payload?.plot_name ?? payload?.plotName;
+    if (typeof fallback === 'string' && fallback.trim()) return fallback;
+    return id ? String(id) : '—';
   };
 
   const fmtDate = (iso: string) => {
@@ -70,10 +73,11 @@ const RecentEntriesList = ({ type }: Props) => {
   const plotOptions = useMemo(() => {
     const map = new Map<string, string>();
     entries.forEach((e) => {
-      const pid = (e.payload as Record<string, unknown>).plot_id;
+      const payload = e.payload as Record<string, unknown>;
+      const pid = payload.plot_id;
       if (pid == null) return;
       const id = String(pid);
-      if (!map.has(id)) map.set(id, plotName(id));
+      if (!map.has(id)) map.set(id, plotName(id, payload));
     });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,7 +155,9 @@ const RecentEntriesList = ({ type }: Props) => {
                 <StatusIcon className={`h-4 w-4 shrink-0 ${statusClass}`} aria-label={statusLabel} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 text-sm text-foreground truncate">
-                    <span className="font-medium truncate">{plotName((e.payload as Record<string, unknown>).plot_id)}</span>
+                    <span className="font-medium truncate">
+                      {plotName((e.payload as Record<string, unknown>).plot_id, e.payload as Record<string, unknown>)}
+                    </span>
                     <span className="text-muted-foreground text-xs shrink-0">{fmtDate(e.operationDate)}</span>
                   </div>
                   <p className="text-xs text-muted-foreground truncate">{summary(e) || '—'}</p>

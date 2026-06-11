@@ -80,6 +80,7 @@ const OperationFormPage = ({ kind }: Props) => {
         const plotVol = Number((vol * ratio).toFixed(3));
         return {
           plot_id: plot.id,
+          plot_name: plot.name,
           operation_date: date,
           water_total_l: plotVol,
           items: validItems.map((it) => ({
@@ -93,7 +94,11 @@ const OperationFormPage = ({ kind }: Props) => {
       });
     }
 
-    const base = { plot_id: plotId, operation_date: date };
+    const base = {
+      plot_id: plotId,
+      plot_name: refs.plots.find((p) => p.id === plotId)?.name ?? '',
+      operation_date: date,
+    };
     switch (kind) {
       case 'irrigation':
         return [{ ...base, water_quantity: Number(waterQty) }];
@@ -251,9 +256,19 @@ const OperationFormPage = ({ kind }: Props) => {
                   })}
                 </div>
                 {plotIds.length > 0 && (
-                  <p className="mt-2 text-xs font-medium" style={{ color: 'hsl(var(--primary-glow))' }}>
-                    {t('form.plotsSelected', { count: plotIds.length, ha: Number(totalSurface.toFixed(3)) })}
-                  </p>
+                  <>
+                    <p className="mt-2 text-xs font-medium" style={{ color: 'hsl(var(--primary-glow))' }}>
+                      {t('form.plotsSelected', { count: plotIds.length, ha: Number(totalSurface.toFixed(3)) })}
+                    </p>
+                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      {selectedPlots.map((plot) => (
+                        <div key={plot.id} className="flex items-center justify-between gap-2">
+                          <span className="truncate">{plot.name}</span>
+                          <span className="shrink-0">{plot.surface_area_ha} ha</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             ) : (
