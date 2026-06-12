@@ -16,10 +16,15 @@ import { usePlotsForFilter } from '@/hooks/usePlotsForFilter';
 import { exportCSV } from '@/lib/export';
 import { chartToDataUrl } from '@/lib/chartPrint';
 
+// 18 well-spaced hues so plots stay distinguishable on farms with many plots
+// (the graph now shows every plot, not just the first 5).
 const PALETTE = [
   'hsl(142, 60%, 42%)', 'hsl(217, 91%, 60%)', 'hsl(35, 92%, 50%)',
   'hsl(12, 60%, 65%)',  'hsl(280, 60%, 60%)', 'hsl(180, 60%, 45%)',
   'hsl(45, 90%, 55%)',  'hsl(330, 60%, 60%)', 'hsl(160, 50%, 45%)',
+  'hsl(255, 70%, 65%)', 'hsl(95, 55%, 45%)',  'hsl(200, 80%, 50%)',
+  'hsl(20, 85%, 55%)',  'hsl(300, 55%, 55%)', 'hsl(120, 45%, 50%)',
+  'hsl(60, 70%, 45%)',  'hsl(350, 75%, 62%)', 'hsl(230, 60%, 58%)',
 ];
 
 const tooltipStyle = {
@@ -104,7 +109,9 @@ const IrrigationReport = () => {
     });
     const plotsBy: Record<string, string> = {};
     monthly.forEach((m) => { plotsBy[m.plot_id] = m.plot_name; });
-    return Array.from(ids).slice(0, 5).map((id) => ({ id, name: plotsBy[id] ?? id }));
+    // Show every plot that has data in the period — no cap. (Was sliced to 5,
+    // which hid plots 6+ from the graph even though the table listed them all.)
+    return Array.from(ids).map((id) => ({ id, name: plotsBy[id] ?? id }));
   }, [monthly, filteredPlotIds]);
 
   const chartData = useMemo(() => {
