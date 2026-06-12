@@ -74,7 +74,10 @@ final class DashboardController extends Controller
 
     public function recentActivity(Request $request): JsonResponse
     {
-        $limit = max(1, min((int) $request->query('limit', 10), 50));
+        // Cap raised from 50 → 1000: the dashboard list is the operator's main
+        // browse/verify view (with client-side date/plot/type filters), so it
+        // must surface the whole campaign, not just the most recent handful.
+        $limit = max(1, min((int) $request->query('limit', 10), 1000));
 
         return ApiResponse::ok(['items' => $this->fetchRecent($limit)])
             ->header('Cache-Control', 'no-store');

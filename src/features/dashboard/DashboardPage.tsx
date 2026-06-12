@@ -53,7 +53,9 @@ const DashboardPage = () => {
     queryKey: ['admin-dashboard-activity'],
     queryFn: async () =>
       (await api.get<{ data: { items: ActivityItem[] } }>('/dashboard/recent-activity', {
-        params: { limit: 24 },
+        // Fetch a generous window so the date/plot/type filters below work
+        // across the whole campaign, not just the 24 most recent operations.
+        params: { limit: 500 },
       })).data.data.items,
   });
 
