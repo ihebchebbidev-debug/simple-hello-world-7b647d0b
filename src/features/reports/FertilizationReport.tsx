@@ -96,9 +96,9 @@ const FertilizationReport = () => {
   const reportQuery = useQuery<ApiData>({
     queryKey: ['report-fertilization', filters.apiParams],
     enabled: filters.filtersReady,
-    queryFn: async () => {
+    queryFn: async (): Promise<ApiData> => {
       const { data } = await api.get<{ data: ApiData }>('/reports/fertilization', { params: filters.apiParams });
-      return (data as { data?: ApiData }).data ?? { monthly: [], cumulative: [] };
+      return data.data ?? { monthly: [], cumulative: [], compositionless: [] };
     },
   });
 
@@ -118,25 +118,25 @@ const FertilizationReport = () => {
   }, [cropFilter, plots]);
 
   const visibleMonthly = useMemo(
-    () => (cropPlotIds ? monthly.filter((m) => cropPlotIds.has(m.plot_id)) : monthly),
+    () => (cropPlotIds ? monthly.filter((m: MonthlyApi) => cropPlotIds.has(m.plot_id)) : monthly),
     [monthly, cropPlotIds],
   );
   const visibleCumul = useMemo(
-    () => (cropPlotIds ? cumulative.filter((c) => cropPlotIds.has(c.plot_id)) : cumulative),
+    () => (cropPlotIds ? cumulative.filter((c: CumulApi) => cropPlotIds.has(c.plot_id)) : cumulative),
     [cumulative, cropPlotIds],
   );
 
   // Distinct sorted YYYY-MM keys
   const months = useMemo(() => {
     const set = new Set<string>();
-    visibleMonthly.forEach((m) => set.add(`${m.year}-${String(m.month).padStart(2, '0')}`));
+    visibleMonthly.forEach((m: MonthlyApi) => set.add(`${m.year}-${String(m.month).padStart(2, '0')}`));
     return [...set].sort();
   }, [visibleMonthly]);
 
   // Distinct plots with at least one monthly row
   const monthlyPlots = useMemo(() => {
     const map = new Map<string, string>();
-    visibleMonthly.forEach((m) => map.set(m.plot_id, m.plot_name));
+    visibleMonthly.forEach((m: MonthlyApi) => map.set(m.plot_id, m.plot_name));
     return Array.from(map.entries()).map(([plotId, plot]) => ({ plotId, plot }));
   }, [visibleMonthly]);
 
@@ -173,7 +173,7 @@ const FertilizationReport = () => {
   const sulfurRows = useMemo(() => buildPivot('s'), [visibleMonthly, monthlyPlots, months]);
 
   const cumulRows = useMemo<PlotCumulRow[]>(() =>
-    visibleCumul.map((c) => ({
+    visibleCumul.map((c: CumulApi) => ({
       plotId: c.plot_id,
       plot: c.plot_name,
       n: round1(c.n_per_ha ?? 0),
@@ -198,13 +198,13 @@ const FertilizationReport = () => {
 
   const compositionlessFertilizers = useMemo(() => {
     const map = new Map<string, string>();
-    compositionless.forEach((row) => map.set(row.fertilizer_id, row.fertilizer_name));
+    compositionless.forEach((row: CompositionlessApiRow) => map.set(row.fertilizer_id, row.fertilizer_name));
     return Array.from(map.entries()).map(([fertilizerId, fertilizer]) => ({ fertilizerId, fertilizer }));
   }, [compositionless]);
 
   const compositionlessRows = useMemo<CompositionlessRow[]>(() => {
     const rowsMap = new Map<string, CompositionlessRow>();
-    compositionless.forEach((row) => {
+    compositionless.forEach((row: CompositionlessApiRow) => {
       if (!rowsMap.has(row.plot_id)) {
         rowsMap.set(row.plot_id, { plotId: row.plot_id, plot: row.plot_name, byFertilizer: {} });
       }
