@@ -23,6 +23,9 @@ interface MonthlyApi {
   n_per_ha: number | null;
   p_per_ha: number | null;
   k_per_ha: number | null;
+  mg_per_ha: number | null;
+  ca_per_ha: number | null;
+  s_per_ha: number | null;
 }
 interface CumulApi {
   plot_id: string;
@@ -32,10 +35,13 @@ interface CumulApi {
   n_per_ha: number | null;
   p_per_ha: number | null;
   k_per_ha: number | null;
+  mg_per_ha: number | null;
+  ca_per_ha: number | null;
+  s_per_ha: number | null;
 }
-interface ApiData { monthly: MonthlyApi[]; cumulative: CumulApi[] }
+interface ApiData { monthly: MonthlyApi[]; cumulative: CumulApi[]; compositionless: CompositionlessApiRow[] }
 
-type Nutrient = 'n' | 'p' | 'k';
+type Nutrient = 'n' | 'p' | 'k' | 'mg' | 'ca' | 's';
 
 interface PlotMonthlyRow {
   plotId: string;
@@ -49,6 +55,23 @@ interface PlotCumulRow {
   n: number;
   p: number;
   k: number;
+  mg: number;
+  ca: number;
+  s: number;
+}
+
+interface CompositionlessApiRow {
+  plot_id: string;
+  plot_name: string;
+  fertilizer_id: string;
+  fertilizer_name: string;
+  total_quantity: number;
+}
+
+interface CompositionlessRow {
+  plotId: string;
+  plot: string;
+  byFertilizer: Record<string, number>;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -61,11 +84,12 @@ const FertilizationReport = () => {
   const [cropFilter, setCropFilter] = useState('all');
   const [searchCumul, setSearchCumul] = useState('');
 
-  const openHistory = (plotId: string, plotName: string, nutrient?: 'n' | 'p' | 'k') => {
+  const openHistory = (plotId: string, plotName: string, params?: { nutrient?: 'n' | 'p' | 'k' | 'mg' | 'ca' | 's'; fertilizerId?: string }) => {
     const qs = new URLSearchParams({ plot_name: plotName });
     if (filters.apiParams.date_from) qs.set('date_from', String(filters.apiParams.date_from));
     if (filters.apiParams.date_to) qs.set('date_to', String(filters.apiParams.date_to));
-    if (nutrient) qs.set('nutrient', nutrient);
+    if (params?.nutrient) qs.set('nutrient', params.nutrient);
+    if (params?.fertilizerId) qs.set('fertilizer_id', params.fertilizerId);
     navigate(`/reports/history/fertilization/${plotId}?${qs.toString()}`);
   };
 
@@ -80,6 +104,7 @@ const FertilizationReport = () => {
 
   const monthly = reportQuery.data?.monthly ?? [];
   const cumulative = reportQuery.data?.cumulative ?? [];
+  const compositionless = reportQuery.data?.compositionless ?? [];
   const plots = plotsQuery.data ?? [];
 
   const cropTypes = useMemo(
@@ -116,7 +141,17 @@ const FertilizationReport = () => {
   }, [visibleMonthly]);
 
   const buildPivot = (nutrient: Nutrient): PlotMonthlyRow[] => {
-    const key = nutrient === 'n' ? 'n_per_ha' : nutrient === 'p' ? 'p_per_ha' : 'k_per_ha';
+    const key: keyof MonthlyApi = nutrient === 'n'
+      ? 'n_per_ha'
+      : nutrient === 'p'
+        ? 'p_per_ha'
+        : nutrient === 'k'
+          ? 'k_per_ha'
+          : nutrient === 'mg'
+            ? 'mg_per_ha'
+            : nutrient === 'ca'
+              ? 'ca_per_ha'
+              : 's_per_ha';
     return monthlyPlots.map(({ plotId, plot }) => {
       const byMonth: Record<string, number> = {};
       months.forEach((mm) => { byMonth[mm] = 0; });
@@ -133,6 +168,9 @@ const FertilizationReport = () => {
   const azoteRows = useMemo(() => buildPivot('n'), [visibleMonthly, monthlyPlots, months]);
   const phosphoreRows = useMemo(() => buildPivot('p'), [visibleMonthly, monthlyPlots, months]);
   const potassiumRows = useMemo(() => buildPivot('k'), [visibleMonthly, monthlyPlots, months]);
+  const magnesiumRows = useMemo(() => buildPivot('mg'), [visibleMonthly, monthlyPlots, months]);
+  const calciumRows = useMemo(() => buildPivot('ca'), [visibleMonthly, monthlyPlots, months]);
+  const sulfurRows = useMemo(() => buildPivot('s'), [visibleMonthly, monthlyPlots, months]);
 
   const cumulRows = useMemo<PlotCumulRow[]>(() =>
     visibleCumul.map((c) => ({
@@ -141,6 +179,9 @@ const FertilizationReport = () => {
       n: round1(c.n_per_ha ?? 0),
       p: round1(c.p_per_ha ?? 0),
       k: round1(c.k_per_ha ?? 0),
+      mg: round1(c.mg_per_ha ?? 0),
+      ca: round1(c.ca_per_ha ?? 0),
+      s: round1(c.s_per_ha ?? 0),
     })),
     [visibleCumul],
   );
@@ -155,12 +196,33 @@ const FertilizationReport = () => {
     resetKey: `${searchCumul}|${filters.resetKey}|${cropFilter}`,
   });
 
+  const compositionlessFertilizers = useMemo(() => {
+    const map = new Map<string, string>();
+    compositionless.forEach((row) => map.set(row.fertilizer_id, row.fertilizer_name));
+    return Array.from(map.entries()).map(([fertilizerId, fertilizer]) => ({ fertilizerId, fertilizer }));
+  }, [compositionless]);
+
+  const compositionlessRows = useMemo<CompositionlessRow[]>(() => {
+    const rowsMap = new Map<string, CompositionlessRow>();
+    compositionless.forEach((row) => {
+      if (!rowsMap.has(row.plot_id)) {
+        rowsMap.set(row.plot_id, { plotId: row.plot_id, plot: row.plot_name, byFertilizer: {} });
+      }
+      const plotRow = rowsMap.get(row.plot_id)!;
+      plotRow.byFertilizer[row.fertilizer_id] = round1((plotRow.byFertilizer[row.fertilizer_id] ?? 0) + row.total_quantity);
+    });
+    return Array.from(rowsMap.values());
+  }, [compositionless]);
+
   const handleExport = () => exportCSV(
     cumulRows.map((r) => ({
       [t('table.plot', 'Plot')]: r.plot,
       'N (unité/ha)': r.n,
       'P (unité/ha)': r.p,
       'K (unité/ha)': r.k,
+      'Mg (unité/ha)': r.mg,
+      'Ca (unité/ha)': r.ca,
+      'S (unité/ha)': r.s,
     })),
     'fertilization-report',
   );
@@ -176,7 +238,7 @@ const FertilizationReport = () => {
     </select>
   );
 
-  const renderPivot = (title: string, rows: PlotMonthlyRow[], nutrient: 'n' | 'p' | 'k') => (
+  const renderPivot = (title: string, rows: PlotMonthlyRow[], nutrient: Nutrient) => (
     <div className="stat-card">
       <h3 className="text-[13px] font-semibold text-foreground mb-3 uppercase tracking-wider">
         {title}{' '}
@@ -194,7 +256,7 @@ const FertilizationReport = () => {
             {rows.map((row) => (
               <tr
                 key={row.plotId}
-                onDoubleClick={() => openHistory(row.plotId, row.plot, nutrient)}
+                onDoubleClick={() => openHistory(row.plotId, row.plot, { nutrient })}
                 title={t('reports.dblClickHistory', 'Double-click to view operations history')}
                 className="cursor-pointer"
               >
@@ -226,9 +288,12 @@ const FertilizationReport = () => {
       {renderPivot(t('reports.nitrogen', 'NITROGEN'), azoteRows, 'n')}
       {renderPivot(t('reports.phosphorus', 'PHOSPHORUS'), phosphoreRows, 'p')}
       {renderPivot(t('reports.potassium', 'POTASSIUM'), potassiumRows, 'k')}
+      {renderPivot(t('reports.magnesium', 'MAGNESIUM'), magnesiumRows, 'mg')}
+      {renderPivot(t('reports.calcium', 'CALCIUM'), calciumRows, 'ca')}
+      {renderPivot(t('reports.sulfur', 'SULFUR'), sulfurRows, 's')}
 
       <ReportTableCard
-        title={t('reports.cumulativeNPK', 'Cumulative NPK per hectare')}
+        title={t('reports.cumulativeElements', 'Eléments cumulés par hectare')}
         subtitle={t('reports.cumulativeNPKSub', 'Σ since campaign start')}
         search={searchCumul}
         onSearchChange={setSearchCumul}
@@ -243,6 +308,9 @@ const FertilizationReport = () => {
               <th>N (unité/ha)</th>
               <th>P (unité/ha)</th>
               <th>K (unité/ha)</th>
+              <th>Mg (unité/ha)</th>
+              <th>Ca (unité/ha)</th>
+              <th>S (unité/ha)</th>
             </tr>
           </thead>
           <tbody>
@@ -257,11 +325,14 @@ const FertilizationReport = () => {
                 <td className="font-semibold text-foreground">{row.n}</td>
                 <td className="font-semibold text-foreground">{row.p}</td>
                 <td className="font-semibold text-foreground">{row.k}</td>
+                <td className="font-semibold text-foreground">{row.mg}</td>
+                <td className="font-semibold text-foreground">{row.ca}</td>
+                <td className="font-semibold text-foreground">{row.s}</td>
               </tr>
             ))}
 
             <TableSkeletonRows
-              colSpan={4}
+              colSpan={7}
               isLoading={!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && cumulRows.length === 0)}
               isError={reportQuery.isError && !reportQuery.isFetching}
               isEmpty={filters.filtersReady && !reportQuery.isLoading && !reportQuery.isError && cumulPg.pageRows.length === 0}
@@ -269,6 +340,48 @@ const FertilizationReport = () => {
             />
           </tbody>
         </table>
+      </ReportTableCard>
+
+      <ReportTableCard
+        title={t('reports.compositionlessFertilizers', 'Fertilizers without composition')}
+        subtitle={t('reports.compositionlessFertilizersSub', 'Total quantity by plot and fertilizer, history drill-down')}
+      >
+        <div className="overflow-x-auto">
+          <table className="data-table mt-2 min-w-[640px]">
+            <thead>
+              <tr>
+                <th>{t('table.plot', 'Plot')}</th>
+                {compositionlessFertilizers.map((fertilizer) => (
+                  <th key={fertilizer.fertilizerId}>{fertilizer.fertilizer}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {compositionlessRows.map((row) => (
+                <tr key={row.plotId}>
+                  <td className="font-medium text-foreground">{row.plot}</td>
+                  {compositionlessFertilizers.map((fertilizer) => (
+                    <td
+                      key={fertilizer.fertilizerId}
+                      onDoubleClick={() => openHistory(row.plotId, row.plot, { fertilizerId: fertilizer.fertilizerId })}
+                      title={t('reports.dblClickHistory', 'Double-click to view operations history')}
+                      className="cursor-pointer"
+                    >
+                      {row.byFertilizer[fertilizer.fertilizerId] ?? '—'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {compositionlessRows.length === 0 && (
+                <tr>
+                  <td colSpan={Math.max(1, compositionlessFertilizers.length + 1)} className="py-4 text-center text-muted-foreground">
+                    {t('reports.noCompositionlessFertilizers', 'No fertilizers without composition found for the selected filters.')}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </ReportTableCard>
 
     </div>

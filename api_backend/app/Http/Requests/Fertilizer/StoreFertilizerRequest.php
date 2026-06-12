@@ -22,6 +22,9 @@ final class StoreFertilizerRequest extends FormRequest
             'n_percent' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'p_percent' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'k_percent' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'mg_percent' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'ca_percent' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            's_percent' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'is_active' => ['sometimes', 'boolean'],
         ];
     }

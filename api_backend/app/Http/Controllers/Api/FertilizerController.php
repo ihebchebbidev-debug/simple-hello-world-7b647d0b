@@ -78,6 +78,9 @@ final class FertilizerController extends Controller
             'n_percent' => (float) $fertilizer->n_percent,
             'p_percent' => (float) $fertilizer->p_percent,
             'k_percent' => (float) $fertilizer->k_percent,
+            'mg_percent' => (float) $fertilizer->mg_percent,
+            'ca_percent' => (float) $fertilizer->ca_percent,
+            's_percent' => (float) $fertilizer->s_percent,
         ];
 
         $fertilizer->fill([
@@ -96,6 +99,9 @@ final class FertilizerController extends Controller
             'n_percent' => 'n_at_entry',
             'p_percent' => 'p_at_entry',
             'k_percent' => 'k_at_entry',
+            'mg_percent' => 'mg_at_entry',
+            'ca_percent' => 'ca_at_entry',
+            's_percent' => 's_at_entry',
         ];
         $propagate = [];
         foreach ($map as $src => $dst) {

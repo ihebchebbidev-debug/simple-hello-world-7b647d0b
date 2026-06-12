@@ -25,6 +25,9 @@ final class FertilizationOperation extends Model
         'n_at_entry',
         'p_at_entry',
         'k_at_entry',
+        'mg_at_entry',
+        'ca_at_entry',
+        's_at_entry',
         'price_at_entry',
         'posting_id',
         'created_by',
@@ -39,6 +42,9 @@ final class FertilizationOperation extends Model
             'n_at_entry'       => 'decimal:2',
             'p_at_entry'       => 'decimal:2',
             'k_at_entry'       => 'decimal:2',
+            'mg_at_entry'      => 'decimal:2',
+            'ca_at_entry'      => 'decimal:2',
+            's_at_entry'       => 'decimal:2',
             'price_at_entry'   => 'decimal:4',
         ];
     }

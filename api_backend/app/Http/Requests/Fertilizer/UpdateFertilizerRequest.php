@@ -22,6 +22,9 @@ final class UpdateFertilizerRequest extends FormRequest
             'n_percent' => ['sometimes', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'p_percent' => ['sometimes', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'k_percent' => ['sometimes', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'mg_percent' => ['sometimes', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'ca_percent' => ['sometimes', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            's_percent' => ['sometimes', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'is_active' => ['sometimes', 'boolean'],
         ];
     }

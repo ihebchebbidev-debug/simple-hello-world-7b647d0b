@@ -51,6 +51,9 @@ final class FertilizationOperationController extends Controller
                 'n' => 'n_at_entry',
                 'p' => 'p_at_entry',
                 'k' => 'k_at_entry',
+                'mg' => 'mg_at_entry',
+                'ca' => 'ca_at_entry',
+                's' => 's_at_entry',
             };
             $query->where($col, '>', 0);
         }
@@ -78,6 +81,9 @@ final class FertilizationOperationController extends Controller
             'n_at_entry'       => $fertilizer->n_percent,
             'p_at_entry'       => $fertilizer->p_percent,
             'k_at_entry'       => $fertilizer->k_percent,
+            'mg_at_entry'      => $fertilizer->mg_percent,
+            'ca_at_entry'      => $fertilizer->ca_percent,
+            's_at_entry'       => $fertilizer->s_percent,
             'price_at_entry'   => $this->prices->priceFor('fertilizer', $fertilizer->id, $date),
             'posting_id'       => $data['posting_id'] ?? null,
             'created_by'       => $request->user()?->id,
@@ -108,6 +114,9 @@ final class FertilizationOperationController extends Controller
             $data['n_at_entry']     = $fertilizer->n_percent;
             $data['p_at_entry']     = $fertilizer->p_percent;
             $data['k_at_entry']     = $fertilizer->k_percent;
+            $data['mg_at_entry']    = $fertilizer->mg_percent;
+            $data['ca_at_entry']    = $fertilizer->ca_percent;
+            $data['s_at_entry']     = $fertilizer->s_percent;
             $data['price_at_entry'] = $this->prices->priceFor(
                 'fertilizer',
                 $fertilizer->id,

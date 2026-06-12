@@ -19,6 +19,9 @@ final class Fertilizer extends Model
         'n_percent',
         'p_percent',
         'k_percent',
+        'mg_percent',
+        'ca_percent',
+        's_percent',
         'is_active',
         'created_by',
         'updated_by',
@@ -30,6 +33,9 @@ final class Fertilizer extends Model
             'n_percent' => 'decimal:2',
             'p_percent' => 'decimal:2',
             'k_percent' => 'decimal:2',
+            'mg_percent' => 'decimal:2',
+            'ca_percent' => 'decimal:2',
+            's_percent' => 'decimal:2',
             'is_active' => 'boolean',
         ];
     }

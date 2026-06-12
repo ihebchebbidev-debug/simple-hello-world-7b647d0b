@@ -123,6 +123,9 @@ final class ReportController extends Controller
                 DB::raw('SUM(op.quantity_applied * op.n_at_entry / 100.0) AS total_n'),
                 DB::raw('SUM(op.quantity_applied * op.p_at_entry / 100.0) AS total_p'),
                 DB::raw('SUM(op.quantity_applied * op.k_at_entry / 100.0) AS total_k'),
+                DB::raw('SUM(op.quantity_applied * op.mg_at_entry / 100.0) AS total_mg'),
+                DB::raw('SUM(op.quantity_applied * op.ca_at_entry / 100.0) AS total_ca'),
+                DB::raw('SUM(op.quantity_applied * op.s_at_entry / 100.0) AS total_s'),
             ])
             ->when($plotIds, fn ($q) => $q->whereIn('op.plot_id', $plotIds))
             ->when($effFrom, fn ($q) => $q->where('op.operation_date', '>=', $effFrom))
@@ -145,6 +148,12 @@ final class ReportController extends Controller
                     ? round((float) $r->total_p / (float) $r->surface_area_ha, 4) : null,
                 'k_per_ha'  => $r->surface_area_ha > 0
                     ? round((float) $r->total_k / (float) $r->surface_area_ha, 4) : null,
+                'mg_per_ha' => $r->surface_area_ha > 0
+                    ? round((float) $r->total_mg / (float) $r->surface_area_ha, 4) : null,
+                'ca_per_ha' => $r->surface_area_ha > 0
+                    ? round((float) $r->total_ca / (float) $r->surface_area_ha, 4) : null,
+                's_per_ha'  => $r->surface_area_ha > 0
+                    ? round((float) $r->total_s / (float) $r->surface_area_ha, 4) : null,
             ]);
 
         $cumulative = DB::table('fertilization_operations as op')
@@ -156,6 +165,9 @@ final class ReportController extends Controller
                 DB::raw('SUM(op.quantity_applied * op.n_at_entry / 100.0) AS total_n'),
                 DB::raw('SUM(op.quantity_applied * op.p_at_entry / 100.0) AS total_p'),
                 DB::raw('SUM(op.quantity_applied * op.k_at_entry / 100.0) AS total_k'),
+                DB::raw('SUM(op.quantity_applied * op.mg_at_entry / 100.0) AS total_mg'),
+                DB::raw('SUM(op.quantity_applied * op.ca_at_entry / 100.0) AS total_ca'),
+                DB::raw('SUM(op.quantity_applied * op.s_at_entry / 100.0) AS total_s'),
             ])
             ->when($plotIds, fn ($q) => $q->whereIn('op.plot_id', $plotIds))
             ->when($effFrom, fn ($q) => $q->where('op.operation_date', '>=', $effFrom))
@@ -175,12 +187,47 @@ final class ReportController extends Controller
                     ? round((float) $r->total_p / (float) $r->surface_area_ha, 4) : null,
                 'k_per_ha'       => $r->surface_area_ha > 0
                     ? round((float) $r->total_k / (float) $r->surface_area_ha, 4) : null,
+                'mg_per_ha'      => $r->surface_area_ha > 0
+                    ? round((float) $r->total_mg / (float) $r->surface_area_ha, 4) : null,
+                'ca_per_ha'      => $r->surface_area_ha > 0
+                    ? round((float) $r->total_ca / (float) $r->surface_area_ha, 4) : null,
+                's_per_ha'       => $r->surface_area_ha > 0
+                    ? round((float) $r->total_s / (float) $r->surface_area_ha, 4) : null,
+            ]);
+
+        $compositionless = DB::table('fertilization_operations as op')
+            ->join('plots', 'plots.id', '=', 'op.plot_id')
+            ->join('fertilizers', 'fertilizers.id', '=', 'op.fertilizer_id')
+            ->select([
+                'op.plot_id',
+                'plots.name as plot_name',
+                'op.fertilizer_id',
+                'fertilizers.name as fertilizer_name',
+                DB::raw('SUM(op.quantity_applied) AS total_quantity'),
+            ])
+            ->when($plotIds, fn ($q) => $q->whereIn('op.plot_id', $plotIds))
+            ->when($effFrom, fn ($q) => $q->where('op.operation_date', '>=', $effFrom))
+            ->when($effTo,   fn ($q) => $q->where('op.operation_date', '<=', $effTo))
+            ->whereRaw(
+                'COALESCE(fertilizers.n_percent, 0) = 0 AND COALESCE(fertilizers.p_percent, 0) = 0 AND COALESCE(fertilizers.k_percent, 0) = 0 AND COALESCE(fertilizers.mg_percent, 0) = 0 AND COALESCE(fertilizers.ca_percent, 0) = 0 AND COALESCE(fertilizers.s_percent, 0) = 0'
+            )
+            ->tap($applyCampaign)
+            ->groupBy('op.plot_id', 'plots.name', 'op.fertilizer_id', 'fertilizers.name')
+            ->orderBy('plots.name')->orderBy('fertilizers.name')
+            ->get()
+            ->map(fn ($r) => [
+                'plot_id' => $r->plot_id,
+                'plot_name' => $r->plot_name,
+                'fertilizer_id' => $r->fertilizer_id,
+                'fertilizer_name' => $r->fertilizer_name,
+                'total_quantity' => round((float) $r->total_quantity, 4),
             ]);
 
         return ApiResponse::ok([
-            'monthly'    => $monthly,
-            'cumulative' => $cumulative,
-            'filters'    => $this->filterSummary($plotIds, $campaignId, $effFrom, $effTo),
+            'monthly'          => $monthly,
+            'cumulative'       => $cumulative,
+            'compositionless'  => $compositionless,
+            'filters'          => $this->filterSummary($plotIds, $campaignId, $effFrom, $effTo),
         ]);
     }
 
