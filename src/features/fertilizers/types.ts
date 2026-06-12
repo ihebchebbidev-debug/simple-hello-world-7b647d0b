@@ -5,6 +5,9 @@ export interface AdminFertilizer {
   n_percent: number;
   p_percent: number;
   k_percent: number;
+  mg_percent: number;
+  ca_percent: number;
+  s_percent: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;

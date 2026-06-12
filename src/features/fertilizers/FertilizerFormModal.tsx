@@ -11,14 +11,21 @@ const decimal3 = /^\d+(\.\d{1,3})?$/;
 export type FertilizerFormSubmit = {
   name: string; unit: string;
   n_percent: number; p_percent: number; k_percent: number;
+  mg_percent: number; ca_percent: number; s_percent: number;
   is_active: boolean;
   /** Optional initial price (TND/unit) — posted to /prices on create. */
   initial_price?: number | null;
 };
 
-interface FormState { name: string; unit: string; n_percent: string; p_percent: string; k_percent: string; is_active: boolean; initial_price: string; }
+interface FormState { name: string; unit: string; n_percent: string; p_percent: string; k_percent: string; mg_percent: string; ca_percent: string; s_percent: string; is_active: boolean; initial_price: string; }
 
-const empty: FormState = { name: '', unit: 'kg', n_percent: '0', p_percent: '0', k_percent: '0', is_active: true, initial_price: '' };
+const empty: FormState = {
+  name: '', unit: 'kg',
+  n_percent: '0', p_percent: '0', k_percent: '0',
+  mg_percent: '0', ca_percent: '0', s_percent: '0',
+  is_active: true,
+  initial_price: '',
+};
 
 interface Props {
   open: boolean; mode: 'create' | 'edit';
@@ -41,6 +48,9 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
         n_percent: String(initial.n_percent ?? 0),
         p_percent: String(initial.p_percent ?? 0),
         k_percent: String(initial.k_percent ?? 0),
+        mg_percent: String(initial.mg_percent ?? 0),
+        ca_percent: String(initial.ca_percent ?? 0),
+        s_percent: String(initial.s_percent ?? 0),
         is_active: initial.is_active,
         initial_price: '',
       });
@@ -54,6 +64,9 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
     n_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
     p_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
     k_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
+    mg_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
+    ca_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
+    s_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
     is_active: z.boolean(),
   }), [t]);
 
@@ -61,7 +74,7 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
     e.preventDefault();
     if (submitting) return;
     const fe: Partial<Record<keyof FormState, string>> = {};
-    for (const k of ['n_percent', 'p_percent', 'k_percent'] as const) {
+    for (const k of ['n_percent', 'p_percent', 'k_percent', 'mg_percent', 'ca_percent', 's_percent'] as const) {
       if (!decimal2.test(values[k])) fe[k] = t('validation.max2dec');
     }
     if (values.initial_price && !decimal3.test(values.initial_price)) {
@@ -73,6 +86,9 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
       n_percent: Number(values.n_percent),
       p_percent: Number(values.p_percent),
       k_percent: Number(values.k_percent),
+      mg_percent: Number(values.mg_percent),
+      ca_percent: Number(values.ca_percent),
+      s_percent: Number(values.s_percent),
       is_active: values.is_active,
     });
     if (!parsed.success) {
@@ -132,6 +148,24 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
           <Field label="K (%)" error={errors.k_percent}>
             <input type="number" step="0.01" min="0" max="100" value={values.k_percent}
               onChange={(e) => setValues((v) => ({ ...v, k_percent: e.target.value }))}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Mg (%)" error={errors.mg_percent}>
+            <input type="number" step="0.01" min="0" max="100" value={values.mg_percent}
+              onChange={(e) => setValues((v) => ({ ...v, mg_percent: e.target.value }))}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" />
+          </Field>
+          <Field label="Ca (%)" error={errors.ca_percent}>
+            <input type="number" step="0.01" min="0" max="100" value={values.ca_percent}
+              onChange={(e) => setValues((v) => ({ ...v, ca_percent: e.target.value }))}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" />
+          </Field>
+          <Field label="S (%)" error={errors.s_percent}>
+            <input type="number" step="0.01" min="0" max="100" value={values.s_percent}
+              onChange={(e) => setValues((v) => ({ ...v, s_percent: e.target.value }))}
               className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" />
           </Field>
         </div>

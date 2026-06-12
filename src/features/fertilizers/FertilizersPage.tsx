@@ -148,7 +148,14 @@ const FertilizersPage = () => {
       downloadCsv(
         `flehty-fertilizers-${new Date().toISOString().slice(0, 10)}.csv`,
         all.map((f) => ({
-          name: f.name, unit: f.unit, n: f.n_percent, p: f.p_percent, k: f.k_percent,
+          name: f.name,
+          unit: f.unit,
+          n: f.n_percent,
+          p: f.p_percent,
+          k: f.k_percent,
+          mg: f.mg_percent,
+          ca: f.ca_percent,
+          s: f.s_percent,
           status: f.is_active ? t('common.active') : t('common.inactive'),
           created: formatDate(f.created_at),
         })),
@@ -158,6 +165,9 @@ const FertilizersPage = () => {
           { key: 'n',       label: 'N (%)' },
           { key: 'p',       label: 'P (%)' },
           { key: 'k',       label: 'K (%)' },
+          { key: 'mg',      label: 'Mg (%)' },
+          { key: 'ca',      label: 'Ca (%)' },
+          { key: 's',       label: 'S (%)' },
           { key: 'status',  label: t('common.status') },
           { key: 'created', label: t('common.createdAt') },
         ],
@@ -221,14 +231,17 @@ const FertilizersPage = () => {
               <th className="px-4 py-3 font-medium">N&nbsp;%</th>
               <th className="px-4 py-3 font-medium">P&nbsp;%</th>
               <th className="px-4 py-3 font-medium">K&nbsp;%</th>
+              <th className="px-4 py-3 font-medium">Mg&nbsp;%</th>
+              <th className="px-4 py-3 font-medium">Ca&nbsp;%</th>
+              <th className="px-4 py-3 font-medium">S&nbsp;%</th>
               <th className="px-4 py-3 font-medium">{t('common.status')}</th>
               <th className="px-4 py-3 font-medium text-right">{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {listQuery.isLoading && (<tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">{t('common.loading')}</td></tr>)}
-            {listQuery.isError && !listQuery.isLoading && (<tr><td colSpan={7} className="px-4 py-10 text-center text-rose-400">{t('fertilizers.loadFailed')}</td></tr>)}
-            {!listQuery.isLoading && !listQuery.isError && items.length === 0 && (<tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">{t('fertilizers.none')}</td></tr>)}
+            {listQuery.isLoading && (<tr><td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">{t('common.loading')}</td></tr>)}
+            {listQuery.isError && !listQuery.isLoading && (<tr><td colSpan={9} className="px-4 py-10 text-center text-rose-400">{t('fertilizers.loadFailed')}</td></tr>)}
+            {!listQuery.isLoading && !listQuery.isError && items.length === 0 && (<tr><td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">{t('fertilizers.none')}</td></tr>)}
             {items.map((item) => {
               const isToggling = toggleActiveMutation.isPending && toggleActiveMutation.variables?.id === item.id;
               return (
@@ -238,6 +251,9 @@ const FertilizersPage = () => {
                   <td className="px-4 py-3 text-muted-foreground">{Number(item.n_percent).toFixed(2)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{Number(item.p_percent).toFixed(2)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{Number(item.k_percent).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{Number(item.mg_percent).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{Number(item.ca_percent).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{Number(item.s_percent).toFixed(2)}</td>
                   <td className="px-4 py-3">
                     <span className={item.is_active
                       ? 'inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30'
