@@ -34,6 +34,9 @@ const META: Record<OpKind, { icon: string; tint: string }> = {
   harvest:       { icon: iconHarvest,       tint: 'hsl(var(--chart-red))' },
 };
 
+/** Round to 3 decimals (quantities are stored with millesimal precision). */
+const round3 = (n: number) => Number((Number.isFinite(n) ? n : 0).toFixed(3));
+
 interface Props { kind: OpKind }
 
 const OperationFormPage = ({ kind }: Props) => {
@@ -66,33 +69,20 @@ const OperationFormPage = ({ kind }: Props) => {
     .filter((p) => p.name.toLowerCase().includes(plotSearch.trim().toLowerCase()));
   const totalSurface = selectedPlots.reduce((s, p) => s + (Number(p.surface_area_ha) || 0), 0);
 
-  // Returns one payload per selected plot so every selected plot is recorded.
+  // Surface share of a plot within the current selection. The user enters the
+  // TOTAL quantity once (water / fertilizer / spray + product / harvest) and we
+  // split it across the selected plots proportionally to their surface, so e.g.
+  // 100 m³ over P3 (1 ha) + P4 (1 ha) records 50 m³ each — not 100 each.
+  const plotRatio = (plot: { surface_area_ha?: number }) =>
+    totalSurface > 0 ? (Number(plot.surface_area_ha) || 0) / totalSurface : 0;
+
+  // Returns one payload per selected plot so every selected plot is recorded,
+  // each with its proportional share of the entered totals.
   const buildPayloads = (): Record<string, unknown>[] => {
     if (selectedPlots.length === 0) return [];
 
-    if (kind === 'phytosanitary') {
-      const vol = Number(waterTotalL) || 0;
-      const validItems = pestItems.filter((it) => it.pesticide_id && Number(it.quantity) > 0);
-      return selectedPlots.map((plot) => {
-        const ratio = totalSurface > 0 ? (Number(plot.surface_area_ha) || 0) / totalSurface : 0;
-        const plotVol = Number((vol * ratio).toFixed(3));
-        return {
-          plot_id: plot.id,
-          plot_name: plot.name,
-          operation_date: date,
-          water_total_l: plotVol,
-          items: validItems.map((it) => ({
-            pesticide_id: it.pesticide_id,
-            quantity_applied: Number((Number(it.quantity) * ratio).toFixed(3)),
-            water_volume_l: plotVol,
-            target_pest: it.target_pest || null,
-          })),
-          remarks: remarks || null,
-        };
-      });
-    }
-
     return selectedPlots.map((plot) => {
+      const ratio = plotRatio(plot);
       const base = {
         plot_id: plot.id,
         plot_name: plot.name,
@@ -100,19 +90,38 @@ const OperationFormPage = ({ kind }: Props) => {
       };
       switch (kind) {
         case 'irrigation':
-          return { ...base, water_quantity: Number(waterQty) };
+          return { ...base, water_quantity: round3(Number(waterQty) * ratio) };
         case 'fertilization':
           return {
             ...base,
             items: fertItems
-              .filter((it) => it.fertilizer_id && it.quantity)
-              .map((it) => ({ fertilizer_id: it.fertilizer_id, quantity_applied: Number(it.quantity) })),
+              .filter((it) => it.fertilizer_id && Number(it.quantity) > 0)
+              .map((it) => ({
+                fertilizer_id: it.fertilizer_id,
+                quantity_applied: round3(Number(it.quantity) * ratio),
+              })),
           };
+        case 'phytosanitary': {
+          const plotVol = round3((Number(waterTotalL) || 0) * ratio);
+          return {
+            ...base,
+            water_total_l: plotVol,
+            items: pestItems
+              .filter((it) => it.pesticide_id && Number(it.quantity) > 0)
+              .map((it) => ({
+                pesticide_id: it.pesticide_id,
+                quantity_applied: round3(Number(it.quantity) * ratio),
+                water_volume_l: plotVol,
+                target_pest: it.target_pest || null,
+              })),
+            remarks: remarks || null,
+          };
+        }
         case 'harvest':
           return {
             ...base,
-            quantity_harvested: Number(harvestQty),
-            num_workers: Math.max(1, Math.round(Number(harvestWorkerDays) || 1)),
+            quantity_harvested: round3(Number(harvestQty) * ratio),
+            num_workers: Math.max(1, Math.round((Number(harvestWorkerDays) || 0) * ratio) || 1),
             days_worked: 1,
           };
       }
@@ -316,6 +325,39 @@ const OperationFormPage = ({ kind }: Props) => {
               />
             )}
 
+            {/* Per-plot split preview (phyto has its own inside PhytoFields). */}
+            {kind !== 'phytosanitary' && selectedPlots.length > 1 && totalSurface > 0 && (
+              <div className="rounded-xl p-3" style={{ background: 'hsl(var(--primary) / 0.06)' }}>
+                <p className="label-md mb-2 text-[11px]" style={{ color: 'hsl(var(--primary-glow))' }}>
+                  {t('form.splitPreview')}
+                </p>
+                <div className="space-y-2">
+                  {selectedPlots.map((plot) => {
+                    const ratio = plotRatio(plot);
+                    return (
+                      <div key={plot.id} className="text-xs">
+                        <div className="flex justify-between font-semibold text-foreground">
+                          <span>{plot.name} · {plot.surface_area_ha} ha</span>
+                          {kind === 'irrigation' && <span>{round3(Number(waterQty) * ratio)} m³</span>}
+                          {kind === 'harvest' && <span>{round3(Number(harvestQty) * ratio)} kg</span>}
+                        </div>
+                        {kind === 'fertilization' && fertItems
+                          .filter((it) => it.fertilizer_id && Number(it.quantity) > 0)
+                          .map((it) => {
+                            const f = refs.fertilizers.find((x) => x.id === it.fertilizer_id);
+                            return (
+                              <div key={it.id} className="flex justify-between text-muted-foreground pl-3">
+                                <span>{f?.name ?? '—'}</span>
+                                <span>{round3(Number(it.quantity) * ratio)} {f?.unit ?? ''}</span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {error && <p className="text-sm text-[hsl(var(--accent-danger))]">{error}</p>}
             {!online && <p className="text-xs text-muted-foreground">{t('common.networkError')}</p>}
