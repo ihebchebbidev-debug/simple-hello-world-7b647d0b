@@ -21,7 +21,7 @@ final class IndexPhytosanitaryOperationRequest extends FormRequest
             'pesticide_id' => ['sometimes', 'uuid', 'exists:pesticides,id'],
             'date_from'    => ['sometimes', 'date', 'date_format:Y-m-d'],
             'date_to'      => ['sometimes', 'date', 'date_format:Y-m-d', 'after_or_equal:date_from'],
-            'per_page'     => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'per_page'     => ['sometimes', 'integer', 'min:1', 'max:1000'],
         ];
     }
 }

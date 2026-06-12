@@ -50,7 +50,8 @@ const PlotOperationsHistoryModal = ({ open, type, plotId, plotName, dateFrom, da
           plot_id: plotId,
           date_from: dateFrom,
           date_to: dateTo,
-          per_page: 100,
+          // Fetch the plot's full history (then paginate client-side).
+          per_page: 1000,
           sort: '-operation_date',
         },
       });

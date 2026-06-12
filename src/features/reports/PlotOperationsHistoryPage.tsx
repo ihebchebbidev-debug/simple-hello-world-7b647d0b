@@ -75,7 +75,9 @@ const PlotOperationsHistoryPage = () => {
           date_to: dateTo,
           ...(validType === 'fertilization' && nutrient ? { nutrient } : {}),
           ...(validType === 'fertilization' && fertilizerId ? { fertilizer_id: fertilizerId } : {}),
-          per_page: 100,
+          // High cap so a plot's FULL history is fetched (then paginated
+          // client-side) — a heavily-irrigated plot can exceed 100 entries.
+          per_page: 1000,
           sort: '-operation_date',
         },
       });
