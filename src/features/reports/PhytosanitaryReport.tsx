@@ -44,6 +44,7 @@ interface FlatRow {
   surface_ha: number;
   pesticide_per_ha: number;
   volume_per_ha: number | null;
+  cost_per_ha: number | null;
 }
 
 const ColFilter = ({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) => (
@@ -103,6 +104,11 @@ const PhytosanitaryReport = () => {
           ?? (tx.water_volume_l != null && surface > 0
             ? Math.round((tx.water_volume_l / surface) * 1000) / 1000
             : null);
+        // Cost/ha = (quantity × unit price frozen at entry) ÷ surface. Lets the
+        // user compare the per-hectare cost of each product on each plot.
+        const costPerHa = surface > 0 && tx.price_at_entry > 0
+          ? Math.round((tx.quantity_applied * tx.price_at_entry / surface) * 100) / 100
+          : null;
         out.push({
           id: tx.id,
           plot_id: g.plot_id,
@@ -116,6 +122,7 @@ const PhytosanitaryReport = () => {
           surface_ha: surface,
           pesticide_per_ha: perHa,
           volume_per_ha: volPerHa,
+          cost_per_ha: costPerHa,
         });
       });
     });
@@ -159,6 +166,7 @@ const PhytosanitaryReport = () => {
       [t('table.composition', 'Composition')]: r.chemical_composition,
       [t('table.pesticidePerHa', 'Pesticide /ha')]: `${r.pesticide_per_ha} / ha`,
       [t('table.volumePerHa', 'Volume /ha')]: r.volume_per_ha != null ? `${r.volume_per_ha} / ha` : '',
+      [t('table.costPerHa', 'Coût / ha')]: r.cost_per_ha != null ? r.cost_per_ha : '',
       [t('table.pest', 'Target pest')]: r.target_pest ?? '',
       [t('table.remarks', 'Remarks')]: r.remarks ?? '',
     })),
@@ -187,9 +195,9 @@ const PhytosanitaryReport = () => {
         filteredCount={filtered.length}
         totalCount={enriched.length}
         pagination={pagination}
-        minWidth={1120}
+        minWidth={1240}
       >
-        <table className="data-table min-w-[1120px]">
+        <table className="data-table min-w-[1240px]">
           <thead>
             <tr>
               <th><div className="flex flex-col gap-1">{t('table.date', 'Date')}<ColFilter value={colFilters.date} onChange={setCol('date')} placeholder="yyyy-mm-dd" /></div></th>
@@ -198,6 +206,7 @@ const PhytosanitaryReport = () => {
               <th><div className="flex flex-col gap-1">{t('table.composition', 'Composition')}<ColFilter value={colFilters.composition} onChange={setCol('composition')} /></div></th>
               <th>{t('table.pesticidePerHa', 'Pesticide /ha')}</th>
               <th>{t('table.volumePerHa', 'Volume /ha')}</th>
+              <th>{t('table.costPerHa', 'Coût / ha')}</th>
               <th><div className="flex flex-col gap-1">{t('table.pest', 'Target pest')}<ColFilter value={colFilters.pest} onChange={setCol('pest')} /></div></th>
               <th><div className="flex flex-col gap-1">{t('table.remarks', 'Remarks')}<ColFilter value={colFilters.remarks} onChange={setCol('remarks')} /></div></th>
             </tr>
@@ -217,12 +226,13 @@ const PhytosanitaryReport = () => {
                 <td className="text-[11px]">{row.chemical_composition}</td>
                 <td className="font-semibold text-foreground whitespace-nowrap">{row.pesticide_per_ha}</td>
                 <td className="whitespace-nowrap">{row.volume_per_ha != null ? row.volume_per_ha : '—'}</td>
+                <td className="font-semibold text-foreground whitespace-nowrap">{row.cost_per_ha != null ? row.cost_per_ha.toLocaleString() : '—'}</td>
                 <td>{row.target_pest || '—'}</td>
                 <td className="text-[11px]">{row.remarks || '—'}</td>
               </tr>
             ))}
             <TableSkeletonRows
-              colSpan={8}
+              colSpan={9}
               isLoading={!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && enriched.length === 0)}
               isError={reportQuery.isError && !reportQuery.isFetching}
               isEmpty={filters.filtersReady && !reportQuery.isLoading && !reportQuery.isError && pagination.pageRows.length === 0}

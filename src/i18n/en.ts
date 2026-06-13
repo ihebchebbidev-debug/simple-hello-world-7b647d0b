@@ -102,6 +102,7 @@ export const en = {
     sprayVolume: 'Spray volume (L)',
     pesticidePerHa: 'Pesticide / ha',
     volumePerHa: 'Volume / ha',
+    costPerHa: 'Cost / ha',
     remarks: 'Remarks',
     irrigationCost: 'Irrigation',
     fertilizationCost: 'Fertilization',
