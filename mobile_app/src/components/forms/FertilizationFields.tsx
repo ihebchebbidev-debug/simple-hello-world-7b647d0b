@@ -20,9 +20,13 @@ interface Props {
   onChange: (items: FertItem[]) => void;
   fertilizers: RefFertilizer[];
   surfaceHa?: number;
+  /** Optional fertigation water (m³) — carries the fertilizer to the plant and
+   *  is recorded as an irrigation operation so it counts in the Irrigation report. */
+  waterM3: string;
+  onWaterChange: (v: string) => void;
 }
 
-const FertilizationFields = ({ items, onChange, fertilizers, surfaceHa }: Props) => {
+const FertilizationFields = ({ items, onChange, fertilizers, surfaceHa, waterM3, onWaterChange }: Props) => {
   const { t } = useTranslation();
   const update = (id: string, patch: Partial<FertItem>) =>
     onChange(items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -90,6 +94,21 @@ const FertilizationFields = ({ items, onChange, fertilizers, surfaceHa }: Props)
         className="mt-3 w-full flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium border border-dashed border-[hsl(var(--primary)/0.4)] text-[hsl(var(--primary-glow))]">
         <Plus className="h-4 w-4" />{t('form.addFertilizer')}
       </button>
+
+      {/* Fertigation water — optional. Saved as an irrigation operation so it
+          shows up in the Irrigation report (m³, m³/ha and water cost). */}
+      <div className="mt-4 rounded-xl p-4" style={{ background: 'hsl(var(--chart-blue) / 0.08)' }}>
+        <label className="label-md mb-1 block" style={{ color: 'hsl(var(--chart-blue))' }}>
+          💧 {t('form.fertigationWater')}
+        </label>
+        <p className="text-[11px] text-muted-foreground mb-2">{t('form.fertigationWaterHint')}</p>
+        <div className="flex gap-2 items-center">
+          <input type="number" inputMode="decimal" step="0.001" min="0"
+            value={waterM3} onChange={(e) => onWaterChange(e.target.value)}
+            className="cl-input h-11 rounded-lg text-sm flex-1" placeholder="0" />
+          <span className="text-sm font-semibold" style={{ color: 'hsl(var(--chart-blue))' }}>m³</span>
+        </div>
+      </div>
     </div>
   );
 };

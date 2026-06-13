@@ -39,6 +39,8 @@ export const fr = {
     selectPlot: 'Sélectionner une parcelle', selectProduct: 'Sélectionner un produit',
     waterQuantity: 'Volume d\'eau appliqué',
     fertilizers: 'Engrais', addFertilizer: '+ Ajouter un engrais',
+    fertigationWater: 'Eau d\'apport (m³)',
+    fertigationWaterHint: 'Optionnel — l\'eau qui transporte l\'engrais. Enregistrée comme irrigation et comptée dans le rapport Irrigation.',
     fertOverMax: 'Quantité supérieure au maximum autorisé ({{max}} kg)',
     fertOverWarn: 'Valeur aberrante : ~{{perHa}} kg/ha. Veuillez vérifier la quantité.',
     pesticides: 'Pesticides', addPesticide: '+ Ajouter un pesticide',

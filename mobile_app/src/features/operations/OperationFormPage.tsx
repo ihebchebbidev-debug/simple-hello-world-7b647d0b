@@ -56,6 +56,8 @@ const OperationFormPage = ({ kind }: Props) => {
   // Op-specific state
   const [waterQty, setWaterQty] = useState('');
   const [fertItems, setFertItems] = useState<FertItem[]>([newFertItem()]);
+  // Optional fertigation water (m³) entered on the fertilization form.
+  const [fertWaterM3, setFertWaterM3] = useState('');
   const [pestItems, setPestItems] = useState<PestItem[]>([newPestItem()]);
   const [waterTotalL, setWaterTotalL] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -129,6 +131,20 @@ const OperationFormPage = ({ kind }: Props) => {
     });
   };
 
+  // Fertigation: the optional water on a fertilization form is recorded as a
+  // real irrigation operation per plot (surface-split), so it flows into the
+  // Irrigation report automatically. Empty / 0 → nothing extra is created.
+  const buildFertigationPayloads = (): Record<string, unknown>[] => {
+    const water = Number(fertWaterM3) || 0;
+    if (kind !== 'fertilization' || water <= 0 || selectedPlots.length === 0) return [];
+    return selectedPlots.map((plot) => ({
+      plot_id: plot.id,
+      plot_name: plot.name,
+      operation_date: date,
+      water_quantity: round3(water * plotRatio(plot)),
+    }));
+  };
+
   const validate = (): string | null => {
     if (plotIds.length === 0) return t('form.invalid');
     if (!date) return t('form.invalid');
@@ -166,6 +182,8 @@ const OperationFormPage = ({ kind }: Props) => {
       // is a single payload. Each enqueue() gets its own client_id, so offline
       // replay stays idempotent per plot.
       for (const payload of buildPayloads()) await enqueue(kind, payload);
+      // Fertigation water → one irrigation operation per plot (same date).
+      for (const w of buildFertigationPayloads()) await enqueue('irrigation', w);
       // Try to flush immediately so the user gets accurate online/offline feedback.
       const result = online ? await flushOutbox().catch(() => ({ sent: 0, failed: 0, remaining: 0 })) : null;
       setSubmitted({ syncedOnline: Boolean(result && result.sent > 0) });
@@ -307,6 +325,8 @@ const OperationFormPage = ({ kind }: Props) => {
                 onChange={setFertItems}
                 fertilizers={refs.fertilizers}
                 surfaceHa={totalSurface}
+                waterM3={fertWaterM3}
+                onWaterChange={setFertWaterM3}
               />
             )}
             {kind === 'phytosanitary' && (
@@ -352,6 +372,12 @@ const OperationFormPage = ({ kind }: Props) => {
                               </div>
                             );
                           })}
+                        {kind === 'fertilization' && Number(fertWaterM3) > 0 && (
+                          <div className="flex justify-between pl-3" style={{ color: 'hsl(var(--chart-blue))' }}>
+                            <span>💧 {t('form.fertigationWater')}</span>
+                            <span>{round3(Number(fertWaterM3) * ratio)} m³</span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
