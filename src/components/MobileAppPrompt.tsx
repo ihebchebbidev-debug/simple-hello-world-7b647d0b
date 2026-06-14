@@ -34,7 +34,7 @@ const MobileAppPrompt = ({ open, onClose }: Props) => {
           </a>
 
           <a
-            href="/mobileapp/app-debug.apk"
+            href="/flehty.apk"
             download="flehty.apk"
             className="btn-outline flex items-center justify-center gap-2 h-10 w-full rounded-lg text-sm font-medium"
             onClick={onClose}

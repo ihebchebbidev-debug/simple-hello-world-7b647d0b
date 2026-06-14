@@ -5,12 +5,12 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/mobileapp/:path((?!assets|icons|version\\.json|app-debug\\.apk).*)", "destination": "/mobileapp/index.html" },
+    { "source": "/mobileapp/:path((?!assets|icons|version\\.json).*)", "destination": "/mobileapp/index.html" },
     { "source": "/((?!mobileapp/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
-      "source": "/mobileapp/app-debug.apk",
+      "source": "/flehty.apk",
       "headers": [
         { "key": "Content-Disposition", "value": "attachment; filename=\"flehty.apk\"" },
         { "key": "Content-Type", "value": "application/vnd.android.package-archive" },
