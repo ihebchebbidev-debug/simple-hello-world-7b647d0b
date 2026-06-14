@@ -30,9 +30,10 @@ const MobileAppPrompt = ({ open, onClose }: Props) => {
           </button>
 
           <a
-            href="/mobileapp/app-debug.apk"
+            href="https://file.kiwi/d1c0b6f7#xgVsZwqobiprPBR4FgbCOA"
             className="btn-primary"
-            download
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={onClose}
           >
             {t('mobilePrompt.downloadApk', 'Download APK')}
