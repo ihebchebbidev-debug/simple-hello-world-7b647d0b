@@ -11,3 +11,7 @@ coverage
 .idea
 .vscode/*
 !.vscode/extensions.json
+
+# Ignore local Gradle cache and generated Android project
+mobile_app/.gradle_cache/
+mobile_app/android/

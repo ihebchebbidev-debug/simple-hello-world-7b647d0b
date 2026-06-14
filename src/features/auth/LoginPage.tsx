@@ -6,6 +6,7 @@ import logoIcon from '@/assets/logo-icon.png';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import OpenMobileAppButton from '@/components/OpenMobileAppButton';
+import MobileAppPrompt from '@/components/MobileAppPrompt';
 import { auth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import PasswordInput from '@/components/PasswordInput';
@@ -19,6 +20,7 @@ const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mobilePromptOpen, setMobilePromptOpen] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +53,7 @@ const LoginPage = () => {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-        <OpenMobileAppButton />
+        <OpenMobileAppButton onClick={() => setMobilePromptOpen(true)} />
         <LanguageSwitcher />
         <ThemeSwitcher />
       </div>
@@ -124,6 +126,7 @@ const LoginPage = () => {
           </form>
         </div>
       </div>
+        <MobileAppPrompt open={mobilePromptOpen} onClose={() => setMobilePromptOpen(false)} />
     </div>
   );
 };

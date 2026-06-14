@@ -5,17 +5,22 @@ import { useTranslation } from 'react-i18next';
  * Small pill button used in the auth screens' top-right cluster.
  * Hard-navigates to the deployed mobile app login.
  */
-const OpenMobileAppButton = () => {
+type Props = {
+  onClick?: () => void;
+};
+
+const OpenMobileAppButton = ({ onClick }: Props) => {
   const { t } = useTranslation();
   return (
-    <a
-      href="https://flehty.com/mobileapp/login"
+    <button
+      onClick={onClick}
       className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent hover:text-accent-foreground transition-colors backdrop-blur"
       title={t('common.openMobileApp', 'Open Mobile App')}
+      type="button"
     >
       <Smartphone className="h-3.5 w-3.5" />
       <span className="hidden sm:inline">{t('common.openMobileApp', 'Open Mobile App')}</span>
-    </a>
+    </button>
   );
 };
 
