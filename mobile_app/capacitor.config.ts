@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'tn.agrisync.app',
-  appName: 'Agri-Sync',
+  appId: 'com.flehty.app',
+  appName: 'Flehty',
   webDir: 'dist',
   bundledWebRuntime: false,
   server: {
