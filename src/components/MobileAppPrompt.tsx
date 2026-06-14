@@ -1,3 +1,4 @@
+import { Smartphone, Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 type Props = {
@@ -11,41 +12,45 @@ const MobileAppPrompt = ({ open, onClose }: Props) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-xl bg-card p-6 shadow-lg">
-        <h3 className="text-lg font-semibold">{t('mobilePrompt.title', 'Open on mobile?')}</h3>
-        <p className="mt-2 text-sm text-muted-foreground">
+      <div className="relative w-full max-w-sm rounded-xl bg-card p-6 shadow-lg">
+        <h3 className="text-base font-semibold">
+          {t('mobilePrompt.title', 'Get the mobile app')}
+        </h3>
+        <p className="mt-1.5 text-[13px] text-muted-foreground">
           {t(
             'mobilePrompt.body',
-            "You can continue in the web app or download the Android APK to open the native app on your device."
+            'Access the field app directly in your browser or install the Android APK on your device.'
           )}
         </p>
 
-        <div className="mt-4 flex gap-3">
-          <button
+        <div className="mt-5 flex flex-col gap-3">
+          <a
+            href="/mobileapp/"
+            className="btn-primary-glass flex items-center justify-center gap-2 h-10 w-full rounded-lg text-sm font-medium"
             onClick={onClose}
-            className="btn-outline"
-            type="button"
           >
-            {t('mobilePrompt.continueWeb', 'Continue in web')}
-          </button>
+            <Smartphone className="h-4 w-4" />
+            {t('mobilePrompt.openWeb', 'Open mobile web app')}
+          </a>
 
           <a
-            href="https://file.kiwi/d1c0b6f7#xgVsZwqobiprPBR4FgbCOA"
-            className="btn-primary"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="/mobileapp/app-debug.apk"
+            download="flehty.apk"
+            className="btn-outline flex items-center justify-center gap-2 h-10 w-full rounded-lg text-sm font-medium"
             onClick={onClose}
           >
-            {t('mobilePrompt.downloadApk', 'Download APK')}
+            <Download className="h-4 w-4" />
+            {t('mobilePrompt.downloadApk', 'Download Android APK')}
           </a>
-        </div>
 
-        <p className="mt-3 text-[12px] text-muted-foreground">
-          {t(
-            'mobilePrompt.note',
-            "Note: This link opens an external download (file.kiwi). If the APK doesn't download, make sure 'app-debug.apk' is available at /mobileapp/app-debug.apk on your server (copy the generated APK into the app's public/mobileapp folder)."
-          )}
-        </p>
+          <button
+            onClick={onClose}
+            className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+            type="button"
+          >
+            {t('mobilePrompt.continueWeb', 'Continue in admin panel')}
+          </button>
+        </div>
       </div>
     </div>
   );

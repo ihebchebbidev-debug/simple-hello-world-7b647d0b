@@ -7,6 +7,7 @@
     "dev": "vite --port 5174",
     "build": "tsc -b && vite build",
     "build:embed": "tsc -b && vite build --config vite.embed.config.ts",
+    "build:android-web": "tsc -b && vite build --config vite.android.config.ts",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
