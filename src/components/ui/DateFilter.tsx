@@ -17,7 +17,7 @@ const DateFilter = ({ value, onChange, label, placeholder = 'Date', className = 
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       aria-label={label || placeholder}
-      className={`filter-date w-40 ${className}`}
+      className={`filter-date w-full sm:w-40 ${className}`}
     />
   </label>
 );

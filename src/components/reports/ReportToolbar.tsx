@@ -27,7 +27,7 @@ const ReportToolbar = ({ filters, showPlotFilter = true, onExport, cropFilter, e
   const plots = plotsQuery.data ?? [];
 
   return (
-    <div className="report-toolbar no-print flex flex-wrap items-center gap-2">
+  <div className="report-toolbar no-print flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center gap-2">
       <img src={iconFilter} alt="" className="h-4 w-4 opacity-60" />
 
       {/* 1. Campagne */}
@@ -39,7 +39,7 @@ const ReportToolbar = ({ filters, showPlotFilter = true, onExport, cropFilter, e
       {/* 3. Parcelle */}
       {showPlotFilter && (
         <select
-          className="filter-select w-44 sm:w-48"
+          className="filter-select w-full sm:w-44 lg:w-48"
           value={filters.plotId}
           onChange={(e) => filters.setPlotId(e.target.value)}
         >

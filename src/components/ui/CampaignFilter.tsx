@@ -31,7 +31,7 @@ const CampaignFilter = ({ value, onChange }: CampaignFilterProps) => {
 
   return (
     <select
-      className="filter-select w-48"
+      className="filter-select w-full sm:w-48"
       value={value}
       onChange={(e) => onChange(e.target.value)}
       title={t('reports.campaignFilter', 'Campaign')}
