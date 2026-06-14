@@ -224,9 +224,9 @@ const PhytosanitaryReport = () => {
                 <td>{row.plot_name}</td>
                 <td className="text-foreground">{row.pesticide_name}</td>
                 <td className="text-[11px]">{row.chemical_composition}</td>
-                <td className="font-semibold text-foreground whitespace-nowrap">{row.pesticide_per_ha}</td>
-                <td className="whitespace-nowrap">{row.volume_per_ha != null ? row.volume_per_ha : '—'}</td>
-                <td className="font-semibold text-foreground whitespace-nowrap">{row.cost_per_ha != null ? row.cost_per_ha.toLocaleString() : '—'}</td>
+                <td className="font-semibold text-foreground whitespace-nowrap">{row.pesticide_per_ha.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                <td className="whitespace-nowrap">{row.volume_per_ha != null ? Math.round(row.volume_per_ha).toLocaleString() : '—'}</td>
+                <td className="font-semibold text-foreground whitespace-nowrap">{row.cost_per_ha != null ? Math.round(row.cost_per_ha).toLocaleString() : '—'}</td>
                 <td>{row.target_pest || '—'}</td>
                 <td className="text-[11px]">{row.remarks || '—'}</td>
               </tr>

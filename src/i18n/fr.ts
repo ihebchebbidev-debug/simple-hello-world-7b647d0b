@@ -28,7 +28,7 @@ export const fr = {
     configuration: 'Configuration',
     plots: 'Parcelles',
     fertilizers: 'Engrais',
-    pesticides: 'Pesticides/Fertilisants',
+    pesticides: 'Produits de Traitement',
     water: 'Eau',
     labor: "Main d'œuvre",
     reports: 'Rapports',
@@ -253,11 +253,11 @@ export const fr = {
   },
 
   pesticides: {
-    title: 'Pesticides',
-    subtitle: 'Catalogue des produits phytosanitaires et leur composition.',
-    countOne: '{{count}} pesticide',
-    countOther: '{{count}} pesticides',
-    new: '+ Nouveau pesticide',
+    title: 'Produits de Traitement',
+    subtitle: 'Catalogue des produits de traitement.',
+    countOne: '{{count}} produit',
+    countOther: '{{count}} produits',
+    new: '+ Nouveau produit',
     searchPlaceholder: 'Rechercher par nom ou composition…',
     unitFilter: 'Filtrer unité (L, kg…)',
     composition: 'Composition',
@@ -271,11 +271,11 @@ export const fr = {
     activated: 'Pesticide activé',
     deactivated: 'Pesticide désactivé',
     deleted: 'Pesticide supprimé',
-    deleteTitle: 'Supprimer le pesticide',
-    deleteConfirm: 'Le pesticide « {{name}} » sera désactivé. Continuer ?',
-    formCreateTitle: 'Nouveau pesticide',
-    formEditTitle: 'Modifier le pesticide',
-    formCreateDesc: 'Ajoute un produit phytosanitaire au catalogue.',
+    deleteTitle: 'Supprimer le produit',
+    deleteConfirm: 'Le produit « {{name}} » sera désactivé. Continuer ?',
+    formCreateTitle: 'Nouveau produit',
+    formEditTitle: 'Modifier le produit',
+    formCreateDesc: 'Ajoute un produit de traitement au catalogue.',
   },
 
   water: {
@@ -388,7 +388,7 @@ export const fr = {
 
   reports: {
     title: 'Rapports',
-    subtitle: 'Analyse agrégée des opérations — irrigation, fertilisation, phyto, récolte, coût.',
+    subtitle: 'Analyse agrégée des opérations — irrigation, fertilisation, traitements, récolte, coût.',
     entries: 'Entrées',
     historyHint: 'Cliquez une ligne pour modifier ou supprimer l’entrée.',
     tab: {
@@ -449,11 +449,11 @@ export const fr = {
     formCreateTitle: 'Nouvelle campagne', formEditTitle: 'Modifier la campagne',
   },
   pests: {
-    title: 'Bioagresseurs', subtitle: 'Catalogue des bioagresseurs (traitements phyto).',
-    new: '+ Nouveau bioagresseur', name: 'Nom', scientificName: 'Nom scientifique', category: 'Catégorie', description: 'Description',
+    title: 'Bioagresseur/Stress', subtitle: 'Catalogue des bioagresseurs/Stress.',
+    new: '+ Nouveau Bioagresseur/Stress', name: 'Nom', scientificName: 'Nom scientifique', category: 'Catégorie', description: 'Description',
     none: 'Aucun bioagresseur.', created: 'Bioagresseur créé', updated: 'Bioagresseur mis à jour', deleted: 'Bioagresseur supprimé',
     deleteTitle: 'Supprimer le bioagresseur', deleteConfirm: 'Le bioagresseur "{{name}}" sera supprimé. Continuer ?',
-    formCreateTitle: 'Nouveau bioagresseur', formEditTitle: 'Modifier le bioagresseur',
+    formCreateTitle: 'Nouveau Bioagresseur/Stress', formEditTitle: 'Modifier le bioagresseur',
   },
   notifications: {
     title: 'Notifications', subtitle: 'Alertes pour le compte connecté.',
@@ -583,7 +583,7 @@ export const fr = {
       campaigns:    { title: 'Campagnes',    body: 'Saisons de production utilisées pour les rapports et opérations.' },
       pests:        { title: 'Bioagresseurs/Stress',    body: 'Catalogue des bioagresseurs utilisés lors des opérations phytosanitaires.' },
       fertilizers:  { title: 'Engrais',      body: 'Catalogue des engrais avec composition NPK et unité.' },
-      pesticides:   { title: 'Pesticides/Fertilisants',   body: 'Catalogue des produits phytosanitaires avec substances actives.' },
+      pesticides:   { title: 'Produits de Traitement',   body: 'Catalogue des produits de traitement avec substances actives.' },
       water:        { title: "Eau d'irrigation", body: 'Unités d\'eau et historique daté des prix d\'irrigation.' },
       labor:        { title: 'Main-d\'œuvre',body: 'Configurations de main-d\'œuvre et historique des tarifs journaliers.' },
     },

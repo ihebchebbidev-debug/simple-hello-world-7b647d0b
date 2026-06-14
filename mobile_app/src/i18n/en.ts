@@ -43,7 +43,7 @@ export const en = {
     fertigationWaterHint: 'Optional — the water carrying the fertilizer. Recorded as irrigation and counted in the Irrigation report.',
     fertOverMax: 'Quantity exceeds the maximum allowed ({{max}} kg)',
     fertOverWarn: 'Aberrant value: ~{{perHa}} kg/ha. Please double-check the quantity.',
-    pesticides: 'Pesticides', addPesticide: '+ Add pesticide',
+    pesticides: 'Treatment products', addPesticide: '+ Add product',
     totalWater: 'Total spray volume',
     dosePer100L: 'Qty/100L',
     totalQuantity: 'Total quantity',

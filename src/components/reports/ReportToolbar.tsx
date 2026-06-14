@@ -51,8 +51,18 @@ const ReportToolbar = ({ filters, showPlotFilter = true, onExport, cropFilter, e
       )}
 
       {/* 4. Jour (date range) */}
-      <DateFilter value={filters.dateFrom} onChange={filters.setDateFrom} placeholder={t('reports.from', 'From')} />
-      <DateFilter value={filters.dateTo} onChange={filters.setDateTo} placeholder={t('reports.to', 'To')} />
+      <DateFilter
+        value={filters.dateFrom}
+        onChange={filters.setDateFrom}
+        label={t('reports.from', 'From')}
+        placeholder={t('reports.from', 'From')}
+      />
+      <DateFilter
+        value={filters.dateTo}
+        onChange={filters.setDateTo}
+        label={t('reports.to', 'To')}
+        placeholder={t('reports.to', 'To')}
+      />
 
       <div className="ml-auto flex items-center gap-2">
         {extras}

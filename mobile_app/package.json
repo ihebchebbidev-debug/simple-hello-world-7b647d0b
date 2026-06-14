@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "cap:sync": "cap sync android",
-    "cap:android": "cap run android"
+    "cap:android": "cap run android",
+    "build:android": "npm run build && npx cap add android || true && npx cap sync android && cd android && gradlew.bat assembleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^6.1.2",

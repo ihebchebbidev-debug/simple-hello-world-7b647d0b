@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import Skeleton from '@/components/Skeleton';
+import DateFilter from '@/components/ui/DateFilter';
 import OperationDetailsModal from './OperationDetailsModal';
 import { usePlotsForFilter } from '@/hooks/usePlotsForFilter';
 import iconIrrigation from '@/assets/icons/icon-irrigation.png';
@@ -65,12 +66,18 @@ const DashboardPage = () => {
   const [activityFilter, setActivityFilter] = useState<'all' | ActivityItem['type']>('all');
   const [activityDate, setActivityDate] = useState('');
   const [activityPlot, setActivityPlot] = useState<'all' | string>('all');
-  const visibleActivity = useMemo(() => items.filter((a) => {
-    if (activityFilter !== 'all' && a.type !== activityFilter) return false;
-    if (activityDate && !a.operation_date.startsWith(activityDate)) return false;
-    if (activityPlot !== 'all' && a.plot_id !== activityPlot) return false;
-    return true;
-  }), [activityFilter, activityDate, activityPlot, items]);
+  const visibleActivity = useMemo(() => items
+    .filter((a) => {
+      if (activityFilter !== 'all' && a.type !== activityFilter) return false;
+      if (activityDate && !a.operation_date.startsWith(activityDate)) return false;
+      if (activityPlot !== 'all' && a.plot_id !== activityPlot) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const dateCompare = b.operation_date.localeCompare(a.operation_date);
+      return dateCompare || b.created_at.localeCompare(a.created_at);
+    }),
+  [activityFilter, activityDate, activityPlot, items]);
 
   const activityMeta: Record<ActivityItem['type'], { icon: string; color: string; label: string }> = {
     irrigation:    { icon: iconIrrigation,    color: 'hsl(var(--chart-blue))',   label: t('dashboard.type.irrigation') },
@@ -219,12 +226,11 @@ const DashboardPage = () => {
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="text-[13px] font-semibold text-foreground">{t('dashboard.recentActivity')}</h3>
           <div className="flex items-center gap-2 flex-wrap">
-            <input
-              type="date"
+            <DateFilter
               value={activityDate}
-              onChange={(e) => setActivityDate(e.target.value)}
-              className="filter-select h-8 text-[11px]"
-              aria-label={t('common.date', 'Date')}
+              onChange={setActivityDate}
+              label={t('common.date', 'Date')}
+              className="h-8 text-[11px]"
             />
             <select
               value={activityPlot}

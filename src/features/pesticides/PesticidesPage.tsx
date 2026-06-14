@@ -38,6 +38,18 @@ function extractApiError(err: unknown, fallback: string): string {
   return fallback;
 }
 
+function buildPageList(current: number, last: number): (number | '…')[] {
+  if (last <= 7) return Array.from({ length: last }, (_, i) => i + 1);
+  const pages: (number | '…')[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(last - 1, current + 1);
+  if (start > 2) pages.push('…');
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (end < last - 1) pages.push('…');
+  pages.push(last);
+  return pages;
+}
+
 const PesticidesPage = () => {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -234,6 +246,28 @@ const PesticidesPage = () => {
           </tbody>
         </table>
       </div>
+
+      {meta && meta.last_page > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span>{t('common.pageInfo', { current: meta.current_page, last: meta.last_page })} — {countLabel(meta.total)}</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button type="button" disabled={page <= 1} onClick={() => setPage(1)} className="rounded-md border border-border px-2 py-1 disabled:opacity-40">«</button>
+            <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-md border border-border px-3 py-1 disabled:opacity-40">{t('common.pagePrev')}</button>
+            {buildPageList(meta.current_page, meta.last_page).map((it, idx) =>
+              it === '…' ? (<span key={`gap-${idx}`} className="px-2">…</span>) : (
+                <button key={it} type="button" onClick={() => setPage(it as number)}
+                  className={it === meta.current_page
+                    ? 'rounded-md bg-primary px-3 py-1 font-medium text-primary-foreground'
+                    : 'rounded-md border border-border px-3 py-1 hover:bg-muted hover:text-foreground'}>
+                  {it}
+                </button>
+              ),
+            )}
+            <button type="button" disabled={page >= meta.last_page} onClick={() => setPage((p) => p + 1)} className="rounded-md border border-border px-3 py-1 disabled:opacity-40">{t('common.pageNext')}</button>
+            <button type="button" disabled={page >= meta.last_page} onClick={() => setPage(meta.last_page)} className="rounded-md border border-border px-2 py-1 disabled:opacity-40">»</button>
+          </div>
+        </div>
+      )}
 
       <PesticideFormModal open={createOpen} mode="create" submitting={createMutation.isPending} serverError={formError}
         onClose={() => setCreateOpen(false)} onSubmit={(values) => createMutation.mutate(values)} />

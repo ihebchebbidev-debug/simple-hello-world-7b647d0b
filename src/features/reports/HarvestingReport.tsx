@@ -7,6 +7,7 @@ import ReportTableCard from '@/components/reports/ReportTableCard';
 import ReportToolbar from '@/components/reports/ReportToolbar';
 import TableSkeletonRows from '@/components/reports/TableSkeletonRows';
 import { usePagination } from '@/hooks/usePagination';
+import { usePlotsForFilter } from '@/hooks/usePlotsForFilter';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import { exportCSV } from '@/lib/export';
 
@@ -31,8 +32,18 @@ interface PlotRow {
 const HarvestingReport = () => {
   const { t } = useTranslation();
   const filters = useReportFilters();
+  const plotsQuery = usePlotsForFilter();
+  const plots = plotsQuery.data ?? [];
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [cropFilter, setCropFilter] = useState('all');
+
+  const cropTypes = useMemo(() => (
+    Array.from(new Set(plots
+      .map((plot) => plot.crop_type)
+      .filter((type): type is string => Boolean(type))),
+    ).sort()
+  ), [plots]);
 
   const reportQuery = useQuery<ApiData>({
     queryKey: ['report-harvest', filters.apiParams],
@@ -57,13 +68,20 @@ const HarvestingReport = () => {
     }));
   }, [reportQuery.data]);
 
+  const rowsAfterCrop = useMemo(() => {
+    if (cropFilter === 'all') return rows;
+    const allowedPlots = new Set(plots.filter((p) => p.crop_type === cropFilter).map((p) => p.id));
+    return rows.filter((row) => allowedPlots.has(row.plot_id));
+  }, [cropFilter, plots, rows]);
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
+    const targetRows = rowsAfterCrop;
+    if (!q) return targetRows;
+    return targetRows.filter((r) =>
       `${r.plot_name} ${r.total_workers} ${r.total_quantity}`.toLowerCase().includes(q),
     );
-  }, [rows, search]);
+  }, [rowsAfterCrop, search]);
 
   const pagination = usePagination({
     rows: filteredRows,
@@ -79,9 +97,20 @@ const HarvestingReport = () => {
     'harvest-report',
   );
 
+  const cropFilterControl = (
+    <select
+      className="filter-select w-44 sm:w-48"
+      value={cropFilter}
+      onChange={(e) => setCropFilter(e.target.value)}
+    >
+      <option value="all">{t('reports.allCropTypes', 'All crops')}</option>
+      {cropTypes.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
+    </select>
+  );
+
   return (
     <div className="space-y-3 sm:space-y-4 animate-fade-in">
-      <ReportToolbar filters={filters} onExport={handleExport} />
+      <ReportToolbar filters={filters} onExport={handleExport} cropFilter={cropFilterControl} />
 
       <ReportTableCard
         title={t('reports.harvestLog', 'Harvest log')}

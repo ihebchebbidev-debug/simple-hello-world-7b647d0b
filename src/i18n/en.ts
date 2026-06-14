@@ -28,7 +28,7 @@ export const en = {
     configuration: 'Configuration',
     plots: 'Plots',
     fertilizers: 'Fertilizers',
-    pesticides: 'Pesticides/Fertilizers',
+    pesticides: 'Treatment products',
     water: 'Water',
     labor: 'Labor',
     reports: 'Reports',
@@ -253,11 +253,11 @@ export const en = {
   },
 
   pesticides: {
-    title: 'Pesticides',
-    subtitle: 'Catalog of phytosanitary products and their composition.',
-    countOne: '{{count}} pesticide',
-    countOther: '{{count}} pesticides',
-    new: '+ New pesticide',
+    title: 'Treatment products',
+    subtitle: 'Treatment product catalog.',
+    countOne: '{{count}} product',
+    countOther: '{{count}} products',
+    new: '+ New product',
     searchPlaceholder: 'Search by name or composition…',
     unitFilter: 'Filter unit (L, kg…)',
     composition: 'Composition',
@@ -271,11 +271,11 @@ export const en = {
     activated: 'Pesticide activated',
     deactivated: 'Pesticide deactivated',
     deleted: 'Pesticide deleted',
-    deleteTitle: 'Delete pesticide',
-    deleteConfirm: 'Pesticide "{{name}}" will be deactivated. Continue?',
-    formCreateTitle: 'New pesticide',
-    formEditTitle: 'Edit pesticide',
-    formCreateDesc: 'Add a phytosanitary product to the catalog.',
+    deleteTitle: 'Delete product',
+    deleteConfirm: 'Product "{{name}}" will be deactivated. Continue?',
+    formCreateTitle: 'New product',
+    formEditTitle: 'Edit product',
+    formCreateDesc: 'Add a treatment product to the catalog.',
   },
 
   water: {
@@ -388,7 +388,7 @@ export const en = {
 
   reports: {
     title: 'Reports',
-    subtitle: 'Aggregated analysis — irrigation, fertilization, phyto, harvest, cost.',
+    subtitle: 'Aggregated analysis — irrigation, fertilization, treatments, harvest, cost.',
     entries: 'Entries',
     historyHint: 'Click a row to edit or delete the entry.',
     tab: {
@@ -449,11 +449,11 @@ export const en = {
     formCreateTitle: 'New campaign', formEditTitle: 'Edit campaign',
   },
   pests: {
-    title: 'Bioaggressors', subtitle: 'Catalog of bioaggressors used in phytosanitary records.',
-    new: '+ New bioaggressor', name: 'Name', scientificName: 'Scientific name', category: 'Category', description: 'Description',
+    title: 'Bioaggressors/Stress', subtitle: 'Catalog of bioaggressors/Stress.',
+    new: '+ New bioaggressor/Stress', name: 'Name', scientificName: 'Scientific name', category: 'Category', description: 'Description',
     none: 'No bioaggressor found.', created: 'Bioaggressor created', updated: 'Bioaggressor updated', deleted: 'Bioaggressor deleted',
     deleteTitle: 'Delete bioaggressor', deleteConfirm: 'Bioaggressor "{{name}}" will be deleted. Continue?',
-    formCreateTitle: 'New bioaggressor', formEditTitle: 'Edit bioaggressor',
+    formCreateTitle: 'New bioaggressor/Stress', formEditTitle: 'Edit bioaggressor',
   },
   notifications: {
     title: 'Notifications', subtitle: 'In-app alerts for the current account.',
@@ -583,7 +583,7 @@ export const en = {
       campaigns:    { title: 'Campaigns',    body: 'Production seasons used to scope reports and operations.' },
       pests:        { title: 'Bioaggressors/Stress', body: 'Catalog of bioaggressors recorded during phytosanitary operations.' },
       fertilizers:  { title: 'Fertilizers',  body: 'Catalog of fertilizers with NPK composition and unit.' },
-      pesticides:   { title: 'Pesticides/Fertilizers',   body: 'Phytosanitary product catalog with active substances.' },
+      pesticides:   { title: 'Treatment products',   body: 'Treatment product catalog with active substances.' },
       water:        { title: 'Irrigation water', body: 'Water units and dated irrigation price history.' },
       labor:        { title: 'Labor',        body: 'Labor configurations and daily rate history.' },
     },
