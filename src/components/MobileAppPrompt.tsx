@@ -43,7 +43,7 @@ const MobileAppPrompt = ({ open, onClose }: Props) => {
         <p className="mt-3 text-[12px] text-muted-foreground">
           {t(
             'mobilePrompt.note',
-            "Note: If the APK doesn't download, make sure 'app-debug.apk' is available at /mobileapp/app-debug.apk on the server (copy the generated APK into the app's public/mobileapp folder)."
+            "Note: This link opens an external download (file.kiwi). If the APK doesn't download, make sure 'app-debug.apk' is available at /mobileapp/app-debug.apk on your server (copy the generated APK into the app's public/mobileapp folder)."
           )}
         </p>
       </div>
