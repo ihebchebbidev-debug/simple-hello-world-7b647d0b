@@ -19,7 +19,9 @@ set -euo pipefail
 API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "$API_DIR")"
 
-PHP_VERSION="${PHP_VERSION:-8.2}"
+# Auto-detect the running PHP version (the box may not be 8.2). Falls back to
+# an env override, then 8.2.
+PHP_VERSION="${PHP_VERSION:-$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo 8.2)}"
 SUPERVISOR_PROGRAM="${SUPERVISOR_PROGRAM:-agritrack}"
 
 echo "==> Pulling latest code ($APP_DIR)"
@@ -40,14 +42,17 @@ php artisan route:cache
 php artisan event:cache
 php artisan view:cache
 
-# ── OPcache: typically the single biggest PHP perf win (3-5x faster) ─────────
-echo "==> Configuring OPcache"
-OPCACHE_INI="/etc/php/${PHP_VERSION}/fpm/conf.d/10-opcache.ini"
-if [ -d "/etc/php/${PHP_VERSION}/fpm/conf.d" ]; then
-  sudo tee "$OPCACHE_INI" > /dev/null <<'EOF'
+# ── OPcache: the single biggest PHP perf win (3-5x faster) ───────────────────
+# CRITICAL: this app runs under supervisor (`agritrack`, i.e. the PHP *CLI*
+# runtime via `artisan serve`), NOT php-fpm. So we MUST set enable_cli=1 and
+# write the config into EVERY SAPI's conf.d — otherwise OPcache stays OFF for
+# the real runtime (which is exactly what the sanity check reported). The
+# supervisor restart below makes the serve process pick this up.
+echo "==> Configuring OPcache (all SAPIs, enable_cli=1 — runtime is CLI/artisan serve)"
+OPCACHE_CONF=$(cat <<'EOF'
 zend_extension=opcache.so
 opcache.enable=1
-opcache.enable_cli=0
+opcache.enable_cli=1
 opcache.memory_consumption=256
 opcache.interned_strings_buffer=32
 opcache.max_accelerated_files=20000
@@ -57,7 +62,16 @@ opcache.fast_shutdown=1
 opcache.jit_buffer_size=128M
 opcache.jit=tracing
 EOF
-  echo "    wrote $OPCACHE_INI (validate_timestamps=0 — that's why we re-run this script after every deploy)"
+)
+opcache_written=0
+for sapi_dir in /etc/php/${PHP_VERSION}/cli/conf.d /etc/php/${PHP_VERSION}/fpm/conf.d /etc/php/${PHP_VERSION}/apache2/conf.d; do
+  [ -d "$sapi_dir" ] || continue
+  echo "$OPCACHE_CONF" | sudo tee "$sapi_dir/10-opcache.ini" > /dev/null
+  echo "    wrote $sapi_dir/10-opcache.ini"
+  opcache_written=1
+done
+if [ "$opcache_written" = 0 ]; then
+  echo "    WARNING: no /etc/php/${PHP_VERSION}/*/conf.d found — is PHP installed at this version?"
 fi
 
 # ── nginx gzip: ~80% smaller JSON responses ──────────────────────────────────
