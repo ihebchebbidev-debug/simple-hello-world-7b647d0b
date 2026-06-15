@@ -36,10 +36,25 @@ log()  { echo -e "==> $*"; }
 warn() { echo -e "!!  $*" >&2; }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-health_ok() {
-  local code
-  code="$(curl -k -o /dev/null -s -w '%{http_code}' --max-time 8 "$HEALTH_URL" || echo 000)"
-  [ "$code" = "200" ]
+# Test the LOCAL nginx→FPM path (force the connection to 127.0.0.1 with the
+# right SNI/Host) — this verifies the migration without depending on the server
+# being able to reach its own PUBLIC IP (NAT hairpin / firewall would otherwise
+# make a perfectly-working setup look broken).
+health_code() {
+  curl -k -o /dev/null -s -w '%{http_code}' --max-time 8 \
+    --resolve "${DOMAIN}:443:127.0.0.1" "$HEALTH_URL" 2>/dev/null || echo 000
+}
+health_ok() { [ "$(health_code)" = "200" ]; }
+
+diagnose() {
+  warn "── Diagnostics (why the health check failed) ──"
+  warn "Local HTTP code: $(health_code)"
+  warn "FPM socket:"; ls -l "$FPM_SOCK" 2>&1 | sed 's/^/    /'
+  warn "php-fpm active: $(sudo systemctl is-active "php${PHP_VERSION}-fpm" 2>/dev/null || echo unknown)"
+  warn "Laravel log (last 12 lines):"
+  sudo tail -n 12 "${API_DIR}/storage/logs/laravel.log" 2>/dev/null | sed 's/^/    /' || warn "    (no laravel.log)"
+  warn "nginx error log (last 8 lines):"
+  sudo tail -n 8 /var/log/nginx/error.log 2>/dev/null | sed 's/^/    /' || true
 }
 
 start_artisan_serve() {
@@ -263,6 +278,7 @@ done
 
 if [ "$ok" != 1 ]; then
   warn "Health check did NOT return 200 — auto-rolling back."
+  diagnose
   rollback
   exit 1
 fi
