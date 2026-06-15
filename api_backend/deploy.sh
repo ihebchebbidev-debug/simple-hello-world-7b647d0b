@@ -116,8 +116,10 @@ fi
 #   • artisan serve (default)      → restart the supervisor program.
 if [ -f /etc/nginx/sites-enabled/flehty-api.conf ]; then
   echo "==> Reloading nginx + PHP-FPM (concurrent mode)"
-  sudo systemctl reload "php${PHP_VERSION}-fpm" 2>/dev/null \
-    || sudo systemctl restart "php${PHP_VERSION}-fpm" 2>/dev/null || true
+  # RESTART (not reload): with opcache.validate_timestamps=0 a graceful reload
+  # can keep serving the old cached bytecode. A restart guarantees the new code
+  # is loaded. Sub-second blip, fine during a deploy.
+  sudo systemctl restart "php${PHP_VERSION}-fpm" 2>/dev/null || true
   sudo supervisorctl stop "$SUPERVISOR_PROGRAM" >/dev/null 2>&1 || true
 else
   echo "==> Reloading nginx + ${SUPERVISOR_PROGRAM} (artisan serve mode)"
