@@ -20,11 +20,23 @@ use App\Http\Controllers\Controller;
 use App\Support\Http\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 final class DashboardController extends Controller
 {
+    /**
+     * `Schema::hasTable()` queries information_schema on every call. These core
+     * tables never disappear at runtime, so cache the check across requests
+     * (reset by `php artisan optimize:clear` in deploy.sh). Removes ~6 catalog
+     * round-trips from each dashboard load.
+     */
+    private function tableExists(string $table): bool
+    {
+        return Cache::rememberForever("schema.has.$table", static fn (): bool => Schema::hasTable($table));
+    }
+
     public function stats(Request $request): JsonResponse
     {
         $monthStart = now()->startOfMonth()->toDateString();
@@ -32,8 +44,8 @@ final class DashboardController extends Controller
         // Single round-trip: all 9 aggregates rolled into one SELECT using
         // FILTER (...) clauses. Postgres only scans each table once instead
         // of 9 sequential queries, which is the biggest dashboard win.
-        $hasCampaigns = Schema::hasTable('campaigns');
-        $hasPostings  = Schema::hasTable('postings');
+        $hasCampaigns = $this->tableExists('campaigns');
+        $hasPostings  = $this->tableExists('postings');
 
         $row = DB::selectOne(
             'SELECT
@@ -103,7 +115,7 @@ final class DashboardController extends Controller
 
         $unions = [];
         foreach ($tables as [$table, $type]) {
-            if (! Schema::hasTable($table)) {
+            if (! $this->tableExists($table)) {
                 continue;
             }
 

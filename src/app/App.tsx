@@ -41,20 +41,18 @@ const DeveloperPage        = lazy(() => import('@/features/developer/DeveloperPa
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Freshness-first: data is stale immediately, so every page mount, tab
-      // refocus, and network reconnect refetches. This guarantees you always
-      // see current data — including operations added or deleted on another
-      // workstation — instead of a stale 5-minute cache. keepPreviousData
-      // (below) means the refetch happens in the background with no white
-      // flash; gcTime keeps the prior result around to serve as that
-      // placeholder.
-      staleTime: 0,
-      // Keep inactive results cached for a while so revisiting a page paints
-      // instantly from the prior data while the (always-on) refetch runs in
-      // the background — fast *and* fresh. Freshness comes from staleTime: 0,
-      // not from dropping the cache.
+      // Balanced for speed AND freshness. Data is considered fresh for 30s, so
+      // navigating between pages within that window paints INSTANTLY from cache
+      // (no network wait) — the main perceived-speed win. Freshness is NOT lost:
+      // every create/update/delete invalidates its query keys, so YOUR own
+      // changes show immediately; the 30s window only delays seeing another
+      // workstation's edits (acceptable). We don't refetch on every tab refocus
+      // (that caused a refetch-storm of all active queries on each alt-tab).
+      staleTime: 30_000,
+      // Keep inactive results cached so revisiting a page paints instantly from
+      // the prior data while any refetch runs in the background.
       gcTime: 30 * 60_000,
-      refetchOnWindowFocus: true,
+      refetchOnWindowFocus: false,
       refetchOnMount: true,
       refetchOnReconnect: true,
       // Show the previous data while the fresh fetch resolves — no flash.
