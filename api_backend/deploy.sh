@@ -110,15 +110,33 @@ EOF
 fi
 
 # ── Reload everything ────────────────────────────────────────────────────────
-echo "==> Reloading PHP-FPM, nginx, and ${SUPERVISOR_PROGRAM}"
-sudo systemctl reload "php${PHP_VERSION}-fpm" || sudo systemctl restart "php${PHP_VERSION}-fpm" || true
+# Works in BOTH serving modes:
+#   • PHP-FPM (after setup-fpm.sh) → reload FPM to pick up new code; leave the
+#     old artisan-serve supervisor stopped.
+#   • artisan serve (default)      → restart the supervisor program.
+if [ -f /etc/nginx/sites-enabled/flehty-api.conf ]; then
+  echo "==> Reloading nginx + PHP-FPM (concurrent mode)"
+  sudo systemctl reload "php${PHP_VERSION}-fpm" 2>/dev/null \
+    || sudo systemctl restart "php${PHP_VERSION}-fpm" 2>/dev/null || true
+  sudo supervisorctl stop "$SUPERVISOR_PROGRAM" >/dev/null 2>&1 || true
+else
+  echo "==> Reloading nginx + ${SUPERVISOR_PROGRAM} (artisan serve mode)"
+  sudo systemctl reload "php${PHP_VERSION}-fpm" 2>/dev/null \
+    || sudo systemctl restart "php${PHP_VERSION}-fpm" 2>/dev/null || true
+  sudo supervisorctl restart "$SUPERVISOR_PROGRAM" \
+    || echo "    (supervisor program $SUPERVISOR_PROGRAM not found — skipping)"
+fi
 sudo systemctl reload nginx || true
-sudo supervisorctl restart "$SUPERVISOR_PROGRAM" || echo "    (supervisor program $SUPERVISOR_PROGRAM not found — skipping)"
 
 # ── Sanity check ─────────────────────────────────────────────────────────────
 echo
 echo "==> Sanity check"
 php -r 'echo "    OPcache : ", (function_exists("opcache_get_status") && @opcache_get_status(false) ? "ON" : "OFF"), PHP_EOL;'
+if [ -f /etc/nginx/sites-enabled/flehty-api.conf ]; then
+  echo "    Serving  : nginx + PHP-FPM (concurrent)"
+else
+  echo "    Serving  : ${SUPERVISOR_PROGRAM} / artisan serve (single-threaded — run setup-fpm.sh for concurrency)"
+fi
 echo "    APP_ENV  : $(grep ^APP_ENV "$API_DIR/.env" 2>/dev/null | cut -d= -f2 || echo unknown)"
 echo "    APP_DEBUG: $(grep ^APP_DEBUG "$API_DIR/.env" 2>/dev/null | cut -d= -f2 || echo unknown)"
 echo

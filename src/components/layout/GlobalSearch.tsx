@@ -19,6 +19,17 @@ type Hit = {
   Icon: React.ComponentType<{ className?: string }>;
 };
 
+/** Loose shape of a catalog search row — fields vary per endpoint. */
+interface SearchRow {
+  id: string;
+  name?: string;
+  label?: string;
+  crop?: string;
+  variety?: string;
+  composition?: string;
+  scientific_name?: string;
+}
+
 const useDebounced = (v: string, ms = 250) => {
   const [d, setD] = useState(v);
   useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
@@ -86,25 +97,25 @@ const GlobalSearch = () => {
   const plotsQ = useQuery({
     queryKey: ['gs-plots', dq],
     enabled,
-    queryFn: async () => (await api.get<{ data: any[] }>('/plots', { params })).data.data ?? [],
+    queryFn: async () => (await api.get<{ data: SearchRow[] }>('/plots', { params })).data.data ?? [],
     staleTime: 30_000,
   });
   const fertQ = useQuery({
     queryKey: ['gs-fert', dq],
     enabled,
-    queryFn: async () => (await api.get<{ data: any[] }>('/fertilizers', { params })).data.data ?? [],
+    queryFn: async () => (await api.get<{ data: SearchRow[] }>('/fertilizers', { params })).data.data ?? [],
     staleTime: 30_000,
   });
   const pestiQ = useQuery({
     queryKey: ['gs-pesti', dq],
     enabled,
-    queryFn: async () => (await api.get<{ data: any[] }>('/pesticides', { params })).data.data ?? [],
+    queryFn: async () => (await api.get<{ data: SearchRow[] }>('/pesticides', { params })).data.data ?? [],
     staleTime: 30_000,
   });
   const pestsQ = useQuery({
     queryKey: ['gs-pests', dq],
     enabled,
-    queryFn: async () => (await api.get<{ data: any[] }>('/pests', { params })).data.data ?? [],
+    queryFn: async () => (await api.get<{ data: SearchRow[] }>('/pests', { params })).data.data ?? [],
     staleTime: 30_000,
   });
 
@@ -114,23 +125,23 @@ const GlobalSearch = () => {
       needle ? arr.filter(h => h.label.toLowerCase().includes(needle)) : arr;
     const pages = filterStatic(navItems);
     const reports = filterStatic(reportItems);
-    const plots: Hit[] = (plotsQ.data ?? []).map((p: any) => ({
+    const plots: Hit[] = (plotsQ.data ?? []).map((p) => ({
       id: `p-${p.id}`, group: t('search.group.plots', 'Plots'),
       label: p.name ?? p.label ?? '—',
       sub: [p.crop, p.variety].filter(Boolean).join(' • '),
       to: '/plots', Icon: MapPin,
     }));
-    const ferts: Hit[] = (fertQ.data ?? []).map((f: any) => ({
+    const ferts: Hit[] = (fertQ.data ?? []).map((f) => ({
       id: `f-${f.id}`, group: t('search.group.fertilizers', 'Fertilizers'),
       label: f.name ?? '—', sub: f.composition,
       to: '/fertilizers', Icon: Leaf,
     }));
-    const pestis: Hit[] = (pestiQ.data ?? []).map((p: any) => ({
+    const pestis: Hit[] = (pestiQ.data ?? []).map((p) => ({
       id: `pe-${p.id}`, group: t('search.group.pesticides', 'Pesticides'),
       label: p.name ?? '—', sub: p.composition,
       to: '/pesticides', Icon: Biohazard,
     }));
-    const pests: Hit[] = (pestsQ.data ?? []).map((p: any) => ({
+    const pests: Hit[] = (pestsQ.data ?? []).map((p) => ({
       id: `pt-${p.id}`, group: t('search.group.pests', 'Bioaggressors'),
       label: p.name ?? '—', sub: p.scientific_name,
       to: '/pests', Icon: Bug,

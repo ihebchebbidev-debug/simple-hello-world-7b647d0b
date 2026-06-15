@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Outlet } from 'react-router-dom';
 import AppSidebar from '@/components/layout/AppSidebar';
 import TopBar from '@/components/layout/TopBar';
+import { api } from '@/lib/api';
+
+/** Unwrap the paginated `{ data: [...] }` envelope into a plain array. */
+async function fetchList(path: string) {
+  const { data } = await api.get<{ data: unknown[] }>(path, { params: { per_page: 100 } });
+  const payload = (data as { data?: unknown[] }).data;
+  return Array.isArray(payload) ? payload : [];
+}
 
 const AppLayout = () => {
+  const qc = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -13,6 +23,15 @@ const AppLayout = () => {
   useEffect(() => {
     localStorage.setItem('agrysync.sidebar.collapsed', collapsed ? '1' : '0');
   }, [collapsed]);
+
+  // Warm the shared reference caches (campaigns + plots) the moment the shell
+  // mounts, so opening a report doesn't wait on a separate round-trip first —
+  // these keys match useReportFilters / usePlotsForFilter, so the report's own
+  // hooks read straight from cache. Removes a request waterfall on report loads.
+  useEffect(() => {
+    void qc.prefetchQuery({ queryKey: ['report-filter-campaigns'], queryFn: () => fetchList('/campaigns'), staleTime: 30_000 });
+    void qc.prefetchQuery({ queryKey: ['report-filter-plots'], queryFn: () => fetchList('/plots'), staleTime: 30_000 });
+  }, [qc]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

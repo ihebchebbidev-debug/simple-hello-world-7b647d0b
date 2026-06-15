@@ -34,8 +34,9 @@ const SignupPage = () => {
     try {
       await auth.register({ name, email, password, password_confirmation: confirm });
       navigate('/dashboard', { replace: true });
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || t('signup.error', 'Could not create the admin account.');
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || t('signup.error', 'Could not create the admin account.');
       setError(msg);
     } finally {
       setLoading(false);
