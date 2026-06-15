@@ -141,6 +141,20 @@ if ! sudo systemctl restart "php${PHP_VERSION}-fpm"; then
   exit 1
 fi
 
+# ── 1b. Let nginx traverse to public/ (app lives under /home, mode 750) ──────
+# nginx (${NGINX_USER}) must be able to stat files under the docroot for
+# try_files. Grant EXECUTE-ONLY (traverse, not listing) on each path component
+# down to public/, read on the public docroot — and lock down .env so making
+# the parent traversable doesn't expose secrets.
+log "Granting ${NGINX_USER} traverse access to ${PUBLIC_DIR}…"
+p="$PUBLIC_DIR"
+while [ -n "$p" ] && [ "$p" != "/" ]; do
+  sudo chmod o+x "$p" 2>/dev/null || true
+  p="$(dirname "$p")"
+done
+sudo chmod -R o+rX "$PUBLIC_DIR" 2>/dev/null || true
+sudo chmod o-rwx "${API_DIR}/.env" 2>/dev/null || true   # keep DB creds private
+
 # ── 2. Find the nginx include files that define THIS domain ──────────────────
 # We iterate the include dirs and grep each file directly, because `grep -r`
 # SKIPS symlinks while recursing — and sites-enabled/* are symlinks, so the
