@@ -7,6 +7,7 @@ import Skeleton from '@/components/Skeleton';
 import DateFilter from '@/components/ui/DateFilter';
 import OperationDetailsModal from './OperationDetailsModal';
 import { usePlotsForFilter } from '@/hooks/usePlotsForFilter';
+import { usePagination } from '@/hooks/usePagination';
 import iconIrrigation from '@/assets/icons/icon-irrigation.png';
 import iconFertilization from '@/assets/icons/icon-fertilization.png';
 import iconPhytosanitary from '@/assets/icons/icon-phytosanitary.png';
@@ -78,6 +79,15 @@ const DashboardPage = () => {
       return dateCompare || b.created_at.localeCompare(a.created_at);
     }),
   [activityFilter, activityDate, activityPlot, items]);
+
+  // Paginate the rendered rows so the dashboard never builds hundreds of DOM
+  // rows at once (all data stays loaded for the filters above — only the
+  // *rendered* slice is capped).
+  const activityPg = usePagination({
+    rows: visibleActivity,
+    initialPageSize: 25,
+    resetKey: `${activityFilter}|${activityDate}|${activityPlot}`,
+  });
 
   const activityMeta: Record<ActivityItem['type'], { icon: string; color: string; label: string }> = {
     irrigation:    { icon: iconIrrigation,    color: 'hsl(var(--chart-blue))',   label: t('dashboard.type.irrigation') },
@@ -316,7 +326,7 @@ const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {visibleActivity.map((item) => {
+                {activityPg.pageRows.map((item) => {
                   const meta = activityMeta[item.type];
                   return (
                     <tr
@@ -339,6 +349,31 @@ const DashboardPage = () => {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {!activityQuery.isLoading && !activityQuery.isError && activityPg.pageCount > 1 && (
+          <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+            <span>{activityPg.start}–{activityPg.end} / {activityPg.total}</span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={activityPg.page <= 1}
+                onClick={() => activityPg.setPage(activityPg.page - 1)}
+                className="rounded-md border border-border px-2.5 py-1 disabled:opacity-40 hover:bg-muted hover:text-foreground"
+              >
+                {t('common.pagePrev', 'Précédent')}
+              </button>
+              <span className="px-1">{activityPg.page} / {activityPg.pageCount}</span>
+              <button
+                type="button"
+                disabled={activityPg.page >= activityPg.pageCount}
+                onClick={() => activityPg.setPage(activityPg.page + 1)}
+                className="rounded-md border border-border px-2.5 py-1 disabled:opacity-40 hover:bg-muted hover:text-foreground"
+              >
+                {t('common.pageNext', 'Suivant')}
+              </button>
+            </div>
           </div>
         )}
       </div>
