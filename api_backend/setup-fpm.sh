@@ -126,11 +126,21 @@ if ! sudo systemctl restart "php${PHP_VERSION}-fpm"; then
   exit 1
 fi
 
-# ── 2. Reuse the EXISTING SSL certificate so HTTPS keeps working ─────────────
-# Find the config file(s) that currently define this domain, and read the cert
-# THEY use (not just the first cert in the whole nginx tree, which could belong
-# to another site). We reuse this same list to disable them in step 4.
-mapfile -t DOMAIN_FILES < <(sudo grep -rlE "server_name[^;]*\b${DOMAIN//./\\.}\b" /etc/nginx 2>/dev/null || true)
+# ── 2. Find the nginx include files that define THIS domain ──────────────────
+# We iterate the include dirs and grep each file directly, because `grep -r`
+# SKIPS symlinks while recursing — and sites-enabled/* are symlinks, so the
+# previous attempt missed the live block and the old server kept winning.
+# Only files that nginx actually includes are considered; other domains
+# (e.g. api.flowentra.app) are never touched.
+DOMAIN_FILES=()
+for f in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
+  [ -e "$f" ] || continue
+  case "$f" in "$SITE_FILE"|"$SITE_LINK") continue ;; esac
+  if sudo grep -qE "server_name[^;]*\b${DOMAIN//./\\.}\b" "$f" 2>/dev/null; then
+    DOMAIN_FILES+=("$f")
+    log "Found existing block for ${DOMAIN}: $f"
+  fi
+done
 
 SSL_CERT=""
 SSL_KEY=""
@@ -173,16 +183,18 @@ DISABLED_DIR="/etc/nginx-flehty-disabled-${STAMP}"
 sudo mkdir -p "$DISABLED_DIR"
 for f in "${DOMAIN_FILES[@]:-}"; do
   [ -n "$f" ] || continue
-  case "$f" in
-    "$SITE_FILE"|"$SITE_LINK") continue ;;
-    # Only move files nginx actually includes (sites-enabled / conf.d); leave
-    # sites-available originals untouched.
-    /etc/nginx/sites-enabled/*|/etc/nginx/conf.d/*) ;;
-    *) continue ;;
-  esac
+  # DOMAIN_FILES only ever contains sites-enabled symlinks / conf.d files for
+  # THIS domain (built in step 2). Moving them out of the include path disables
+  # them; the sites-available originals + other domains stay untouched.
   log "Disabling existing block: $f"
   sudo mv "$f" "$DISABLED_DIR/" 2>/dev/null || true
 done
+
+if [ "${#DOMAIN_FILES[@]}" -eq 0 ]; then
+  warn "No existing nginx block for ${DOMAIN} was found in sites-enabled/conf.d."
+  warn "If the old block lives elsewhere (main nginx.conf or a custom include),"
+  warn "the migration may conflict. Paste:  sudo grep -rl '${DOMAIN}' /etc/nginx"
+fi
 
 # ── 5. Write the FPM server block ───────────────────────────────────────────
 log "Writing ${SITE_FILE}"
@@ -196,8 +208,9 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name ${DOMAIN};
 
     ssl_certificate     ${SSL_CERT};
