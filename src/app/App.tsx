@@ -5,7 +5,7 @@ import { Toaster } from 'sonner';
 import AppLayout from './AppLayout';
 import RequireAuth from '@/components/RequireAuth';
 import { ThemeProvider } from '@/hooks/useTheme';
-import SetupGate from '@/components/SetupGate';
+import LoginPage from '@/features/auth/LoginPage';
 import { preloadAllRoutesOnIdle } from './preloadRoutes';
 
 // Route-level code splitting — each chunk loads on demand, shrinking the
@@ -90,7 +90,7 @@ const App = () => {
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<Navigate to="/login" replace />} />
-            <Route path="/login" element={<SetupGate />} />
+            <Route path="/login" element={<LoginPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/developer" element={<DeveloperPage />} />
             <Route path="/mobileapp" element={<MobileAppRedirect />} />
