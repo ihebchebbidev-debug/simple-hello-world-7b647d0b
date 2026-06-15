@@ -74,10 +74,19 @@ log "Migrating ${DOMAIN} → nginx + PHP-FPM ${PHP_VERSION}"
 log "App public dir: ${PUBLIC_DIR}"
 
 # ── 1. Ensure PHP-FPM is installed ──────────────────────────────────────────
-if ! systemctl list-unit-files 2>/dev/null | grep -q "php${PHP_VERSION}-fpm"; then
+# It's almost certainly already installed (deploy.sh writes to its conf.d). Only
+# touch apt if the fpm tree is genuinely missing — and keep apt NON-FATAL so a
+# broken third-party PPA (e.g. ondrej/php with no packages for this Ubuntu
+# release) can't abort the migration.
+if [ ! -d "/etc/php/${PHP_VERSION}/fpm" ] && ! command -v "php-fpm${PHP_VERSION}" >/dev/null 2>&1; then
   log "Installing php${PHP_VERSION}-fpm…"
-  sudo apt-get update -y
-  sudo apt-get install -y "php${PHP_VERSION}-fpm"
+  sudo apt-get update -y || warn "apt update had errors (broken PPA?) — continuing"
+  sudo apt-get install -y "php${PHP_VERSION}-fpm" || true
+fi
+if [ ! -d "/etc/php/${PHP_VERSION}/fpm" ]; then
+  warn "php${PHP_VERSION}-fpm is not installed and could not be installed automatically."
+  warn "Install it once, then re-run:  sudo apt-get install -y php${PHP_VERSION}-fpm"
+  exit 1
 fi
 
 NGINX_DUMP="$(sudo nginx -T 2>/dev/null || true)"
@@ -110,7 +119,12 @@ catch_workers_output = yes
 EOF
 
 sudo systemctl enable "php${PHP_VERSION}-fpm" >/dev/null 2>&1 || true
-sudo systemctl restart "php${PHP_VERSION}-fpm"
+if ! sudo systemctl restart "php${PHP_VERSION}-fpm"; then
+  warn "Could not start php${PHP_VERSION}-fpm — is the package fully installed?"
+  warn "Try:  sudo apt-get install -y php${PHP_VERSION}-fpm   (then re-run this script)"
+  warn "No nginx changes were made — your site is untouched."
+  exit 1
+fi
 
 # ── 2. Reuse the EXISTING SSL certificate so HTTPS keeps working ─────────────
 # Find the config file(s) that currently define this domain, and read the cert
