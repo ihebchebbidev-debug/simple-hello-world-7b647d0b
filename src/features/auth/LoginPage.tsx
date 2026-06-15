@@ -40,7 +40,9 @@ const LoginPage = () => {
       qc.prefetchQuery({
         queryKey: ['admin-dashboard-activity'],
         queryFn: async () =>
-          (await api.get('/dashboard/recent-activity', { params: { limit: 24 } })).data.data.items,
+          // Must match DashboardPage's limit (same query key) so the prefetched
+          // cache isn't a stale 24-row subset of the real list.
+          (await api.get('/dashboard/recent-activity', { params: { limit: 1000 } })).data.data.items,
       });
       navigate('/dashboard', { replace: true });
     } catch {

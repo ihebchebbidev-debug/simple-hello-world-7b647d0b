@@ -10,24 +10,27 @@ import SignupPage from '@/features/auth/SignupPage';
  * gate becomes a pure pass-through to LoginPage forever.
  */
 const SetupGate = () => {
-  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+  // Render the login form IMMEDIATELY (the common case — an admin already
+  // exists). We check setup-status in the background and only switch to the
+  // one-time SignupPage if the backend actually reports needs_setup. This
+  // avoids blocking the whole login screen behind a network round-trip.
+  const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
+    // Once we've confirmed an admin exists, never ask again — setup is a
+    // one-time, irreversible state, so this request is pure waste afterwards.
+    try { if (localStorage.getItem('flehty.setupDone') === '1') return; } catch { /* ignore */ }
     let cancelled = false;
     auth
       .setupStatus()
-      .then((s) => { if (!cancelled) setNeedsSetup(!!s?.needs_setup); })
-      .catch(() => { if (!cancelled) setNeedsSetup(false); });
+      .then((s) => {
+        if (cancelled) return;
+        if (s?.needs_setup) setNeedsSetup(true);
+        else { try { localStorage.setItem('flehty.setupDone', '1'); } catch { /* ignore */ } }
+      })
+      .catch(() => { /* assume an admin exists — keep the login form */ });
     return () => { cancelled = true; };
   }, []);
-
-  if (needsSetup === null) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="h-8 w-8 rounded-full border-2 border-[hsl(var(--primary-glow))] border-t-transparent animate-spin" />
-      </div>
-    );
-  }
 
   return needsSetup ? <SignupPage /> : <LoginPage />;
 };
