@@ -6,6 +6,7 @@ import AppLayout from './AppLayout';
 import RequireAuth from '@/components/RequireAuth';
 import { ThemeProvider } from '@/hooks/useTheme';
 import LoginPage from '@/features/auth/LoginPage';
+import { restoreQueryCache, startQueryPersist } from '@/lib/queryPersist';
 import { preloadAllRoutesOnIdle } from './preloadRoutes';
 
 // Route-level code splitting — each chunk loads on demand, shrinking the
@@ -69,6 +70,13 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Persist the cache to localStorage so a reload paints instantly from the last
+// snapshot. It's only a placeholder: refetchOnMount (above) revalidates every
+// restored query immediately and mutations invalidate their keys, so stale data
+// never lingers — deletes vanish and new rows appear as soon as the refetch lands.
+restoreQueryCache(queryClient);
+startQueryPersist(queryClient);
 
 const RouteFallback = () => (
   <div className="flex h-full w-full items-center justify-center p-10">
