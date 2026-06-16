@@ -14,16 +14,6 @@ export interface LoginPayload {
 }
 
 export const auth = {
-  async setupStatus(): Promise<{ needs_setup: boolean }> {
-    const { data } = await api.get('/auth/setup-status');
-    return data?.data ?? data;
-  },
-  async register(payload: { name: string; email: string; password: string; password_confirmation: string; preferred_lang?: 'fr' | 'en' }): Promise<AuthUser> {
-    const { data } = await api.post('/auth/register', payload);
-    const token = data?.data?.token ?? data?.token;
-    if (token) setAuthToken(token);
-    return data?.data?.user ?? data?.user;
-  },
   async login(payload: LoginPayload): Promise<AuthUser> {
     const { data } = await api.post('/auth/login', payload);
     const token = data?.data?.token ?? data?.token;
