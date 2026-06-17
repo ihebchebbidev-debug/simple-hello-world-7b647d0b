@@ -4,7 +4,7 @@ import { useQueries } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import {
   Users, MapPin, CalendarRange, Leaf, Biohazard, Bug,
-  Droplets, Download, CheckCircle2, AlertCircle,
+  Droplets, HardHat, Download, CheckCircle2, AlertCircle,
   Loader2, FileSpreadsheet, HardDriveDownload, RefreshCw,
   Wheat,
 } from 'lucide-react';
@@ -103,7 +103,7 @@ function buildAndDownload(
   XLSX.writeFile(wb, filename);
 }
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const today = () => new Date().toISOString().slice(0, 10);
 
 // ── Category definitions ─────────────────────────────────────────────────────
 // Endpoint paths confirmed from api_backend/routes/api.php
@@ -111,7 +111,7 @@ const TODAY = new Date().toISOString().slice(0, 10);
 //   reference data → max:100 | operations → max:1000
 
 const CATEGORIES: CatDef[] = [
-  // ── Reference data ──
+  // ── Reference / configuration data ──
   {
     key: 'users',
     endpoint: '/users',
@@ -175,6 +175,28 @@ const CATEGORIES: CatDef[] = [
     labelKey: 'backup.cat.pests',
     descKey: 'backup.catDesc.pests',
     Icon: Bug,
+    iconColor: 'text-orange-400',
+    iconBg: 'bg-orange-500/10',
+  },
+  {
+    key: 'waterConfig',
+    endpoint: '/water-config',
+    perPage: 100,
+    sheetName: 'Config. Eau',
+    labelKey: 'backup.cat.waterConfig',
+    descKey: 'backup.catDesc.waterConfig',
+    Icon: Droplets,
+    iconColor: 'text-sky-400',
+    iconBg: 'bg-sky-500/10',
+  },
+  {
+    key: 'laborConfig',
+    endpoint: '/labor-config',
+    perPage: 100,
+    sheetName: 'Config. Main-d\'œuvre',
+    labelKey: 'backup.cat.laborConfig',
+    descKey: 'backup.catDesc.laborConfig',
+    Icon: HardHat,
     iconColor: 'text-orange-400',
     iconBg: 'bg-orange-500/10',
   },
@@ -250,7 +272,7 @@ const BackupPage = () => {
   const handleExportSingle = useCallback(
     (cat: CatDef, rows: Record<string, unknown>[]) => {
       if (!rows.length) { toast.info(t('common.noData')); return; }
-      buildAndDownload([{ name: cat.sheetName, rows }], `flehty-${cat.key}-${TODAY}.xlsx`);
+      buildAndDownload([{ name: cat.sheetName, rows }], `flehty-${cat.key}-${today()}.xlsx`);
       toast.success(t('backup.exportedSingle', { name: cat.sheetName }));
     },
     [t],
@@ -275,7 +297,7 @@ const BackupPage = () => {
       }
 
       if (!sheets.length) { toast.error(t('common.noData')); return; }
-      buildAndDownload(sheets, `flehty-backup-complet-${TODAY}.xlsx`);
+      buildAndDownload(sheets, `flehty-backup-complet-${today()}.xlsx`);
       const now = new Date().toLocaleString();
       localStorage.setItem('flehty.lastBackup', now);
       setLastExport(now);
@@ -373,7 +395,7 @@ const BackupPage = () => {
           {t('backup.sectionRef')}
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {CATEGORIES.slice(0, 6).map((cat, i) => (
+          {CATEGORIES.slice(0, 8).map((cat, i) => (
             <CategoryCard key={cat.key} cat={cat} result={results[i]} onExport={handleExportSingle} t={t} />
           ))}
         </div>
@@ -385,8 +407,8 @@ const BackupPage = () => {
           {t('backup.sectionOps')}
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {CATEGORIES.slice(6).map((cat, i) => (
-            <CategoryCard key={cat.key} cat={cat} result={results[6 + i]} onExport={handleExportSingle} t={t} />
+          {CATEGORIES.slice(8).map((cat, i) => (
+            <CategoryCard key={cat.key} cat={cat} result={results[8 + i]} onExport={handleExportSingle} t={t} />
           ))}
         </div>
       </div>
