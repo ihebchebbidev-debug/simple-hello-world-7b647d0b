@@ -19,6 +19,7 @@ const PesticidesPage       = lazy(() => import('@/features/pesticides/Pesticides
 const WaterPage            = lazy(() => import('@/features/water/WaterPage'));
 const LaborPage            = lazy(() => import('@/features/labor/LaborPage'));
 const UsersPage            = lazy(() => import('@/features/users/UsersPage'));
+const BackupPage           = lazy(() => import('@/features/backup/BackupPage'));
 const ReportsLayout        = lazy(() => import('@/features/reports/ReportsLayout'));
 const IrrigationReport     = lazy(() => import('@/features/reports/IrrigationReport'));
 const FertilizationReport  = lazy(() => import('@/features/reports/FertilizationReport'));
@@ -123,6 +124,7 @@ const App = () => {
                 <Route path="history/:type/:plotId" element={<PlotOperationsHistoryPage />} />
               </Route>
               <Route path="users" element={<UsersPage />} />
+              <Route path="backup" element={<BackupPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="sync" element={<SyncPage />} />
               <Route path="logs" element={<LogsPage />} />

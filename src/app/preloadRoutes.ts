@@ -23,6 +23,7 @@ const loaders: Record<string, Loader> = {
   '/reports/harvesting':      () => import('@/features/reports/HarvestingReport'),
   '/reports/production-cost': () => import('@/features/reports/ProductionCostReport'),
   '/users':         () => import('@/features/users/UsersPage'),
+  '/backup':        () => import('@/features/backup/BackupPage'),
   '/notifications': () => import('@/features/notifications/NotificationsPage'),
   '/sync':          () => import('@/features/sync/SyncPage'),
   '/logs':          () => import('@/features/logs/LogsPage'),

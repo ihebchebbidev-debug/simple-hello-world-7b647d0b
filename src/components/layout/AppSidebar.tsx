@@ -17,6 +17,7 @@ import {
   ScrollText,
   HelpCircle,
   LogOut,
+  HardDriveDownload,
   type LucideIcon,
 } from 'lucide-react';
 import logoIcon from '@/assets/logo-icon.png';
@@ -47,6 +48,7 @@ const navItems: NavItem[] = [
   { path: '/pests',         labelKey: 'nav.pests',         Icon: Bug,             tone: 'text-rose-400' },
   { path: '/reports',       labelKey: 'nav.reports',       Icon: BarChart3,       tone: 'text-cyan-400' },
   { path: '/users',         labelKey: 'nav.users',         Icon: UserCog,         tone: 'text-violet-400' },
+  { path: '/backup',        labelKey: 'nav.backup',        Icon: HardDriveDownload, tone: 'text-indigo-400' },
   { path: '/notifications', labelKey: 'nav.notifications', Icon: Bell,            tone: 'text-yellow-400' },
   { path: '/sync',          labelKey: 'nav.sync',          Icon: RefreshCw,       tone: 'text-teal-400' },
   { path: '/logs',          labelKey: 'nav.logs',          Icon: ScrollText,      tone: 'text-slate-400' },
@@ -72,13 +74,7 @@ const AppSidebar = ({ onClose, collapsed = false }: Props) => {
   return (
     <aside className="flex h-screen w-full flex-col shrink-0 bg-[hsl(var(--sidebar-background))] transition-[width] duration-200">
       <div className={`flex items-center gap-3 py-5 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
-        <img src={logoIcon} alt="Flehty" className="h-9 w-9 shrink-0 rounded-lg" />
-        {!collapsed && (
-          <div className="min-w-0">
-            <h1 className="text-[14px] font-bold tracking-wide leading-tight text-[hsl(var(--primary-glow))]">Flehty</h1>
-            <span className="text-[10px] font-medium leading-tight text-muted-foreground">Administration</span>
-          </div>
-        )}
+        <img src={logoIcon} alt="Flehty" className="h-12 w-12 shrink-0 rounded-lg" />
       </div>
 
       <nav className={`flex-1 py-3 space-y-0.5 overflow-y-auto ${collapsed ? 'px-2' : 'px-3'}`}>
