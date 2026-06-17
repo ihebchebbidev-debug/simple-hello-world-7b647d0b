@@ -80,6 +80,7 @@ const UsersPage = () => {
     queryKey: ['admin-users', params],
     queryFn: () => fetchUsers(params),
     placeholderData: keepPreviousData,
+    staleTime: 60_000,
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin-users'] });

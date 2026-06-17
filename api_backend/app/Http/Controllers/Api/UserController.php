@@ -56,10 +56,14 @@ final class UserController extends Controller
             $query->whereIn('id', $this->roles->userIdsForRole($data['role']));
         }
 
-        return $this->paginatedResponse(
-            $query->paginate($data['per_page'] ?? 25),
-            UserResource::class,
+        $paginator = $query->paginate($data['per_page'] ?? 25);
+
+        // Preload all roles for this page in one query to eliminate N+1.
+        $this->roles->preloadForUsers(
+            collect($paginator->items())->pluck('id')->all(),
         );
+
+        return $this->paginatedResponse($paginator, UserResource::class);
     }
 
     public function store(StoreUserRequest $request): JsonResponse

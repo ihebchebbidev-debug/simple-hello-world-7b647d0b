@@ -15,14 +15,66 @@ final class UserRoleRepository
 {
     use HasSchemaAwareColumns;
 
+    /**
+     * Cached per-request result of Schema::hasTable('user_roles').
+     * Static so it survives across multiple instances within one PHP request
+     * (UserResource resolves this class via app() on every row).
+     */
+    private static ?bool $tableExistsCache = null;
+
+    /**
+     * Per-request role preload cache keyed by user UUID.
+     * Populated by preloadForUsers() so forUser() never fires individual
+     * SELECT queries when a bulk preload was already done.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private static array $rolesCache = [];
+
     public function tableExists(): bool
     {
-        return Schema::hasTable('user_roles');
+        if (self::$tableExistsCache === null) {
+            self::$tableExistsCache = Schema::hasTable('user_roles');
+        }
+
+        return self::$tableExistsCache;
+    }
+
+    /**
+     * Preload roles for a list of user IDs in a single query.
+     * Call this before serialising a paginated collection to eliminate N+1.
+     *
+     * @param array<int, string> $userIds
+     */
+    public function preloadForUsers(array $userIds): void
+    {
+        if (empty($userIds) || ! $this->tableExists()) {
+            return;
+        }
+
+        // Seed every requested ID with an empty array so forUser() knows the
+        // data was loaded (even for users that have no roles assigned).
+        foreach ($userIds as $id) {
+            self::$rolesCache[$id] ??= [];
+        }
+
+        $rows = DB::table('user_roles')
+            ->whereIn('user_id', $userIds)
+            ->get(['user_id', 'role']);
+
+        foreach ($rows as $row) {
+            self::$rolesCache[$row->user_id][] = $row->role;
+        }
     }
 
     /** @return array<int, string> */
     public function forUser(User $user): array
     {
+        // Use the preloaded cache when available — avoids a DB round-trip per row.
+        if (array_key_exists($user->id, self::$rolesCache)) {
+            return self::$rolesCache[$user->id];
+        }
+
         if (! $this->tableExists()) {
             return [];
         }
