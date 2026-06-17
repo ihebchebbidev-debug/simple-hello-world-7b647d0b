@@ -156,13 +156,43 @@ final class UserController extends Controller
     {
         $user = User::findOrFail($id);
 
-        if (Schema::hasColumn('users', 'is_active')) {
-            DB::table('users')->where('id', $user->id)->update(['is_active' => false, 'updated_at' => now()]);
-        }
-
+        // Revoke all personal access tokens first so the user can no longer
+        // authenticate. Keep this outside any multi-statement transaction to
+        // avoid masking errors on pooled Postgres connections.
         $user->tokens()->delete();
 
-        return $this->resourceResponse(UserResource::class, $user->refresh());
+        // Remove any role assignments for this user. Syncing with an empty
+        // array effectively deletes role rows for the user.
+        try {
+            if ($this->roles->tableExists()) {
+                try { DB::statement('ROLLBACK'); } catch (\Throwable) {}
+                DB::table('user_roles')->where('user_id', $user->id)->delete();
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('user_roles.delete_failed', [
+                'user_id' => $user->id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+
+        // Finally delete the user row from the users table. This performs a
+        // permanent delete (no soft deletes are used in this project).
+        try {
+            try { DB::statement('ROLLBACK'); } catch (\Throwable) {}
+            DB::table('users')->where('id', $user->id)->delete();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('users.delete_failed', [
+                'user_id' => $user->id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+
+        // Return 204 No Content — the client does not need the deleted resource.
+        return response()->json(null, 204);
     }
 
     private function passwordColumn(): ?string

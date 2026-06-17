@@ -42,13 +42,7 @@ const HomePage = () => {
         <div className="flex flex-col min-h-screen px-5 pt-6 pb-24">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <img src={logoIcon} alt="" className="h-10 w-10 rounded-xl" />
-              <div>
-                <h1 className="text-base font-bold text-foreground">Flehty</h1>
-                <p className="text-[11px] text-muted-foreground">
-                  {user ? t('home.welcome', { name: user.name }) : t('app.tagline')}
-                </p>
-              </div>
+              <img src={logoIcon} alt="" className="h-14 w-14 rounded-xl" />
             </div>
             <div className="flex items-center gap-2">
               <NetworkBadge online={online} />

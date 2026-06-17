@@ -127,10 +127,30 @@ const UsersPage = () => {
     mutationFn: async (user: AdminUser) => {
       await api.delete(`/users/${user.id}`);
     },
-    onSuccess: () => {
+    onSuccess: (_d, user) => {
+      // Remove the user from all cached 'admin-users' query results so the
+      // UI no longer shows the row immediately (backend currently marks
+      // users as inactive rather than physically deleting). We update the
+      // paginated payload shape (data + meta) when present.
       toast.success(t('users.deleted'));
       setDeleting(null);
-      invalidate();
+
+      try {
+        // Find all queries whose key starts with 'admin-users' and update their
+        // paginated data by removing the deleted user. This allows immediate
+        // UI feedback across pages and filters without a full refetch.
+        const queries = queryClient.getQueryCache().findAll({ queryKey: ['admin-users'] });
+        queries.forEach((q) => {
+          const stateData = (q.state.data as any);
+          const old = stateData?.data;
+          if (!old || !Array.isArray(old)) return;
+          const filtered = old.filter((u: any) => u.id !== user.id);
+          const meta = stateData?.meta ? { ...stateData.meta, total: Math.max((stateData.meta?.total ?? 0) - (old.length - filtered.length), 0) } : stateData?.meta;
+          queryClient.setQueryData(q.queryKey, { data: filtered, meta });
+        });
+      } catch (e) {
+        invalidate();
+      }
     },
     onError: (err) => toast.error(extractApiError(err, t('errors.deleteFailed'))),
   });
