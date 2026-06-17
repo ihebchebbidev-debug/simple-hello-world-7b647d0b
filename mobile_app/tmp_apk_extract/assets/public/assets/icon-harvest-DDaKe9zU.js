@@ -1,0 +1,1 @@
+const i="/mobileapp/assets/icon-irrigation-CiDXcp8W.png",s="/mobileapp/assets/icon-fertilization-DO4SnLzm.png",a="/mobileapp/assets/icon-phytosanitary-C1IDkCV0.png",n="/mobileapp/assets/icon-harvest-DzW0mlQg.png";export{n as a,i as b,a as c,s as i};
