@@ -74,7 +74,8 @@ const AppSidebar = ({ onClose, collapsed = false }: Props) => {
   return (
     <aside className="flex h-screen w-full flex-col shrink-0 bg-[hsl(var(--sidebar-background))] transition-[width] duration-200">
       <div className={`flex items-center gap-3 py-5 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
-        <img src={logoIcon} alt="Flehty" className="h-12 w-12 shrink-0 rounded-lg" />
+        {/* Larger logo; in dark mode apply a filter so the icon appears white */}
+        <img src={logoIcon} alt="Flehty" className="h-16 w-16 shrink-0 rounded-lg filter dark:brightness-0 dark:invert" />
       </div>
 
       <nav className={`flex-1 py-3 space-y-0.5 overflow-y-auto ${collapsed ? 'px-2' : 'px-3'}`}>

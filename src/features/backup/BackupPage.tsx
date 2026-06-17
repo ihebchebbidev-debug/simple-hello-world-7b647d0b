@@ -12,10 +12,13 @@ import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
+// ── Types ────────────────────────────────────────────────────────────────────
+
 interface CatDef {
   key: string;
   endpoint: string;
-  params?: Record<string, string | number | boolean>;
+  /** Backend max: 100 for reference data, 1000 for operations */
+  perPage: number;
   sheetName: string;
   labelKey: string;
   descKey: string;
@@ -23,6 +26,8 @@ interface CatDef {
   iconColor: string;
   iconBg: string;
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function extractRows(apiData: unknown): Record<string, unknown>[] {
   if (!apiData) return [];
@@ -33,6 +38,27 @@ function extractRows(apiData: unknown): Record<string, unknown>[] {
   return [];
 }
 
+/** Fetches ALL pages for an endpoint, respecting the backend max per_page. */
+async function fetchAllPages(endpoint: string, perPage: number): Promise<Record<string, unknown>[]> {
+  const all: Record<string, unknown>[] = [];
+  let page = 1;
+
+  for (;;) {
+    const { data } = await api.get(endpoint, { params: { page, per_page: perPage } });
+    const rows = extractRows(data);
+    all.push(...rows);
+
+    const meta = (data as Record<string, unknown>)?.meta as
+      | { last_page?: number }
+      | undefined;
+
+    if (!meta?.last_page || page >= meta.last_page || rows.length === 0) break;
+    page++;
+  }
+
+  return all;
+}
+
 function flattenRow(row: Record<string, unknown>): Record<string, unknown> {
   const flat: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) {
@@ -40,7 +66,11 @@ function flattenRow(row: Record<string, unknown>): Record<string, unknown> {
       flat[k] = '';
     } else if (Array.isArray(v)) {
       flat[k] = v
-        .map((i) => (typeof i === 'object' && i !== null ? (i as { role?: string }).role ?? JSON.stringify(i) : String(i)))
+        .map((i) =>
+          typeof i === 'object' && i !== null
+            ? (i as { role?: string }).role ?? JSON.stringify(i)
+            : String(i),
+        )
         .join(', ');
     } else if (typeof v === 'object') {
       flat[k] = JSON.stringify(v);
@@ -51,7 +81,10 @@ function flattenRow(row: Record<string, unknown>): Record<string, unknown> {
   return flat;
 }
 
-function buildAndDownload(sheets: { name: string; rows: Record<string, unknown>[] }[], filename: string) {
+function buildAndDownload(
+  sheets: { name: string; rows: Record<string, unknown>[] }[],
+  filename: string,
+) {
   const wb = XLSX.utils.book_new();
   for (const { name, rows } of sheets) {
     if (rows.length === 0) {
@@ -72,11 +105,17 @@ function buildAndDownload(sheets: { name: string; rows: Record<string, unknown>[
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
+// ── Category definitions ─────────────────────────────────────────────────────
+// Endpoint paths confirmed from api_backend/routes/api.php
+// per_page limits confirmed from backend Request validation rules:
+//   reference data → max:100 | operations → max:1000
+
 const CATEGORIES: CatDef[] = [
+  // ── Reference data ──
   {
     key: 'users',
     endpoint: '/users',
-    params: { per_page: 9999 },
+    perPage: 100,
     sheetName: 'Utilisateurs',
     labelKey: 'backup.cat.users',
     descKey: 'backup.catDesc.users',
@@ -87,7 +126,7 @@ const CATEGORIES: CatDef[] = [
   {
     key: 'plots',
     endpoint: '/plots',
-    params: { per_page: 9999 },
+    perPage: 100,
     sheetName: 'Parcelles',
     labelKey: 'backup.cat.plots',
     descKey: 'backup.catDesc.plots',
@@ -98,7 +137,7 @@ const CATEGORIES: CatDef[] = [
   {
     key: 'campaigns',
     endpoint: '/campaigns',
-    params: { per_page: 9999 },
+    perPage: 100,
     sheetName: 'Campagnes',
     labelKey: 'backup.cat.campaigns',
     descKey: 'backup.catDesc.campaigns',
@@ -109,7 +148,7 @@ const CATEGORIES: CatDef[] = [
   {
     key: 'fertilizers',
     endpoint: '/fertilizers',
-    params: { per_page: 9999 },
+    perPage: 100,
     sheetName: 'Engrais',
     labelKey: 'backup.cat.fertilizers',
     descKey: 'backup.catDesc.fertilizers',
@@ -120,7 +159,7 @@ const CATEGORIES: CatDef[] = [
   {
     key: 'pesticides',
     endpoint: '/pesticides',
-    params: { per_page: 9999 },
+    perPage: 100,
     sheetName: 'Produits de traitement',
     labelKey: 'backup.cat.pesticides',
     descKey: 'backup.catDesc.pesticides',
@@ -131,7 +170,7 @@ const CATEGORIES: CatDef[] = [
   {
     key: 'pests',
     endpoint: '/pests',
-    params: { per_page: 9999 },
+    perPage: 100,
     sheetName: 'Bioagresseurs',
     labelKey: 'backup.cat.pests',
     descKey: 'backup.catDesc.pests',
@@ -139,10 +178,11 @@ const CATEGORIES: CatDef[] = [
     iconColor: 'text-orange-400',
     iconBg: 'bg-orange-500/10',
   },
+  // ── Field operations ──
   {
     key: 'irrigation',
-    endpoint: '/irrigation',
-    params: { per_page: 9999 },
+    endpoint: '/irrigation-operations',
+    perPage: 1000,
     sheetName: 'Irrigation',
     labelKey: 'backup.cat.irrigation',
     descKey: 'backup.catDesc.irrigation',
@@ -152,8 +192,8 @@ const CATEGORIES: CatDef[] = [
   },
   {
     key: 'fertilization',
-    endpoint: '/fertilization',
-    params: { per_page: 9999 },
+    endpoint: '/fertilization-operations',
+    perPage: 1000,
     sheetName: 'Fertilisation',
     labelKey: 'backup.cat.fertilization',
     descKey: 'backup.catDesc.fertilization',
@@ -163,8 +203,8 @@ const CATEGORIES: CatDef[] = [
   },
   {
     key: 'phytosanitary',
-    endpoint: '/phytosanitary',
-    params: { per_page: 9999 },
+    endpoint: '/phytosanitary-operations',
+    perPage: 1000,
     sheetName: 'Phytosanitaire',
     labelKey: 'backup.cat.phytosanitary',
     descKey: 'backup.catDesc.phytosanitary',
@@ -174,8 +214,8 @@ const CATEGORIES: CatDef[] = [
   },
   {
     key: 'harvest',
-    endpoint: '/harvest',
-    params: { per_page: 9999 },
+    endpoint: '/harvest-operations',
+    perPage: 1000,
     sheetName: 'Récolte',
     labelKey: 'backup.cat.harvest',
     descKey: 'backup.catDesc.harvest',
@@ -185,18 +225,19 @@ const CATEGORIES: CatDef[] = [
   },
 ];
 
+// ── Page component ────────────────────────────────────────────────────────────
+
 const BackupPage = () => {
   const { t } = useTranslation();
   const [exportingAll, setExportingAll] = useState(false);
-  const [lastExport, setLastExport] = useState<string | null>(() => localStorage.getItem('flehty.lastBackup'));
+  const [lastExport, setLastExport] = useState<string | null>(
+    () => localStorage.getItem('flehty.lastBackup'),
+  );
 
   const results = useQueries({
     queries: CATEGORIES.map((cat) => ({
       queryKey: ['backup', cat.key],
-      queryFn: async () => {
-        const { data } = await api.get(cat.endpoint, { params: cat.params });
-        return extractRows(data);
-      },
+      queryFn: () => fetchAllPages(cat.endpoint, cat.perPage),
       retry: 1,
       staleTime: 5 * 60 * 1000,
     })),
@@ -219,19 +260,20 @@ const BackupPage = () => {
     setExportingAll(true);
     try {
       const sheets: { name: string; rows: Record<string, unknown>[] }[] = [];
+
       for (let i = 0; i < CATEGORIES.length; i++) {
         const cat = CATEGORIES[i];
         let rows = results[i].data;
         if (!rows) {
           try {
-            const { data } = await api.get(cat.endpoint, { params: cat.params });
-            rows = extractRows(data);
+            rows = await fetchAllPages(cat.endpoint, cat.perPage);
           } catch {
             continue;
           }
         }
         sheets.push({ name: cat.sheetName, rows });
       }
+
       if (!sheets.length) { toast.error(t('common.noData')); return; }
       buildAndDownload(sheets, `flehty-backup-complet-${TODAY}.xlsx`);
       const now = new Date().toLocaleString();
@@ -244,10 +286,10 @@ const BackupPage = () => {
   }, [results, t]);
 
   const successCount = results.filter((r) => !r.isLoading && !r.isError).length;
-  const errorCount = results.filter((r) => r.isError).length;
+  const errorCount   = results.filter((r) => r.isError).length;
   const loadingCount = results.filter((r) => r.isLoading).length;
   const totalRecords = results.reduce((s, r) => s + (r.data?.length ?? 0), 0);
-  const allSettled = loadingCount === 0;
+  const allSettled   = loadingCount === 0;
 
   return (
     <div className="space-y-6">
@@ -266,7 +308,6 @@ const BackupPage = () => {
             onClick={handleRefresh}
             disabled={!allSettled}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background/60 px-3 py-2 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-40"
-            title={t('backup.refresh')}
           >
             <RefreshCw className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">{t('backup.refresh')}</span>
@@ -305,7 +346,7 @@ const BackupPage = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-center">
+          <div className="flex items-center gap-6 text-center">
             <div>
               <p className="text-2xl font-bold tabular-nums text-emerald-400">{successCount}</p>
               <p className="text-[11px] text-muted-foreground">{t('backup.ready')}</p>
@@ -326,38 +367,26 @@ const BackupPage = () => {
         </div>
       </div>
 
-      {/* ── Reference data section ── */}
+      {/* ── Reference data ── */}
       <div>
         <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           {t('backup.sectionRef')}
         </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {CATEGORIES.slice(0, 6).map((cat, i) => (
-            <CategoryCard
-              key={cat.key}
-              cat={cat}
-              result={results[i]}
-              onExport={handleExportSingle}
-              t={t}
-            />
+            <CategoryCard key={cat.key} cat={cat} result={results[i]} onExport={handleExportSingle} t={t} />
           ))}
         </div>
       </div>
 
-      {/* ── Operations section ── */}
+      {/* ── Operations ── */}
       <div>
         <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           {t('backup.sectionOps')}
         </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {CATEGORIES.slice(6).map((cat, i) => (
-            <CategoryCard
-              key={cat.key}
-              cat={cat}
-              result={results[6 + i]}
-              onExport={handleExportSingle}
-              t={t}
-            />
+            <CategoryCard key={cat.key} cat={cat} result={results[6 + i]} onExport={handleExportSingle} t={t} />
           ))}
         </div>
       </div>
@@ -366,7 +395,8 @@ const BackupPage = () => {
   );
 };
 
-/* ─── Category card ─── */
+// ── Category card ─────────────────────────────────────────────────────────────
+
 interface CardProps {
   cat: CatDef;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -383,7 +413,6 @@ const CategoryCard = ({ cat, result, onExport, t }: CardProps) => {
   return (
     <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-4 hover:border-[hsl(var(--primary)/0.4)] transition-colors">
 
-      {/* Top row */}
       <div className="flex items-start justify-between">
         <div className={`rounded-lg p-2.5 ${cat.iconBg}`}>
           <cat.Icon className={`h-5 w-5 ${cat.iconColor}`} />
@@ -397,13 +426,11 @@ const CategoryCard = ({ cat, result, onExport, t }: CardProps) => {
         )}
       </div>
 
-      {/* Name & description */}
       <div className="flex-1">
         <p className="font-medium text-sm leading-tight">{t(cat.labelKey)}</p>
         <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{t(cat.descKey)}</p>
       </div>
 
-      {/* Count */}
       <div className="flex items-baseline gap-1.5">
         {isLoading ? (
           <span className="text-sm text-muted-foreground animate-pulse">{t('common.loading')}</span>
@@ -417,7 +444,6 @@ const CategoryCard = ({ cat, result, onExport, t }: CardProps) => {
         )}
       </div>
 
-      {/* Export button */}
       <button
         onClick={() => onExport(cat, rows)}
         disabled={isLoading || isError || count === 0}
