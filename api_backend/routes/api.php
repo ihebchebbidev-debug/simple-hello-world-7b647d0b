@@ -260,10 +260,10 @@ $registerGroup(['reports', 'v1/reports'], 'auth:sanctum', function (): void {
 // ─── Backup snapshots (admin-only point-in-time restore) ─────────────────────
 
 $registerGroup(['backup-snapshots', 'v1/backup-snapshots'], ['auth:sanctum', 'role:admin'], function (): void {
-    Route::get('/',                          [BackupSnapshotController::class, 'index']);
-    Route::post('/',                         [BackupSnapshotController::class, 'store']);
-    Route::post('{snapshot}/restore',        [BackupSnapshotController::class, 'restore']);
-    Route::delete('{snapshot}',              [BackupSnapshotController::class, 'destroy']);
+    Route::get('/',                    [BackupSnapshotController::class, 'index']);
+    Route::post('/',                   [BackupSnapshotController::class, 'store']);
+    Route::post('{id}/restore',        [BackupSnapshotController::class, 'restore']);
+    Route::delete('{id}',              [BackupSnapshotController::class, 'destroy']);
 });
 
 // ─── System Logs (admin-only audit trail) ─────────────────────────────────────

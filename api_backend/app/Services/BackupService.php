@@ -138,7 +138,52 @@ final class BackupService
         try {
             DB::transaction(function () use ($snapshotTables, $deleteOrder, $insertOrder, $restoredBy): void {
 
-                // ── Step 1: delete in reverse dependency order ────────────────
+                // ── Step 1: pre-clean FK references in excluded tables ─────────
+                // Tables like notifications, feedback_reports, system_logs, and
+                // personal_access_tokens are NOT restored (intentionally excluded)
+                // but their FK columns reference users.id. We must null/delete
+                // those references before deleting users or FK constraints will
+                // block the deletion.
+                $usersToDelete = DB::table('users')
+                    ->where('id', '!=', $restoredBy->id)
+                    ->pluck('id')
+                    ->all();
+
+                if (! empty($usersToDelete)) {
+                    // Notifications are ephemeral — delete them outright.
+                    if (Schema::hasTable('notifications')) {
+                        DB::table('notifications')->whereIn('user_id', $usersToDelete)->delete();
+                    }
+
+                    // Feedback reports: null resolved_by first (nullable FK),
+                    // then delete rows whose submitter is being removed.
+                    if (Schema::hasTable('feedback_reports')) {
+                        DB::table('feedback_reports')
+                            ->whereIn('resolved_by', $usersToDelete)
+                            ->update(['resolved_by' => null]);
+                        DB::table('feedback_reports')
+                            ->whereIn('user_id', $usersToDelete)
+                            ->delete();
+                    }
+
+                    // Audit log — null the user_id to preserve the audit trail
+                    // but break the FK link so users can be deleted safely.
+                    if (Schema::hasTable('system_logs')) {
+                        DB::table('system_logs')
+                            ->whereIn('user_id', $usersToDelete)
+                            ->update(['user_id' => null]);
+                    }
+
+                    // Sanctum tokens — revoke all tokens for users being removed.
+                    if (Schema::hasTable('personal_access_tokens')) {
+                        DB::table('personal_access_tokens')
+                            ->where('tokenable_type', User::class)
+                            ->whereIn('tokenable_id', $usersToDelete)
+                            ->delete();
+                    }
+                }
+
+                // ── Step 2: delete in reverse dependency order ────────────────
                 foreach ($deleteOrder as $table) {
                     if (! Schema::hasTable($table) || ! array_key_exists($table, $snapshotTables)) {
                         continue;
@@ -152,7 +197,7 @@ final class BackupService
                     }
                 }
 
-                // ── Step 2: insert in dependency order ────────────────────────
+                // ── Step 3: insert in dependency order ────────────────────────
                 foreach ($insertOrder as $table) {
                     if (! Schema::hasTable($table) || ! array_key_exists($table, $snapshotTables)) {
                         continue;
