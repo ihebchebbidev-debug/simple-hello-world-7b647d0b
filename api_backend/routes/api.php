@@ -12,6 +12,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BackupSnapshotController;
 use App\Http\Controllers\Api\CampaignController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\FeedbackReportController;
@@ -254,6 +255,15 @@ $registerGroup(['reports', 'v1/reports'], 'auth:sanctum', function (): void {
     Route::get('phytosanitary',    [ReportController::class, 'phytosanitary']);
     Route::get('harvest',          [ReportController::class, 'harvest']);
     Route::get('production-cost',  [ReportController::class, 'productionCost']);
+});
+
+// ─── Backup snapshots (admin-only point-in-time restore) ─────────────────────
+
+$registerGroup(['backup-snapshots', 'v1/backup-snapshots'], ['auth:sanctum', 'role:admin'], function (): void {
+    Route::get('/',                          [BackupSnapshotController::class, 'index']);
+    Route::post('/',                         [BackupSnapshotController::class, 'store']);
+    Route::post('{snapshot}/restore',        [BackupSnapshotController::class, 'restore']);
+    Route::delete('{snapshot}',              [BackupSnapshotController::class, 'destroy']);
 });
 
 // ─── System Logs (admin-only audit trail) ─────────────────────────────────────
