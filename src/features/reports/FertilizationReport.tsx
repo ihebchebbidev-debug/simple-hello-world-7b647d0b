@@ -1,7 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import {
+  Bar, BarChart, CartesianGrid, Legend, Line, LineChart,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts';
 import { api } from '@/lib/api';
 import ReportTableCard from '@/components/reports/ReportTableCard';
 import ReportToolbar from '@/components/reports/ReportToolbar';
@@ -10,7 +14,28 @@ import { usePagination } from '@/hooks/usePagination';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import { usePlotsForFilter } from '@/hooks/usePlotsForFilter';
 import { exportCSV } from '@/lib/export';
-import { formatMonthFr } from '@/lib/format';
+import { chartToDataUrl } from '@/lib/chartPrint';
+
+// 18 well-spaced hues so plots stay distinguishable on farms with many plots.
+const PALETTE = [
+  'hsl(142, 60%, 42%)', 'hsl(217, 91%, 60%)', 'hsl(35, 92%, 50%)',
+  'hsl(12, 60%, 65%)',  'hsl(280, 60%, 60%)', 'hsl(180, 60%, 45%)',
+  'hsl(45, 90%, 55%)',  'hsl(330, 60%, 60%)', 'hsl(160, 50%, 45%)',
+  'hsl(255, 70%, 65%)', 'hsl(95, 55%, 45%)',  'hsl(200, 80%, 50%)',
+  'hsl(20, 85%, 55%)',  'hsl(300, 55%, 55%)', 'hsl(120, 45%, 50%)',
+  'hsl(60, 70%, 45%)',  'hsl(350, 75%, 62%)', 'hsl(230, 60%, 58%)',
+];
+
+const tooltipStyle = {
+  background: 'hsl(var(--card))',
+  border: 'none',
+  borderRadius: '8px',
+  fontSize: '12px',
+  color: 'hsl(var(--foreground))',
+  padding: '8px 12px',
+};
+
+const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 
 interface MonthlyApi {
   plot_id: string;
@@ -43,11 +68,8 @@ interface ApiData { monthly: MonthlyApi[]; cumulative: CumulApi[]; compositionle
 
 type Nutrient = 'n' | 'p' | 'k' | 'mg' | 'ca' | 's';
 
-interface PlotMonthlyRow {
-  plotId: string;
-  plot: string;
-  byMonth: Record<string, number>;
-}
+interface ChartPlot { id: string; name: string }
+type ChartRow = Record<string, number | string>;
 
 interface PlotCumulRow {
   plotId: string;
@@ -76,15 +98,125 @@ interface CompositionlessRow {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+const NUTRIENT_KEY: Record<Nutrient, keyof MonthlyApi> = {
+  n: 'n_per_ha',
+  p: 'p_per_ha',
+  k: 'k_per_ha',
+  mg: 'mg_per_ha',
+  ca: 'ca_per_ha',
+  s: 's_per_ha',
+};
+
+interface NutrientChartCardProps {
+  title: string;
+  data: ChartRow[];
+  plots: ChartPlot[];
+  mode: 'bar' | 'line';
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+}
+
+// One chart per nutrient. Each card keeps its own print-only PNG/SVG snapshot in
+// sync because the live Recharts ResponsiveContainer doesn't paint into the print
+// canvas (it exports as a grey box).
+const NutrientChartCard = ({ title, data, plots, mode, isLoading, isError, onRetry }: NutrientChartCardProps) => {
+  const { t } = useTranslation();
+  const chartRef = useRef<HTMLDivElement>(null);
+  const printImgRef = useRef<HTMLImageElement>(null);
+
+  const refreshChartSnapshot = () => {
+    const src = chartToDataUrl(chartRef.current);
+    if (src && printImgRef.current) printImgRef.current.src = src;
+  };
+
+  useEffect(() => {
+    const id = window.setTimeout(refreshChartSnapshot, 350);
+    return () => window.clearTimeout(id);
+  }, [data, mode, plots]);
+
+  useEffect(() => {
+    window.addEventListener('beforeprint', refreshChartSnapshot);
+    return () => window.removeEventListener('beforeprint', refreshChartSnapshot);
+  }, []);
+
+  const ChartComponent = mode === 'bar' ? BarChart : LineChart;
+
+  return (
+    <div className="stat-card">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 className="text-[13px] font-semibold text-foreground uppercase tracking-wider">
+          {title}{' '}
+          <span className="text-[11px] normal-case text-muted-foreground font-normal tracking-normal">(unité/ha)</span>
+        </h3>
+        <p className="text-[11px] text-muted-foreground">
+          {t('reports.plotsCount', { count: plots.length, defaultValue: '{{count}} plot(s)' })}
+        </p>
+      </div>
+      <div ref={chartRef} className="no-print" style={{ width: '100%', height: 300 }}>
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="w-full max-w-md space-y-3 px-6">
+              <div className="h-3 w-32 rounded bg-[hsl(var(--surface-bright))] animate-pulse" />
+              <div className="h-44 w-full rounded bg-[hsl(var(--surface-bright))] animate-pulse opacity-70" />
+            </div>
+          </div>
+        ) : isError ? (
+          <div className="flex items-center justify-center h-full gap-3 px-4 text-sm">
+            <span className="text-[hsl(var(--accent-danger))]">{t('reports.loadFailed')}</span>
+            <button type="button" onClick={onRetry} className="btn-secondary text-xs">
+              {t('common.retry', 'Réessayer')}
+            </button>
+          </div>
+        ) : data.length === 0 || plots.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t('reports.noData')}</p>
+        ) : (
+          <ResponsiveContainer>
+            <ChartComponent data={data} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+              <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={tooltipStyle} cursor={mode === 'bar' ? { fill: 'hsl(var(--surface-container-lowest))' } : undefined} />
+              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+              {plots.map((plot, i) => {
+                const color = PALETTE[i % PALETTE.length];
+                return mode === 'bar'
+                  ? <Bar key={plot.name} dataKey={plot.name} fill={color} radius={[4, 4, 0, 0]} maxBarSize={20} isAnimationActive={false} />
+                  : <Line key={plot.name} type="monotone" dataKey={plot.name} stroke={color} strokeWidth={2.2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls isAnimationActive={false} />;
+              })}
+            </ChartComponent>
+          </ResponsiveContainer>
+        )}
+      </div>
+      {/* Print/PDF fallback — a flattened snapshot of the chart above. */}
+      <img ref={printImgRef} alt="" className="print-only" style={{ width: '100%', height: 'auto' }} />
+      {plots.length > 0 && (
+        <div className="print-only" style={{ marginTop: '8px' }}>
+          {plots.map((plot, i) => (
+            <span
+              key={plot.id}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '14px', fontSize: '11px', color: '#111' }}
+            >
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: PALETTE[i % PALETTE.length], display: 'inline-block' }} />
+              {plot.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const FertilizationReport = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const filters = useReportFilters({ defaultActiveCampaign: true });
   const plotsQuery = usePlotsForFilter();
   const [cropFilter, setCropFilter] = useState('all');
+  const [chartMode, setChartMode] = useState<'bar' | 'line'>('line');
   const [searchCumul, setSearchCumul] = useState('');
 
-  const openHistory = (plotId: string, plotName: string, params?: { nutrient?: 'n' | 'p' | 'k' | 'mg' | 'ca' | 's'; fertilizerId?: string }) => {
+  const openHistory = (plotId: string, plotName: string, params?: { nutrient?: Nutrient; fertilizerId?: string }) => {
     const qs = new URLSearchParams({ plot_name: plotName });
     if (filters.apiParams.date_from) qs.set('date_from', String(filters.apiParams.date_from));
     if (filters.apiParams.date_to) qs.set('date_to', String(filters.apiParams.date_to));
@@ -133,44 +265,49 @@ const FertilizationReport = () => {
     return [...set].sort();
   }, [visibleMonthly]);
 
-  // Distinct plots with at least one monthly row
-  const monthlyPlots = useMemo(() => {
+  // Distinct plots with at least one monthly row — these become the chart series.
+  const chartPlots = useMemo<ChartPlot[]>(() => {
     const map = new Map<string, string>();
     visibleMonthly.forEach((m: MonthlyApi) => map.set(m.plot_id, m.plot_name));
-    return Array.from(map.entries()).map(([plotId, plot]) => ({ plotId, plot }));
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [visibleMonthly]);
 
-  const buildPivot = (nutrient: Nutrient): PlotMonthlyRow[] => {
-    const key: keyof MonthlyApi = nutrient === 'n'
-      ? 'n_per_ha'
-      : nutrient === 'p'
-        ? 'p_per_ha'
-        : nutrient === 'k'
-          ? 'k_per_ha'
-          : nutrient === 'mg'
-            ? 'mg_per_ha'
-            : nutrient === 'ca'
-              ? 'ca_per_ha'
-              : 's_per_ha';
-    return monthlyPlots.map(({ plotId, plot }) => {
-      const byMonth: Record<string, number> = {};
-      months.forEach((mm) => { byMonth[mm] = 0; });
-      visibleMonthly
-        .filter((m) => m.plot_id === plotId)
-        .forEach((m) => {
-          const k = `${m.year}-${String(m.month).padStart(2, '0')}`;
-          byMonth[k] = round1((byMonth[k] ?? 0) + (m[key] ?? 0));
-        });
-      return { plotId, plot, byMonth };
+  // Pre-aggregate every nutrient per plot per month in a single pass, then shape
+  // each nutrient into Recharts rows (one row per month, one key per plot).
+  const chartDataByNutrient = useMemo(() => {
+    const acc = new Map<string, Record<string, number>>(); // `${nutrient}|${plotId}|${ym}` bucket
+    const bucket = (nutrient: Nutrient): Record<string, number> => {
+      const existing = acc.get(nutrient);
+      if (existing) return existing;
+      const fresh: Record<string, number> = {};
+      acc.set(nutrient, fresh);
+      return fresh;
+    };
+    (Object.keys(NUTRIENT_KEY) as Nutrient[]).forEach((nutrient) => {
+      const key = NUTRIENT_KEY[nutrient];
+      const store = bucket(nutrient);
+      visibleMonthly.forEach((m) => {
+        const ym = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        const cell = `${m.plot_id}|${ym}`;
+        store[cell] = (store[cell] ?? 0) + ((m[key] as number | null) ?? 0);
+      });
     });
-  };
 
-  const azoteRows = useMemo(() => buildPivot('n'), [visibleMonthly, monthlyPlots, months]);
-  const phosphoreRows = useMemo(() => buildPivot('p'), [visibleMonthly, monthlyPlots, months]);
-  const potassiumRows = useMemo(() => buildPivot('k'), [visibleMonthly, monthlyPlots, months]);
-  const magnesiumRows = useMemo(() => buildPivot('mg'), [visibleMonthly, monthlyPlots, months]);
-  const calciumRows = useMemo(() => buildPivot('ca'), [visibleMonthly, monthlyPlots, months]);
-  const sulfurRows = useMemo(() => buildPivot('s'), [visibleMonthly, monthlyPlots, months]);
+    const result = {} as Record<Nutrient, ChartRow[]>;
+    (Object.keys(NUTRIENT_KEY) as Nutrient[]).forEach((nutrient) => {
+      const store = acc.get(nutrient) ?? {};
+      result[nutrient] = months.map((ym) => {
+        const [year, mo] = ym.split('-');
+        const row: ChartRow = { month: `${MONTH_LABELS[Number(mo) - 1]} ${year.slice(2)}` };
+        chartPlots.forEach(({ id, name }) => {
+          const value = store[`${id}|${ym}`];
+          if (value) row[name] = round1(value);
+        });
+        return row;
+      });
+    });
+    return result;
+  }, [visibleMonthly, months, chartPlots]);
 
   const cumulRows = useMemo<PlotCumulRow[]>(() =>
     visibleCumul.map((c: CumulApi) => ({
@@ -238,59 +375,56 @@ const FertilizationReport = () => {
     </select>
   );
 
-  const renderPivot = (title: string, rows: PlotMonthlyRow[], nutrient: Nutrient) => (
-    <div className="stat-card">
-      <h3 className="text-[13px] font-semibold text-foreground mb-3 uppercase tracking-wider">
-        {title}{' '}
-        <span className="text-[11px] normal-case text-muted-foreground font-normal">(unité/ha)</span>
-      </h3>
-      <div className="overflow-x-auto -mx-1">
-        <table className="data-table min-w-[420px]">
-          <thead>
-            <tr>
-              <th>{t('table.plot', 'Plot')}</th>
-              {months.map((m) => <th key={m}>{formatMonthFr(m)}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row.plotId}
-                onDoubleClick={() => openHistory(row.plotId, row.plot, { nutrient })}
-                title={t('reports.dblClickHistory', 'Double-click to view operations history')}
-                className="cursor-pointer"
-              >
-                <td className="font-medium text-foreground">{row.plot}</td>
-                {months.map((m) => <td key={m}>{row.byMonth[m] || '—'}</td>)}
-              </tr>
-            ))}
-
-            <TableSkeletonRows
-              colSpan={Math.max(2, months.length + 1)}
-              isLoading={!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && rows.length === 0)}
-              isError={reportQuery.isError && !reportQuery.isFetching}
-              isEmpty={filters.filtersReady && !reportQuery.isLoading && !reportQuery.isError && (rows.length === 0 || months.length === 0)}
-              onRetry={() => reportQuery.refetch()}
-            />
-          </tbody>
-        </table>
-      </div>
+  const chartToggle = (
+    <div className="flex rounded-md overflow-hidden bg-[hsl(var(--surface-container-highest))]">
+      {(['bar', 'line'] as const).map((mode) => (
+        <button
+          key={mode}
+          onClick={() => setChartMode(mode)}
+          className={`px-3 h-9 text-[11px] font-medium transition-colors ${
+            chartMode === mode
+              ? 'bg-[hsl(var(--primary)/0.2)] text-[hsl(var(--primary-glow))]'
+              : 'text-muted-foreground'
+          }`}
+        >
+          {mode === 'bar' ? t('reports.chartBar', 'Bar') : t('reports.chartLine', 'Line')}
+        </button>
+      ))}
     </div>
   );
+
+  const chartLoading = !filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && !reportQuery.data);
+  const chartError = reportQuery.isError && !reportQuery.isFetching;
+
+  const NUTRIENTS: { nutrient: Nutrient; title: string }[] = [
+    { nutrient: 'n', title: t('reports.nitrogen', 'NITROGEN') },
+    { nutrient: 'p', title: t('reports.phosphorus', 'PHOSPHORUS') },
+    { nutrient: 'k', title: t('reports.potassium', 'POTASSIUM') },
+    { nutrient: 'mg', title: t('reports.magnesium', 'MAGNESIUM') },
+    { nutrient: 'ca', title: t('reports.calcium', 'CALCIUM') },
+    { nutrient: 's', title: t('reports.sulfur', 'SULFUR') },
+  ];
 
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="stat-card !p-3 sm:!p-4">
-        <ReportToolbar filters={filters} onExport={handleExport} cropFilter={cropFilterControl} />
+        <ReportToolbar filters={filters} onExport={handleExport} cropFilter={cropFilterControl} extras={chartToggle} />
       </div>
 
-
-      {renderPivot(t('reports.nitrogen', 'NITROGEN'), azoteRows, 'n')}
-      {renderPivot(t('reports.phosphorus', 'PHOSPHORUS'), phosphoreRows, 'p')}
-      {renderPivot(t('reports.potassium', 'POTASSIUM'), potassiumRows, 'k')}
-      {renderPivot(t('reports.magnesium', 'MAGNESIUM'), magnesiumRows, 'mg')}
-      {renderPivot(t('reports.calcium', 'CALCIUM'), calciumRows, 'ca')}
-      {renderPivot(t('reports.sulfur', 'SULFUR'), sulfurRows, 's')}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {NUTRIENTS.map(({ nutrient, title }) => (
+          <NutrientChartCard
+            key={nutrient}
+            title={title}
+            data={chartDataByNutrient[nutrient]}
+            plots={chartPlots}
+            mode={chartMode}
+            isLoading={chartLoading}
+            isError={chartError}
+            onRetry={() => reportQuery.refetch()}
+          />
+        ))}
+      </div>
 
       <ReportTableCard
         title={t('reports.cumulativeElements', 'Eléments cumulés par hectare')}
