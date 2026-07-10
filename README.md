@@ -1,4 +1,4 @@
-# Agri-Sync — Admin Web
+# Agri-Sync — Admin Webs
 
 Web administration interface for Agri-Sync (managers & administrators).
 
