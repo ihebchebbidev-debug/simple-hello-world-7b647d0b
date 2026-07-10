@@ -191,16 +191,16 @@ const ProductionCostReport = () => {
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px' }} />
                 <Bar dataKey="irrigation" name={t('table.irrigationCost', 'Irrigation') + ' /ha'} stackId="a" fill={COLORS.irrigation}>
-                  <LabelList dataKey="irrigation" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                  <LabelList dataKey="irrigation" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                 </Bar>
                 <Bar dataKey="fertilization" name={t('table.fertilizationCost', 'Fertilisation') + ' /ha'} stackId="a" fill={COLORS.fertilization}>
-                  <LabelList dataKey="fertilization" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                  <LabelList dataKey="fertilization" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                 </Bar>
                 <Bar dataKey="phytosanitary" name={t('table.phytosanitaryCost', 'Phytosanitaire') + ' /ha'} stackId="a" fill={COLORS.phytosanitary}>
-                  <LabelList dataKey="phytosanitary" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                  <LabelList dataKey="phytosanitary" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                 </Bar>
                 <Bar dataKey="harvest" name={t('table.harvestCost', 'Récolte') + ' /ha'} stackId="a" fill={COLORS.harvest}>
-                  <LabelList dataKey="harvest" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                  <LabelList dataKey="harvest" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                   <LabelList dataKey="total" position="top" content={renderCustomTotalLabel} />
                 </Bar>
               </BarChart>
