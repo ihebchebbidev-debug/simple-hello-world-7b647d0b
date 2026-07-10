@@ -1,0 +1,1 @@
+function e(o){const t=[],{primaryEntity:n,primaryId:p,prospectId:r,opportunityId:i}=o;return r&&!(n==="prospect"&&String(r)===String(p))&&t.push({entity:"prospect",entityId:String(r),label:"Prospect"}),i&&!(n==="opportunity"&&String(i)===String(p))&&t.push({entity:"opportunity",entityId:String(i),label:"Opportunité"}),t}export{e as b};

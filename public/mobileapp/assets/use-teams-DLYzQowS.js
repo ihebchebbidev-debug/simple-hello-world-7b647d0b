@@ -1,0 +1,1 @@
+import{b1 as t,av as n}from"../index-Bsze9v2s.js";function i(){const[r,e]=t.useState([]),[o,s]=t.useState(!0),a=t.useCallback(async()=>{s(!0);try{const c=await n("/teams.php");e(c.teams??[])}catch{e([])}finally{s(!1)}},[]);return t.useEffect(()=>{a()},[a]),{teams:r,loading:o,refresh:a}}export{i as u};

@@ -1,0 +1,1 @@
+import{bq as e,bi as u,b1 as n,C as c,b5 as p,b6 as a,b7 as y,b8 as A,b9 as f}from"../index-Bsze9v2s.js";function b(){const r=e(),{refresh:o}=u(),s=n.useMemo(()=>({qc:r,refresh:o}),[r,o]);return{opts:s,sync:t=>f(t,s),afterProspectAuto:t=>A(t,s),afterOpportunityAuto:t=>y(t,s),afterBulkProspectAuto:t=>a(t,s),afterBulkOpportunityAuto:t=>p(t,s),...c}}export{b as u};

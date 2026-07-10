@@ -27,6 +27,7 @@ interface PlotRow {
   plot_name: string;
   total_workers: number;
   total_quantity: number;
+  total_cost: number;
 }
 
 const HarvestingReport = () => {
@@ -65,6 +66,7 @@ const HarvestingReport = () => {
       total_quantity: Math.round(
         g.harvests.reduce((s, h) => s + Number(h.quantity_harvested || 0), 0) * 100,
       ) / 100,
+      total_cost: g.harvests.reduce((s, h) => s + (h.num_workers * h.days_worked * (h.daily_rate_at_entry || 0)), 0),
     }));
   }, [reportQuery.data]);
 
@@ -79,7 +81,7 @@ const HarvestingReport = () => {
     const targetRows = rowsAfterCrop;
     if (!q) return targetRows;
     return targetRows.filter((r) =>
-      `${r.plot_name} ${r.total_workers} ${r.total_quantity}`.toLowerCase().includes(q),
+      `${r.plot_name} ${r.total_workers} ${r.total_quantity} ${r.total_quantity > 0 ? (r.total_cost / r.total_quantity).toFixed(3) : "0.000"}`.toLowerCase().includes(q),
     );
   }, [rowsAfterCrop, search]);
 
@@ -93,6 +95,7 @@ const HarvestingReport = () => {
       [t('table.plot', 'Plot')]: r.plot_name,
       "Main d'œuvre (homme/jour)": r.total_workers,
       'Quantité récoltée (kg)': r.total_quantity,
+      'Coût du kg (dt)': r.total_quantity > 0 ? Number((r.total_cost / r.total_quantity).toFixed(3)) : 0,
     })),
     'harvest-report',
   );
@@ -127,6 +130,7 @@ const HarvestingReport = () => {
               <th>{t('table.plot', 'Plot')}</th>
               <th>{t('table.workerDays', "Main d'œuvre (homme/jour)")}</th>
               <th>{t('table.quantityHarvested', 'Quantité récoltée (kg)')}</th>
+              <th>{t('table.costPerKg', 'Coût du kg (dt)')}</th>
             </tr>
           </thead>
           <tbody>
@@ -140,10 +144,13 @@ const HarvestingReport = () => {
                 <td className="font-medium text-foreground">{row.plot_name}</td>
                 <td>{row.total_workers}</td>
                 <td className="font-semibold text-foreground">{row.total_quantity.toLocaleString()} kg</td>
+                <td className="font-medium text-foreground">
+                  {row.total_quantity > 0 ? (row.total_cost / row.total_quantity).toFixed(3) : "0.000"} dt
+                </td>
               </tr>
             ))}
             <TableSkeletonRows
-              colSpan={3}
+              colSpan={4}
               isLoading={!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && rows.length === 0)}
               isError={reportQuery.isError && !reportQuery.isFetching}
               isEmpty={filters.filtersReady && !reportQuery.isLoading && !reportQuery.isError && pagination.pageRows.length === 0}
