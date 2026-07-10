@@ -2,13 +2,13 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts';
+import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts';
 import ReportTableCard from '@/components/reports/ReportTableCard';
 import ReportToolbar from '@/components/reports/ReportToolbar';
 
 const COLORS = {
   irrigation: '#4da6ff',
-  fertilization: '#43b596',
+  fertilization: '#10b981',
   phytosanitary: '#ffb84d',
   harvest: '#f07167'
 };
@@ -165,46 +165,50 @@ const ProductionCostReport = () => {
             {t('common.noData', 'No data available')}
           </div>
         ) : (
-          <div className="min-w-[760px] h-[500px] pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={pagination.pageRows}
-                margin={{ top: 30, right: 30, left: 20, bottom: 60 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis 
-                  dataKey="plot" 
-                  tick={{ fill: 'hsl(var(--foreground))' }}
-                  tickMargin={10}
-                  angle={-45}
-                  textAnchor="end"
-                />
-                <YAxis 
-                  tickFormatter={(val) => `${val}`}
-                  tick={{ fill: 'hsl(var(--foreground))' }}
-                  label={{ value: t('reports.costPerHa', 'Coût (TND/ha)'), angle: -90, position: 'insideLeft', style: { fill: 'hsl(var(--foreground))' } }}
-                />
-                <Tooltip 
-                  formatter={(value: any) => `${Math.round(Number(value)).toLocaleString()} TND`}
-                  cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }}
-                  contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' }}
-                />
-                <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                <Bar dataKey="irrigation" name={t('table.irrigationCost', 'Irrigation') + ' /ha'} stackId="a" fill={COLORS.irrigation}>
-                  <LabelList dataKey="irrigation" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
-                </Bar>
-                <Bar dataKey="fertilization" name={t('table.fertilizationCost', 'Fertilisation') + ' /ha'} stackId="a" fill={COLORS.fertilization}>
-                  <LabelList dataKey="fertilization" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
-                </Bar>
-                <Bar dataKey="phytosanitary" name={t('table.phytosanitaryCost', 'Phytosanitaire') + ' /ha'} stackId="a" fill={COLORS.phytosanitary}>
-                  <LabelList dataKey="phytosanitary" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
-                </Bar>
-                <Bar dataKey="harvest" name={t('table.harvestCost', 'Récolte') + ' /ha'} stackId="a" fill={COLORS.harvest}>
-                  <LabelList dataKey="harvest" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
-                  <LabelList dataKey="total" position="top" content={renderCustomTotalLabel} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="min-w-[760px] h-[500px] pt-4 flex flex-col">
+            <div className="text-sm font-medium text-muted-foreground ml-6 mb-2 shrink-0">{t('reports.costPerHa', 'Coût (TND/ha)')}</div>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={pagination.pageRows}
+                  margin={{ top: 30, right: 30, left: 20, bottom: 60 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis 
+                    dataKey="plot" 
+                    tick={{ fill: 'hsl(var(--foreground))' }}
+                    tickMargin={10}
+                    angle={-45}
+                    textAnchor="end"
+                  />
+                  <YAxis 
+                    tickFormatter={(val) => `${val}`}
+                    tick={{ fill: 'hsl(var(--foreground))' }}
+                  />
+                  <Tooltip 
+                    formatter={(value: any) => `${Math.round(Number(value)).toLocaleString()} TND`}
+                    cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }}
+                    contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                  <Bar dataKey="irrigation" name={t('table.irrigationCost', 'Irrigation')} stackId="a" fill={COLORS.irrigation}>
+                    <LabelList dataKey="irrigation" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                  </Bar>
+                  <Bar dataKey="fertilization" name={t('table.fertilizationCost', 'Fertilisation')} stackId="a" fill={COLORS.fertilization}>
+                    <LabelList dataKey="fertilization" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                  </Bar>
+                  <Bar dataKey="phytosanitary" name={t('table.phytosanitaryCost', 'Phytosanitaire')} stackId="a" fill={COLORS.phytosanitary}>
+                    <LabelList dataKey="phytosanitary" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                  </Bar>
+                  <Bar dataKey="harvest" name={t('table.harvestCost', 'Récolte')} stackId="a" fill={COLORS.harvest}>
+                    <LabelList dataKey="harvest" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                  </Bar>
+                  <Line dataKey="total" name={t('table.totalCost', 'Total')} stroke="transparent" dot={false} activeDot={false} legendType="none">
+                    <LabelList dataKey="total" position="top" content={renderCustomTotalLabel} />
+                  </Line>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
       </ReportTableCard>
