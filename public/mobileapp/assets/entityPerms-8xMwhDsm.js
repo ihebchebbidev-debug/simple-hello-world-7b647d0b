@@ -1,1 +1,0 @@
-const e={prospect:"prospect.edit",opportunity:"opportunity.edit",contract:"contract.edit",migration:"migration.edit",reclamation:"reclamation.edit",user:"user.edit","lead-action":"prospect.edit"};function i(t){return e[t]??`${t}.edit`}export{i as e};
