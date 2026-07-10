@@ -2,9 +2,26 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts';
 import ReportTableCard from '@/components/reports/ReportTableCard';
 import ReportToolbar from '@/components/reports/ReportToolbar';
-import TableSkeletonRows from '@/components/reports/TableSkeletonRows';
+
+const COLORS = {
+  irrigation: '#4da6ff',
+  fertilization: '#43b596',
+  phytosanitary: '#ffb84d',
+  harvest: '#f07167'
+};
+
+const renderCustomTotalLabel = (props: any) => {
+  const { x, y, width, value } = props;
+  if (!value) return null;
+  return (
+    <text x={x + width / 2} y={y - 10} fill="hsl(var(--foreground))" textAnchor="middle" fontSize={12} fontWeight="bold">
+      {`${Math.round(value).toLocaleString()} TND`}
+    </text>
+  );
+};
 import { usePagination } from '@/hooks/usePagination';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import { usePlotsForFilter } from '@/hooks/usePlotsForFilter';
@@ -132,37 +149,64 @@ const ProductionCostReport = () => {
         pagination={pagination}
         minWidth={760}
       >
-        <table className="data-table min-w-[760px]">
-          <thead>
-            <tr>
-              <th>{t('table.plot', 'Plot')}</th>
-              <th>{t('table.irrigationCost', 'Irrigation')} (TND/ha)</th>
-              <th>{t('table.fertilizationCost', 'Fertilization')} (TND/ha)</th>
-              <th>{t('table.phytosanitaryCost', 'Phytosanitary')} (TND/ha)</th>
-              <th>{t('table.harvestCost', 'Harvest')} (TND/ha)</th>
-              <th>{t('table.totalCost', 'Total')} (TND/ha)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pagination.pageRows.map((row) => (
-              <tr key={row.plot}>
-                <td className="font-medium text-foreground">{row.plot}</td>
-                <td>{Math.round(row.irrigation).toLocaleString()}</td>
-                <td>{Math.round(row.fertilization).toLocaleString()}</td>
-                <td>{Math.round(row.phytosanitary).toLocaleString()}</td>
-                <td>{Math.round(row.harvest).toLocaleString()}</td>
-                <td className="font-bold text-foreground">{Math.round(row.total).toLocaleString()}</td>
-              </tr>
-            ))}
-            <TableSkeletonRows
-              colSpan={6}
-              isLoading={!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && costs.length === 0)}
-              isError={reportQuery.isError && !reportQuery.isFetching}
-              isEmpty={filters.filtersReady && !reportQuery.isLoading && !reportQuery.isError && costs.length === 0}
-              onRetry={() => reportQuery.refetch()}
-            />
-          </tbody>
-        </table>
+        {(!filters.filtersReady || reportQuery.isLoading || (reportQuery.isFetching && costs.length === 0)) ? (
+          <div className="h-[500px] flex items-center justify-center text-muted-foreground min-w-[760px]">
+            {t('common.loading', 'Loading...')}
+          </div>
+        ) : reportQuery.isError ? (
+          <div className="h-[500px] flex flex-col items-center justify-center text-destructive min-w-[760px] gap-2">
+            <p>{t('common.error', 'Error loading data')}</p>
+            <button onClick={() => reportQuery.refetch()} className="btn-primary text-sm px-3 py-1">
+              {t('common.retry', 'Retry')}
+            </button>
+          </div>
+        ) : costs.length === 0 ? (
+          <div className="h-[500px] flex items-center justify-center text-muted-foreground min-w-[760px]">
+            {t('common.noData', 'No data available')}
+          </div>
+        ) : (
+          <div className="min-w-[760px] h-[500px] pt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={pagination.pageRows}
+                margin={{ top: 30, right: 30, left: 20, bottom: 60 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                <XAxis 
+                  dataKey="plot" 
+                  tick={{ fill: 'hsl(var(--foreground))' }}
+                  tickMargin={10}
+                  angle={-45}
+                  textAnchor="end"
+                />
+                <YAxis 
+                  tickFormatter={(val) => `${val}`}
+                  tick={{ fill: 'hsl(var(--foreground))' }}
+                  label={{ value: t('reports.costPerHa', 'Coût (TND/ha)'), angle: -90, position: 'insideLeft', style: { fill: 'hsl(var(--foreground))' } }}
+                />
+                <Tooltip 
+                  formatter={(value: number) => `${Math.round(value).toLocaleString()} TND`}
+                  cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }}
+                  contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' }}
+                />
+                <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                <Bar dataKey="irrigation" name={t('table.irrigationCost', 'Irrigation') + ' /ha'} stackId="a" fill={COLORS.irrigation}>
+                  <LabelList dataKey="irrigation" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                </Bar>
+                <Bar dataKey="fertilization" name={t('table.fertilizationCost', 'Fertilisation') + ' /ha'} stackId="a" fill={COLORS.fertilization}>
+                  <LabelList dataKey="fertilization" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                </Bar>
+                <Bar dataKey="phytosanitary" name={t('table.phytosanitaryCost', 'Phytosanitaire') + ' /ha'} stackId="a" fill={COLORS.phytosanitary}>
+                  <LabelList dataKey="phytosanitary" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                </Bar>
+                <Bar dataKey="harvest" name={t('table.harvestCost', 'Récolte') + ' /ha'} stackId="a" fill={COLORS.harvest}>
+                  <LabelList dataKey="harvest" position="inside" fill="#fff" fontSize={11} formatter={(val: number) => val > 0 ? Math.round(val) : ''} />
+                  <LabelList dataKey="total" position="top" content={renderCustomTotalLabel} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </ReportTableCard>
     </div>
   );
