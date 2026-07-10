@@ -17,10 +17,29 @@ const renderCustomTotalLabel = (props: any) => {
   const { x, y, width, value } = props;
   if (!value) return null;
   return (
-    <text x={x + width / 2} y={y - 10} fill="hsl(var(--foreground))" textAnchor="middle" fontSize={12} fontWeight="bold">
+    <text x={x + width / 2} y={y - 10} fill="hsl(var(--foreground))" textAnchor="middle" fontSize={14} fontWeight="bold">
       {`${Math.round(value).toLocaleString()} TND`}
     </text>
   );
+};
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const filteredPayload = payload.filter((entry: any) => Number(entry.value) > 0 && entry.dataKey !== 'total');
+    if (filteredPayload.length === 0) return null;
+    return (
+      <div className="bg-card text-foreground border border-border rounded-lg p-3 shadow-md">
+        <p className="font-bold text-[15px] mb-2">{label}</p>
+        {filteredPayload.map((entry: any, index: number) => (
+          <div key={index} className="flex items-center gap-2 mb-1.5 text-[14px]" style={{ color: entry.color }}>
+            <span className="font-semibold">{entry.name} :</span>
+            <span>{Math.round(Number(entry.value)).toLocaleString()} TND</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
 };
 import { usePagination } from '@/hooks/usePagination';
 import { useReportFilters } from '@/hooks/useReportFilters';
@@ -186,22 +205,21 @@ const ProductionCostReport = () => {
                     tick={{ fill: 'hsl(var(--foreground))' }}
                   />
                   <Tooltip 
-                    formatter={(value: any) => `${Math.round(Number(value)).toLocaleString()} TND`}
+                    content={<CustomTooltip />}
                     cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }}
-                    contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' }}
                   />
                   <Legend wrapperStyle={{ paddingTop: '20px' }} />
                   <Bar dataKey="irrigation" name={t('table.irrigationCost', 'Irrigation')} stackId="a" fill={COLORS.irrigation}>
-                    <LabelList dataKey="irrigation" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                    <LabelList dataKey="irrigation" position="inside" fill="#fff" fontSize={13} fontWeight="600" formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                   </Bar>
                   <Bar dataKey="fertilization" name={t('table.fertilizationCost', 'Fertilisation')} stackId="a" fill={COLORS.fertilization}>
-                    <LabelList dataKey="fertilization" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                    <LabelList dataKey="fertilization" position="inside" fill="#fff" fontSize={13} fontWeight="600" formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                   </Bar>
                   <Bar dataKey="phytosanitary" name={t('table.phytosanitaryCost', 'Phytosanitaire')} stackId="a" fill={COLORS.phytosanitary}>
-                    <LabelList dataKey="phytosanitary" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                    <LabelList dataKey="phytosanitary" position="inside" fill="#fff" fontSize={13} fontWeight="600" formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                   </Bar>
                   <Bar dataKey="harvest" name={t('table.harvestCost', 'Récolte')} stackId="a" fill={COLORS.harvest}>
-                    <LabelList dataKey="harvest" position="inside" fill="#fff" fontSize={11} formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
+                    <LabelList dataKey="harvest" position="inside" fill="#fff" fontSize={13} fontWeight="600" formatter={(val: any) => Number(val) > 0 ? Math.round(Number(val)) : ''} />
                   </Bar>
                   <Line dataKey="total" name={t('table.totalCost', 'Total')} stroke="transparent" dot={false} activeDot={false} legendType="none">
                     <LabelList dataKey="total" position="top" content={renderCustomTotalLabel} />
