@@ -185,7 +185,7 @@ const ProductionCostReport = () => {
                   label={{ value: t('reports.costPerHa', 'Coût (TND/ha)'), angle: -90, position: 'insideLeft', style: { fill: 'hsl(var(--foreground))' } }}
                 />
                 <Tooltip 
-                  formatter={(value: number) => `${Math.round(value).toLocaleString()} TND`}
+                  formatter={(value: any) => `${Math.round(Number(value)).toLocaleString()} TND`}
                   cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }}
                   contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' }}
                 />
