@@ -69,7 +69,7 @@ export function useReportFilters({
     queryKey: ['report-filter-campaigns'],
     queryFn: async () => {
       const { data } = await api.get<{ data: CampaignLite[] }>('/campaigns', {
-        params: { per_page: 100 },
+        params: { per_page: 50000 },
       });
       // Endpoint returns { data: [...] } (paginated) — unwrap.
       const payload = (data as unknown as { data?: CampaignLite[] }).data;

@@ -42,7 +42,7 @@ const LoginPage = () => {
         queryFn: async () =>
           // Must match DashboardPage's limit (same query key) so the prefetched
           // cache isn't a stale 24-row subset of the real list.
-          (await api.get('/dashboard/recent-activity', { params: { limit: 1000 } })).data.data.items,
+          (await api.get('/dashboard/recent-activity', { params: { limit: 50000 } })).data.data.items,
       });
       navigate('/dashboard', { replace: true });
     } catch {

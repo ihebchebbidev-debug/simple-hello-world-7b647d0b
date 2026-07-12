@@ -16,7 +16,7 @@ export function usePlotsForFilter() {
     queryKey: ['report-filter-plots'],
     queryFn: async () => {
       const { data } = await api.get<{ data: PlotLite[] }>('/plots', {
-        params: { per_page: 100 },
+        params: { per_page: 50000 },
       });
       const payload = (data as unknown as { data?: PlotLite[] }).data;
       return Array.isArray(payload) ? payload : [];

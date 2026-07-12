@@ -57,7 +57,7 @@ const DashboardPage = () => {
       (await api.get<{ data: { items: ActivityItem[] } }>('/dashboard/recent-activity', {
         // Fetch the full window (matches the backend cap) so the date/plot/type
         // filters below work across the whole campaign, not just recent ops.
-        params: { limit: 1000 },
+        params: { limit: 50000 },
       })).data.data.items,
   });
 
