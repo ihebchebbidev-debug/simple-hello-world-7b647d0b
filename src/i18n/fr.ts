@@ -721,7 +721,7 @@ export const fr = {
       circuitOpen: 'L’assistant est en pause suite à des erreurs répétées. Une nouvelle tentative sera faite automatiquement dans 30 secondes.',
       timeout: 'Le fournisseur IA a mis trop de temps à répondre. Veuillez réessayer.',
       network: 'Impossible de joindre le fournisseur IA. Vérifiez votre connexion puis réessayez.',
-      emptyReply: 'Le fournisseur IA a renvoyé une réponse vide. Veuillez réessayer.',
+      emptyReply: 'Opps ... :( erreur.',
     },
     feedback: {
       label: 'Évaluer cette réponse',

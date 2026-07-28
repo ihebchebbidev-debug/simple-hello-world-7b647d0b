@@ -854,12 +854,12 @@ final class AiContextBuilder
                 ->all();
         }
         if ($this->hasTable('pesticides')) {
-            // Real schema uses `chemical_composition`; older code referenced a
-            // non-existent `active_ingredient` column which blew up the whole
-            // AI context build under stale Schema caches.
+            // The current schema stores the pesticide formula in
+            // `chemical_composition`; do not fallback to the removed
+            // `active_ingredient` column.
             $ingredientCol = $this->hasColumn('pesticides', 'chemical_composition')
                 ? 'chemical_composition'
-                : ($this->hasColumn('pesticides', 'active_ingredient') ? 'active_ingredient' : null);
+                : null;
             $cols = ['name'];
             if ($ingredientCol) $cols[] = $ingredientCol;
             if ($this->hasColumn('pesticides', 'unit')) $cols[] = 'unit';
@@ -869,7 +869,7 @@ final class AiContextBuilder
                 ->orderBy('name')->limit(40)->get()
                 ->map(fn ($r) => [
                     'name' => $r->name ?? null,
-                    'active_ingredient' => $ingredientCol ? ($r->{$ingredientCol} ?? null) : null,
+                    'chemical_composition' => $ingredientCol ? ($r->{$ingredientCol} ?? null) : null,
                     'unit' => $r->unit ?? null,
                 ])
                 ->all();
