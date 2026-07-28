@@ -696,6 +696,8 @@ export const en = {
     copy: 'Copy reply',
     copied: 'Copied',
     thinking: 'Assistant is thinking…',
+    jumpToLatest: 'Jump to latest',
+    regenerate: 'Regenerate response',
     inputPlaceholder: 'Message the assistant…',
     inputHint: 'Enter to send · Shift+Enter for a new line',
     inputHintMobile: 'Tap send or press Enter',
@@ -726,6 +728,12 @@ export const en = {
       up: 'Helpful',
       down: 'Not helpful',
       thanks: 'Thanks for the feedback',
+    },
+    voice: {
+      start: 'Start voice input',
+      stop: 'Stop voice input',
+      listening: 'Listening…',
+      hint: 'Listening — speak now. Click the mic again to stop.',
     },
     history: {
       title: 'Conversations',

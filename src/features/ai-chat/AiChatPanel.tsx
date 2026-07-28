@@ -15,6 +15,7 @@ export default function AiChatPanel() {
     messages,
     isSending,
     sendMessage,
+    regenerateLastAnswer,
     startNewConversation,
     rateMessage,
     historyAvailable,
@@ -127,6 +128,7 @@ export default function AiChatPanel() {
               isSending={isSending}
               onSuggestion={(text) => void sendMessage(text)}
               onRate={(id, rating) => void rateMessage(id, rating)}
+              onRegenerate={() => void regenerateLastAnswer()}
             />
             <AiChatComposer
               focusOnMount={open}

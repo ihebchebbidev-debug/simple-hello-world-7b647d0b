@@ -696,6 +696,8 @@ export const fr = {
     copy: 'Copier la réponse',
     copied: 'Copié',
     thinking: 'L’assistant réfléchit…',
+    jumpToLatest: 'Aller au dernier message',
+    regenerate: 'Régénérer la réponse',
     inputPlaceholder: 'Écrivez votre message…',
     inputHint: 'Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne',
     inputHintMobile: 'Appuyez sur envoyer ou Entrée',
@@ -726,6 +728,12 @@ export const fr = {
       up: 'Utile',
       down: 'Pas utile',
       thanks: 'Merci pour votre retour',
+    },
+    voice: {
+      start: 'Démarrer la saisie vocale',
+      stop: 'Arrêter la saisie vocale',
+      listening: 'Écoute…',
+      hint: 'Écoute en cours — parlez maintenant. Cliquez à nouveau sur le micro pour arrêter.',
     },
     history: {
       title: 'Conversations',
