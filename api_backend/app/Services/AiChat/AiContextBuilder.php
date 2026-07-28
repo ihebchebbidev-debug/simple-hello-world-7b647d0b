@@ -706,13 +706,24 @@ final class AiContextBuilder
                 ->all();
         }
         if (Schema::hasTable('pesticides')) {
-            $cols = array_values(array_filter(['name', 'active_ingredient', 'unit'], fn ($c) => Schema::hasColumn('pesticides', $c)));
-            if (! in_array('name', $cols, true)) $cols = array_merge(['name'], $cols);
+            // Real schema uses `chemical_composition`; older code referenced a
+            // non-existent `active_ingredient` column which blew up the whole
+            // AI context build under stale Schema caches.
+            $ingredientCol = Schema::hasColumn('pesticides', 'chemical_composition')
+                ? 'chemical_composition'
+                : (Schema::hasColumn('pesticides', 'active_ingredient') ? 'active_ingredient' : null);
+            $cols = ['name'];
+            if ($ingredientCol) $cols[] = $ingredientCol;
+            if (Schema::hasColumn('pesticides', 'unit')) $cols[] = 'unit';
             $q = DB::table('pesticides');
             if (Schema::hasColumn('pesticides', 'is_active')) $q->where('is_active', true);
             $out['pesticides'] = $q->select($cols)
                 ->orderBy('name')->limit(40)->get()
-                ->map(fn ($r) => ['name' => $r->name ?? null, 'active_ingredient' => $r->active_ingredient ?? null, 'unit' => $r->unit ?? null])
+                ->map(fn ($r) => [
+                    'name' => $r->name ?? null,
+                    'active_ingredient' => $ingredientCol ? ($r->{$ingredientCol} ?? null) : null,
+                    'unit' => $r->unit ?? null,
+                ])
                 ->all();
         }
         if (Schema::hasTable('pests')) {
@@ -774,7 +785,9 @@ final class AiContextBuilder
         if ($entityId !== null) {
             $q->where('entity_id', $entityId);
         }
-        $row = $q->orderByDesc('effective_from')->orderByDesc('id')->first(['price_per_unit']);
+        // price_history.id is a UUID — lexicographic order is not chronological.
+        // Break ties on the same effective_from with created_at instead.
+        $row = $q->orderByDesc('effective_from')->orderByDesc('created_at')->first(['price_per_unit']);
 
         return $row ? (float) $row->price_per_unit : 0.0;
     }
