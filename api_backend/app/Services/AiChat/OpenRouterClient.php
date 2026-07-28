@@ -43,6 +43,14 @@ final class OpenRouterClient
         ];
     }
 
+    /** Let the caller feed an approximate prompt-token count when the stream provider omits usage. */
+    public function seedApproxPromptTokens(int $tokens): void
+    {
+        if ($this->lastPromptTokens === 0 && $tokens > 0) {
+            $this->lastPromptTokens = $tokens;
+        }
+    }
+
     /** @param array<int, array<string, string>> $messages */
     public function chat(array $messages): string
     {
@@ -179,7 +187,9 @@ final class OpenRouterClient
             'Content-Type'  => 'application/json',
             'Accept'        => $stream ? 'text/event-stream' : 'application/json',
         ])->connectTimeout($connectTimeout)
-          ->timeout($stream ? $streamIdle : $reqTimeout);
+          // For streams, `timeout` is Guzzle's total wall-clock cap — must be large
+          // enough to let a long answer finish. Per-chunk idle is enforced via read_timeout.
+          ->timeout($stream ? max($reqTimeout * 5, 300) : $reqTimeout);
 
         if ($stream) {
             // Guzzle: enable streaming + per-chunk read timeout so a stalled
@@ -226,8 +236,10 @@ final class OpenRouterClient
         if ($lastRawUsage !== null) {
             $this->captureUsage(['usage' => $lastRawUsage]);
         } else {
-            // Approximation from character length if provider omitted usage on stream.
+            // Approximate both prompt + completion when provider omits usage on stream,
+            // so budget accounting doesn't undercount by the (large) system prompt.
             $this->lastCompletionTokens = (int) ceil(mb_strlen($full) / 4);
+            // Prompt tokens are approximated by the caller via approxPromptTokens().
         }
 
         return $full;

@@ -23,8 +23,8 @@ return [
 
     // Model fallback chain — first entry is primary; used in order on upstream failure.
     'models' => array_values(array_filter([
-        env('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
-        env('OPENROUTER_MODEL_FALLBACK'),
+        env('OPENROUTER_MODEL', 'meta-llama/llama-3.3-70b-instruct:free'),
+        env('OPENROUTER_MODEL_FALLBACK', 'google/gemini-2.0-flash-exp:free'),
     ], static fn ($m) => is_string($m) && trim($m) !== '')),
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),

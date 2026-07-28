@@ -25,10 +25,11 @@ final class AiChatService
     public function reply(array $messages, string $locale, ?string $conversationId = null, int|string|null $subjectId = null): array
     {
         $id = $conversationId ?: (string) Str::uuid();
-        $payload = $this->buildOpenRouterMessages($messages, $locale);
 
-        $cacheKey = $this->promptCacheKey($payload);
-        if (($cached = $this->cacheGet($cacheKey)) !== null) {
+        // Cheap cache key on messages+locale — avoids building the heavy live-data
+        // context on cache hits (context build = ~15 SQL stamp queries + section aggregates).
+        $earlyKey = $this->earlyCacheKey($messages, $locale);
+        if (($cached = $this->cacheGet($earlyKey)) !== null) {
             return ['reply' => $cached, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => true];
         }
 
@@ -40,14 +41,16 @@ final class AiChatService
             ];
         }
 
+        $payload = $this->buildOpenRouterMessages($messages, $locale);
+
         $reply = $this->openRouter->chat($payload);
-        $this->recordUsage($subjectId);
+        $this->recordUsage($subjectId, $payload);
 
         $final = $this->selfCheck($reply, $messages, $locale, $payload);
         if ($final['revised']) {
-            $this->recordUsage($subjectId);
+            $this->recordUsage($subjectId, $payload);
         }
-        $this->cachePut($cacheKey, $final['reply']);
+        $this->cachePut($earlyKey, $final['reply']);
 
         return [
             'reply'           => $final['reply'],
@@ -69,10 +72,9 @@ final class AiChatService
         int|string|null $subjectId = null,
     ): array {
         $id = $conversationId ?: (string) Str::uuid();
-        $payload = $this->buildOpenRouterMessages($messages, $locale);
 
-        $cacheKey = $this->promptCacheKey($payload);
-        if (($cached = $this->cacheGet($cacheKey)) !== null) {
+        $earlyKey = $this->earlyCacheKey($messages, $locale);
+        if (($cached = $this->cacheGet($earlyKey)) !== null) {
             $onDelta($cached);
             return ['reply' => $cached, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => true];
         }
@@ -83,14 +85,16 @@ final class AiChatService
             return ['reply' => $msg, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'degraded' => true];
         }
 
+        $payload = $this->buildOpenRouterMessages($messages, $locale);
+
         $streamed = $this->openRouter->chatStream($payload, $onDelta);
-        $this->recordUsage($subjectId);
+        $this->recordUsage($subjectId, $payload);
 
         $final = $this->selfCheck($streamed, $messages, $locale, $payload);
         if ($final['revised']) {
-            $this->recordUsage($subjectId);
+            $this->recordUsage($subjectId, $payload);
         }
-        $this->cachePut($cacheKey, $final['reply']);
+        $this->cachePut($earlyKey, $final['reply']);
 
         return [
             'reply'           => $final['reply'],
@@ -168,7 +172,13 @@ Previous draft:
 INSTR;
 
         try {
-            $repairPayload = array_merge($payload, [
+            // Slim repair payload: keep the system prompt (rules) but drop the
+            // heavy live-data JSON isn't needed — the numbers are already in the
+            // draft. This roughly halves upstream tokens on the repair pass.
+            $systemOnly = ! empty($payload) && ($payload[0]['role'] ?? '') === 'system'
+                ? [$payload[0]]
+                : [];
+            $repairPayload = array_merge($systemOnly, [
                 ['role' => 'user', 'content' => $repairInstruction],
             ]);
             $revised = trim($this->openRouter->chat($repairPayload));
@@ -219,13 +229,28 @@ INSTR;
 
     // ─── Prompt cache / budget helpers ──────────────────────────────────
 
-    /** @param array<int, array{role: string, content: string}> $payload */
-    private function promptCacheKey(array $payload): string
+    /**
+     * Cheap cache key on the user-visible inputs only. Avoids building the
+     * heavy live-data context just to compute a key that would miss anyway
+     * once any DB row changes (context bakes stamps into its own inner caches).
+     *
+     * @param array<int, array{role: string, content: string}> $messages
+     */
+    private function earlyCacheKey(array $messages, string $locale): string
     {
         $models = (array) config('openrouter.models', []);
+        // Normalise: trim + role/content only.
+        $norm = [];
+        foreach ($messages as $m) {
+            $norm[] = [
+                'r' => (string) ($m['role'] ?? ''),
+                'c' => trim((string) ($m['content'] ?? '')),
+            ];
+        }
         $hash = hash('sha256', (string) json_encode([
             'model'   => $models[0] ?? '',
-            'payload' => $payload,
+            'locale'  => strtolower(substr($locale, 0, 2)),
+            'msgs'    => $norm,
             'temp'    => (float) config('openrouter.temperature'),
             'max'     => (int) config('openrouter.max_tokens'),
         ], JSON_UNESCAPED_UNICODE));
@@ -251,8 +276,24 @@ INSTR;
         Cache::put($key, $reply, $ttl);
     }
 
-    private function recordUsage(int|string|null $subjectId): void
+    /**
+     * Attribute tokens to the caller's daily budget. When the upstream provider
+     * omits usage on streams, seed the prompt token count from the outbound
+     * payload so we don't undercount by the whole system prompt.
+     *
+     * @param array<int, array{role: string, content: string}> $payload
+     */
+    private function recordUsage(int|string|null $subjectId, array $payload = []): void
     {
+        // Seed prompt tokens from the payload when possible — no-op if provider
+        // already reported them.
+        if ($payload !== []) {
+            $chars = 0;
+            foreach ($payload as $m) {
+                $chars += mb_strlen((string) ($m['content'] ?? ''));
+            }
+            $this->openRouter->seedApproxPromptTokens((int) ceil($chars / 4));
+        }
         $tokens = (int) ($this->openRouter->lastUsage()['total'] ?? 0);
         if ($tokens > 0) {
             $this->budget->record($subjectId, $tokens);

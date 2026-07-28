@@ -58,8 +58,11 @@ final class OpenRouterKeyPool
             }
         }
 
-        // All quarantined — return the current cursor's key anyway.
-        return $this->keys[$cursor % $count];
+        // All quarantined — advance the cursor and return the picked key so
+        // successive requests spread load instead of hammering one degraded key.
+        $idx = $cursor % $count;
+        Cache::put(self::CURSOR_KEY, ($idx + 1) % $count, 3600);
+        return $this->keys[$idx];
     }
 
     public function markFailed(string $key, int $status): void

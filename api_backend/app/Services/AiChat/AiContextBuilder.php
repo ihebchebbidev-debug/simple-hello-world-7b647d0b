@@ -564,14 +564,14 @@ final class AiContextBuilder
         }
 
         // Latest active price per (entity_type, entity_id).
-        $rows = DB::table('price_history as ph')
-            ->select(['ph.entity_type', 'ph.entity_id', 'ph.price_per_unit', 'ph.unit', 'ph.effective_from'])
-            ->whereRaw('ph.id IN (
-                SELECT MAX(id) FROM price_history
-                WHERE effective_from <= CURRENT_DATE
-                GROUP BY entity_type, entity_id
-            )')
-            ->get();
+        // Use DISTINCT ON (Postgres) ordered by effective_from desc since id is a uuid (MAX(uuid) is unsupported).
+        $rows = collect(DB::select('
+            SELECT DISTINCT ON (entity_type, entity_id)
+                   entity_type, entity_id, price_per_unit, unit, effective_from
+            FROM price_history
+            WHERE effective_from <= CURRENT_DATE
+            ORDER BY entity_type, entity_id, effective_from DESC
+        '));
 
         $fertNames = Schema::hasTable('fertilizers')
             ? DB::table('fertilizers')->pluck('name', 'id')->all() : [];

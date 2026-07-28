@@ -56,6 +56,7 @@ final class AiChatController extends Controller
             'message_id'      => ['required', 'string', 'max:64'],
             'rating'          => ['required', 'in:up,down'],
             'conversation_id' => ['nullable', 'uuid'],
+            'client_id'       => ['nullable', 'string', 'max:64'],
             'locale'          => ['nullable', 'string', 'max:10'],
             'comment'         => ['nullable', 'string', 'max:2000'],
             'question'        => ['nullable', 'string', 'max:4000'],
@@ -66,8 +67,15 @@ final class AiChatController extends Controller
 
         try {
             $userId = $request->user()?->id;
+            // Endpoint is public — fall back to an anon client identifier so the
+            // unique index (user_id, message_client_id) stays deterministic per
+            // browser/session and upserts work without a NULL user_id.
+            $subjectKey = $userId !== null
+                ? (string) $userId
+                : 'anon:'.($data['client_id'] ?? substr(sha1($request->ip().'|'.$request->userAgent()), 0, 24));
+
             AiFeedback::updateOrCreate(
-                ['user_id' => $userId, 'message_client_id' => $data['message_id']],
+                ['user_id' => $userId, 'message_client_id' => $subjectKey.'|'.$data['message_id']],
                 [
                     'conversation_id' => $data['conversation_id'] ?? null,
                     'rating'          => $data['rating'],
@@ -79,10 +87,9 @@ final class AiChatController extends Controller
                 ],
             );
 
-            // Structured log line so guardrail tuning can grep for down-votes
-            // without a database query.
             Log::info('ai.chat.feedback', [
                 'user_id'    => $userId,
+                'subject'    => $subjectKey,
                 'rating'     => $data['rating'],
                 'message_id' => $data['message_id'],
                 'locale'     => $data['locale'] ?? null,
