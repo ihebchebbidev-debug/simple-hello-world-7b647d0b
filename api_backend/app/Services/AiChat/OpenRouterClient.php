@@ -290,6 +290,7 @@ final class OpenRouterClient
             $status === 0                     => 'network',
             $status === 401 || $status === 403 => 'upstream_auth',
             $status === 402                   => 'quota_exceeded',
+            $status === 404                   => 'model_not_found',
             $status === 429                   => 'rate_limited',
             $status === 408 || $status === 425 => 'timeout',
             $status >= 500                    => 'upstream_error',

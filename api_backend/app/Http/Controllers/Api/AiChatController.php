@@ -38,6 +38,7 @@ final class AiChatController extends Controller
             'quota_exceeded'  => ['code' => 'quota_exceeded',  'status' => 402, 'message' => 'The AI provider quota is exhausted. Update the API keys or top up credit.'],
             'upstream_auth'   => ['code' => 'upstream_auth',   'status' => 502, 'message' => 'The AI provider rejected our credentials. Rotate the API key.'],
             'upstream_error'  => ['code' => 'upstream_error',  'status' => 502, 'message' => 'The AI provider returned an error. Please retry.'],
+            'model_not_found' => ['code' => 'model_not_found', 'status' => 502, 'message' => 'The configured AI model is unavailable. Update OPENROUTER_MODEL to a valid slug.'],
             'timeout'         => ['code' => 'timeout',         'status' => 504, 'message' => 'The AI provider timed out. Please retry.'],
             'network'         => ['code' => 'network',         'status' => 502, 'message' => 'Could not reach the AI provider. Check the network and try again.'],
             'empty_reply'     => ['code' => 'empty_reply',     'status' => 502, 'message' => 'The AI provider returned an empty response. Please retry.'],

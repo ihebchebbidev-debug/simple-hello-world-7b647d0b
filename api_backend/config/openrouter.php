@@ -22,9 +22,14 @@ return [
     ], static fn ($k) => is_string($k) && trim($k) !== '')),
 
     // Model fallback chain — first entry is primary; used in order on upstream failure.
+    // Defaults target OpenRouter's currently-available free tier; override per env if
+    // a slug is retired (OpenRouter returns 404 for removed models — surface as
+    // `model_not_found` in the client).
     'models' => array_values(array_filter([
-        env('OPENROUTER_MODEL', 'meta-llama/llama-3.3-70b-instruct:free'),
-        env('OPENROUTER_MODEL_FALLBACK', 'google/gemini-2.0-flash-exp:free'),
+        env('OPENROUTER_MODEL',            'deepseek/deepseek-chat-v3.1:free'),
+        env('OPENROUTER_MODEL_FALLBACK',   'meta-llama/llama-3.3-70b-instruct:free'),
+        env('OPENROUTER_MODEL_FALLBACK_2', 'qwen/qwen-2.5-72b-instruct:free'),
+        env('OPENROUTER_MODEL_FALLBACK_3', 'google/gemini-2.0-flash-exp:free'),
     ], static fn ($m) => is_string($m) && trim($m) !== '')),
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),

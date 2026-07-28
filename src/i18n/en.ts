@@ -715,6 +715,7 @@ export const en = {
       quotaExceeded: 'The AI provider quota is exhausted. Please contact your administrator to top up credit or rotate keys.',
       upstreamAuth: 'The AI provider rejected our credentials. Please contact your administrator to rotate the API key.',
       upstreamError: 'The AI provider returned an error. Please retry in a moment.',
+      modelNotFound: 'The configured AI model is unavailable at the provider. Ask your administrator to update OPENROUTER_MODEL.',
       circuitOpen: 'Assistant paused after repeated upstream failures. It will retry automatically in about 30 seconds.',
       timeout: 'The AI provider took too long to respond. Please retry.',
       network: 'Could not reach the AI provider. Check your connection and try again.',

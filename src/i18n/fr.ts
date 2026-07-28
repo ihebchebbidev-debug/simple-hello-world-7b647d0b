@@ -715,6 +715,7 @@ export const fr = {
       quotaExceeded: 'Le quota du fournisseur IA est épuisé. Contactez votre administrateur pour recharger le crédit ou changer de clé.',
       upstreamAuth: 'Le fournisseur IA a rejeté nos identifiants. Contactez votre administrateur pour renouveler la clé API.',
       upstreamError: 'Le fournisseur IA a renvoyé une erreur. Réessayez dans un instant.',
+      modelNotFound: 'Le modèle IA configuré est introuvable chez le fournisseur. Demandez à votre administrateur de mettre à jour OPENROUTER_MODEL.',
       circuitOpen: 'L’assistant est en pause suite à des erreurs répétées. Une nouvelle tentative sera faite automatiquement dans 30 secondes.',
       timeout: 'Le fournisseur IA a mis trop de temps à répondre. Veuillez réessayer.',
       network: 'Impossible de joindre le fournisseur IA. Vérifiez votre connexion puis réessayez.',

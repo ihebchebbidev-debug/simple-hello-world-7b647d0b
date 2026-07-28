@@ -250,6 +250,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           quota_exceeded: 'aiChat.errors.quotaExceeded',
           upstream_auth:  'aiChat.errors.upstreamAuth',
           upstream_error: 'aiChat.errors.upstreamError',
+          model_not_found: 'aiChat.errors.modelNotFound',
           timeout:        'aiChat.errors.timeout',
           network:        'aiChat.errors.network',
           empty_reply:    'aiChat.errors.emptyReply',
