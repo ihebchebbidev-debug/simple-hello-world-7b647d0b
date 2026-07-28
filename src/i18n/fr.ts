@@ -695,7 +695,7 @@ export const fr = {
     send: 'Envoyer le message',
     copy: 'Copier la réponse',
     copied: 'Copié',
-    thinking: 'L’assistant réfléchit…',
+    thinking: 'Hmmm… je réfléchis. Juste une seconde… je lis les données…',
     jumpToLatest: 'Aller au dernier message',
     regenerate: 'Régénérer la réponse',
     inputPlaceholder: 'Écrivez votre message…',

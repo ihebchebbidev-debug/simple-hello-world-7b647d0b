@@ -695,7 +695,7 @@ export const en = {
     send: 'Send message',
     copy: 'Copy reply',
     copied: 'Copied',
-    thinking: 'Assistant is thinking…',
+    thinking: 'Hmmm… I’m thinking. Just a second… I’m reading the data…',
     jumpToLatest: 'Jump to latest',
     regenerate: 'Regenerate response',
     inputPlaceholder: 'Message the assistant…',

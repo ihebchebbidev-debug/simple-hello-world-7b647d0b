@@ -509,6 +509,63 @@ final class AiContextBuilder
             ])
             ->all();
 
+        $byTargetPest = DB::table('phytosanitary_operations as op')
+            ->select([
+                DB::raw("COALESCE(NULLIF(op.target_pest, ''), 'unknown') AS target_pest"),
+                DB::raw('COUNT(*) AS treatments'),
+                DB::raw('SUM(op.quantity_applied) AS total_qty'),
+            ])
+            ->groupBy('op.target_pest')
+            ->orderByDesc('treatments')
+            ->limit(20)
+            ->get()
+            ->map(fn ($r) => [
+                'target_pest'    => $r->target_pest ?? 'unknown',
+                'treatments'     => (int) $r->treatments,
+                'total_quantity' => (float) $r->total_qty,
+            ])
+            ->all();
+
+        $byPlot = DB::table('phytosanitary_operations as op')
+            ->leftJoin('plots as plt', 'plt.id', '=', 'op.plot_id')
+            ->select([
+                DB::raw("COALESCE(plt.name, 'unknown') AS plot_name"),
+                DB::raw('COUNT(*) AS treatments'),
+                DB::raw('SUM(op.quantity_applied) AS total_qty'),
+            ])
+            ->groupBy('plt.name')
+            ->orderByDesc('treatments')
+            ->limit(40)
+            ->get()
+            ->map(fn ($r) => [
+                'plot_name'      => $r->plot_name ?? 'unknown',
+                'treatments'     => (int) $r->treatments,
+                'total_quantity' => (float) $r->total_qty,
+            ])
+            ->all();
+
+        $recent = DB::table('phytosanitary_operations as op')
+            ->leftJoin('plots as plt', 'plt.id', '=', 'op.plot_id')
+            ->leftJoin('pesticides as p', 'p.id', '=', 'op.pesticide_id')
+            ->select([
+                'op.operation_date',
+                DB::raw("COALESCE(plt.name, 'unknown') AS plot_name"),
+                DB::raw("COALESCE(NULLIF(op.target_pest, ''), 'unknown') AS target_pest"),
+                DB::raw("COALESCE(p.name, 'unknown') AS pesticide"),
+                'op.quantity_applied',
+            ])
+            ->orderByDesc('op.operation_date')
+            ->limit(15)
+            ->get()
+            ->map(fn ($r) => [
+                'operation_date' => $r->operation_date,
+                'plot_name'      => $r->plot_name ?? 'unknown',
+                'target_pest'    => $r->target_pest ?? 'unknown',
+                'pesticide'      => $r->pesticide ?? 'unknown',
+                'quantity_applied' => (float) $r->quantity_applied,
+            ])
+            ->all();
+
         return [
             'this_month_treatments' => (int) $this->tableScalar(
                 'phytosanitary_operations',
@@ -516,6 +573,9 @@ final class AiContextBuilder
                 [$monthStart],
             ),
             'by_pesticide' => $byPest,
+            'by_target_pest' => $byTargetPest,
+            'by_plot' => $byPlot,
+            'recent_treatments' => $recent,
         ];
     }
 
@@ -670,7 +730,7 @@ final class AiContextBuilder
             return [];
         }
 
-        return DB::table('campaigns')
+        $rows = DB::table('campaigns')
             ->select(['id', 'name', 'start_date', 'end_date', 'is_active'])
             ->orderByDesc('start_date')
             ->limit(20)
@@ -683,6 +743,15 @@ final class AiContextBuilder
                 'is_active'  => (bool) $r->is_active,
             ])
             ->all();
+
+        $activeCampaigns = array_values(array_filter($rows, fn (array $row): bool => (bool) ($row['is_active'] ?? false)));
+
+        return [
+            'count'           => count($rows),
+            'active_count'    => count($activeCampaigns),
+            'active_campaigns' => $activeCampaigns,
+            'campaigns'       => $rows,
+        ];
     }
 
     /** @return array<int, array<string, mixed>> */
