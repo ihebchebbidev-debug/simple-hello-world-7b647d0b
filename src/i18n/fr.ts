@@ -41,6 +41,7 @@ export const fr = {
     logs: 'Journaux système',
     help: 'Aide',
     logout: 'Déconnexion',
+    aiAssistant: 'Assistant IA',
   },
 
   common: {
@@ -682,6 +683,50 @@ export const fr = {
     none: 'Aucun prix enregistré.',
     deleteTitle: 'Supprimer le prix',
     deleteMsg: 'Le prix de {{price}} sera supprimé. Continuer ?',
+  },
+
+  aiChat: {
+    title: 'Assistant Flehty',
+    subtitle: 'Posez vos questions sur les parcelles, rapports et opérations',
+    online: 'En ligne · fondé sur les données réelles',
+    open: 'Ouvrir l’assistant IA',
+    close: 'Fermer l’assistant',
+    newChat: 'Nouvelle conversation',
+    send: 'Envoyer le message',
+    copy: 'Copier la réponse',
+    copied: 'Copié',
+    thinking: 'L’assistant réfléchit…',
+    inputPlaceholder: 'Écrivez votre message…',
+    inputHint: 'Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne',
+    inputHintMobile: 'Appuyez sur envoyer ou Entrée',
+    emptyTitle: 'Comment puis-je vous aider ?',
+    emptySubtitle: 'Obtenez des réponses sur les modules Flehty, les données terrain et les rapports.',
+    suggestionsTitle: 'Suggestions',
+    suggestions: {
+      plots: 'Combien de parcelles actives avons-nous et quelles cultures ?',
+      water: 'Quelle est la consommation d’eau par parcelle ce mois-ci ?',
+      reports: 'Résumez les totaux d’irrigation, fertilisation et récolte du mois',
+      fertilizer: 'Combien d’engrais et pesticides dans notre catalogue ?',
+    },
+    errors: {
+      generic: 'Impossible d’obtenir une réponse. Veuillez réessayer.',
+      notConfigured: 'L’assistant IA n’est pas encore disponible sur le serveur. Contactez votre administrateur.',
+      rateLimited: 'Le fournisseur IA limite les requêtes. Patientez quelques secondes puis réessayez.',
+      quotaExceeded: 'Le quota du fournisseur IA est épuisé. Contactez votre administrateur pour recharger le crédit ou changer de clé.',
+      upstreamAuth: 'Le fournisseur IA a rejeté nos identifiants. Contactez votre administrateur pour renouveler la clé API.',
+      upstreamError: 'Le fournisseur IA a renvoyé une erreur. Réessayez dans un instant.',
+      circuitOpen: 'L’assistant est en pause suite à des erreurs répétées. Une nouvelle tentative sera faite automatiquement dans 30 secondes.',
+      timeout: 'Le fournisseur IA a mis trop de temps à répondre. Veuillez réessayer.',
+      network: 'Impossible de joindre le fournisseur IA. Vérifiez votre connexion puis réessayez.',
+      emptyReply: 'Le fournisseur IA a renvoyé une réponse vide. Veuillez réessayer.',
+    },
+    feedback: {
+      label: 'Évaluer cette réponse',
+      up: 'Utile',
+      down: 'Pas utile',
+      thanks: 'Merci pour votre retour',
+    },
+
   },
 } as const;
 

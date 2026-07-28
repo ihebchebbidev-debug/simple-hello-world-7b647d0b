@@ -3,6 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Outlet } from 'react-router-dom';
 import AppSidebar from '@/components/layout/AppSidebar';
 import TopBar from '@/components/layout/TopBar';
+import { AiChatProvider } from '@/features/ai-chat/AiChatProvider';
+import AiChatPanel from '@/features/ai-chat/AiChatPanel';
 import { api } from '@/lib/api';
 
 /** Unwrap the paginated `{ data: [...] }` envelope into a plain array. */
@@ -34,6 +36,7 @@ const AppLayout = () => {
   }, [qc]);
 
   return (
+    <AiChatProvider>
     <div className="flex h-screen overflow-hidden bg-background">
       {sidebarOpen && (
         <div
@@ -72,7 +75,9 @@ const AppLayout = () => {
           </div>
         </main>
       </div>
+      <AiChatPanel />
     </div>
+    </AiChatProvider>
   );
 };
 

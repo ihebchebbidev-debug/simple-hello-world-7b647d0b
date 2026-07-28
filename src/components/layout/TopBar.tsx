@@ -10,6 +10,7 @@ import iconBell from '@/assets/icons/icon-bell.png';
 import { api } from '@/lib/api';
 import ReportIssueModal from '@/features/feedback/ReportIssueModal';
 import GlobalSearch from '@/components/layout/GlobalSearch';
+import AiChatTrigger from '@/features/ai-chat/AiChatTrigger';
 
 interface TopBarProps {
   menuButton?: ReactNode;
@@ -60,6 +61,7 @@ const TopBar = ({ menuButton, collapsed, onToggleCollapse }: TopBarProps) => {
         >
           <img src={iconSearch} alt="" className="h-5 w-5 opacity-70" />
         </button>
+        <AiChatTrigger variant="header" />
         <button
           type="button"
           onClick={() => setReportOpen(true)}

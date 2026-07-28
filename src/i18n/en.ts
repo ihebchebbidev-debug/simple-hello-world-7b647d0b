@@ -41,6 +41,7 @@ export const en = {
     logs: 'System logs',
     help: 'Help',
     logout: 'Logout',
+    aiAssistant: 'AI Assistant',
   },
 
   common: {
@@ -682,6 +683,50 @@ export const en = {
     none: 'No price recorded yet.',
     deleteTitle: 'Delete price',
     deleteMsg: 'The price of {{price}} will be deleted. Continue?',
+  },
+
+  aiChat: {
+    title: 'Flehty Assistant',
+    subtitle: 'Ask about plots, reports, and daily operations',
+    online: 'Online · grounded on live data',
+    open: 'Open AI assistant',
+    close: 'Close assistant',
+    newChat: 'New conversation',
+    send: 'Send message',
+    copy: 'Copy reply',
+    copied: 'Copied',
+    thinking: 'Assistant is thinking…',
+    inputPlaceholder: 'Message the assistant…',
+    inputHint: 'Enter to send · Shift+Enter for a new line',
+    inputHintMobile: 'Tap send or press Enter',
+    emptyTitle: 'How can I help you today?',
+    emptySubtitle: 'Get quick answers about Flehty modules, field data, and reports.',
+    suggestionsTitle: 'Suggested prompts',
+    suggestions: {
+      plots: 'How many active plots do we have, and what crops are they on?',
+      water: 'What is our water consumption by plot this month?',
+      reports: 'Summarize this month’s irrigation, fertilization, and harvest totals',
+      fertilizer: 'How many fertilizers and pesticides are in our catalog?',
+    },
+    errors: {
+      generic: 'Could not get a reply. Please try again.',
+      notConfigured: 'The AI assistant is not available on the server yet. Contact your administrator.',
+      rateLimited: 'The AI provider is rate-limiting requests. Please wait a few seconds and try again.',
+      quotaExceeded: 'The AI provider quota is exhausted. Please contact your administrator to top up credit or rotate keys.',
+      upstreamAuth: 'The AI provider rejected our credentials. Please contact your administrator to rotate the API key.',
+      upstreamError: 'The AI provider returned an error. Please retry in a moment.',
+      circuitOpen: 'Assistant paused after repeated upstream failures. It will retry automatically in about 30 seconds.',
+      timeout: 'The AI provider took too long to respond. Please retry.',
+      network: 'Could not reach the AI provider. Check your connection and try again.',
+      emptyReply: 'The AI provider returned an empty response. Please retry.',
+    },
+    feedback: {
+      label: 'Rate this reply',
+      up: 'Helpful',
+      down: 'Not helpful',
+      thanks: 'Thanks for the feedback',
+    },
+
   },
 } as const;
 

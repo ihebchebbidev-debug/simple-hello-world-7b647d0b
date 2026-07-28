@@ -191,6 +191,10 @@ final class ApiOverview
             self::endpoint('Dashboard', 'GET', '/api/dashboard/recent-activity', 'Latest operations across all types.', true, null,
                 ['limit' => '10']),
 
+            self::endpoint('AI Assistant', 'POST', '/api/ai/chat',
+                'Ask the Flehty AI assistant about plots, water consumption, operations, and reports. Streams when stream=true.', true,
+                ['messages' => [['role' => 'user', 'content' => 'How much water was used this month?']], 'locale' => 'fr', 'stream' => true]),
+
             // ── Offline sync queue ────────────────────────────────────────────
 
             self::endpoint('Postings', 'POST', '/api/postings',

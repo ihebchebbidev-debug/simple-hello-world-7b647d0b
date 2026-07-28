@@ -23,6 +23,7 @@ import {
 import logoIcon from '@/assets/logo-icon.png';
 import { auth } from '@/lib/auth';
 import { preloadRoute, preloadAllRoutesOnIdle } from '@/app/preloadRoutes';
+import AiChatTrigger from '@/features/ai-chat/AiChatTrigger';
 import { useEffect } from 'react';
 
 type NavItem = {
@@ -102,6 +103,7 @@ const AppSidebar = ({ onClose, collapsed = false }: Props) => {
       </nav>
 
       <div className={`pb-4 space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
+        <AiChatTrigger variant="sidebar" collapsed={collapsed} onNavigate={handleNav} />
         <NavLink
           to="/help"
           onClick={handleNav}

@@ -1,0 +1,71 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\AiChat;
+
+use Illuminate\Support\Facades\Cache;
+
+/**
+ * Rolling-window circuit breaker for OpenRouter upstream.
+ *
+ * Records success/failure samples in a per-window bucket. If the failure
+ * ratio exceeds the configured threshold AND the sample count meets the
+ * minimum, the breaker trips for `cool_down` seconds — during which
+ * shouldTrip() short-circuits without hitting upstream.
+ */
+final class CircuitBreaker
+{
+    private const OPEN_KEY = 'openrouter.breaker.open_until';
+    private const SUCC_KEY = 'openrouter.breaker.succ';
+    private const FAIL_KEY = 'openrouter.breaker.fail';
+
+    public function shouldTrip(): bool
+    {
+        $until = (int) Cache::get(self::OPEN_KEY, 0);
+        return $until > time();
+    }
+
+    public function recordSuccess(): void
+    {
+        $this->increment(self::SUCC_KEY);
+    }
+
+    public function recordFailure(): void
+    {
+        $this->increment(self::FAIL_KEY);
+        $this->evaluate();
+    }
+
+    private function evaluate(): void
+    {
+        $window     = max(10, (int) config('openrouter.breaker.window', 60));
+        $minSamples = max(1, (int) config('openrouter.breaker.min_samples', 6));
+        $threshold  = (float) config('openrouter.breaker.threshold', 0.5);
+        $cool       = max(5, (int) config('openrouter.breaker.cool_down', 30));
+
+        $succ = (int) Cache::get($this->bucketKey(self::SUCC_KEY, $window), 0);
+        $fail = (int) Cache::get($this->bucketKey(self::FAIL_KEY, $window), 0);
+        $total = $succ + $fail;
+
+        if ($total < $minSamples) {
+            return;
+        }
+        if (($fail / $total) >= $threshold) {
+            Cache::put(self::OPEN_KEY, time() + $cool, $cool + 5);
+        }
+    }
+
+    private function increment(string $base): void
+    {
+        $window = max(10, (int) config('openrouter.breaker.window', 60));
+        $key    = $this->bucketKey($base, $window);
+        // File cache lacks atomic increment; get+put is fine for approximate rate.
+        Cache::put($key, ((int) Cache::get($key, 0)) + 1, $window + 5);
+    }
+
+    private function bucketKey(string $base, int $window): string
+    {
+        return $base.':'.intdiv(time(), $window);
+    }
+}
