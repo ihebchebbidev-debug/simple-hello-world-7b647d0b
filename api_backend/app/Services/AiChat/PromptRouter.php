@@ -28,7 +28,7 @@ final class PromptRouter
         'labor'             => ['labor', 'labour', 'ouvrier', 'main-d', "main d'", 'salaire', 'wage', 'worker'],
         'prices'            => ['price', 'prix', 'tarif', 'rate'],
         'campaigns'         => ['campaign', 'campagne', 'campagnes', 'saison', 'season', 'active', 'en cours', 'ongoing', 'current'],
-        'plot_operations'   => ['operation', 'opération', 'operations', 'parcelle', 'plot', 'field', 'parcel', 'bloc'],
+        'plot_operations'   => ['operation', 'opération', 'operations', 'parcelle', 'parcelles', 'plot', 'field', 'champ', 'terrain', 'parcel', 'bloc'],
         'recent_operations' => ['recent', 'récent', 'dernier', 'latest', 'today', 'aujourd'],
         'catalog'           => ['catalog', 'catalogue', 'produit', 'product', 'inventory', 'stock'],
         'catalog_items'     => ['catalog', 'catalogue', 'produit', 'product', 'inventory', 'stock', 'sku'],
