@@ -127,8 +127,20 @@ final class AiContextBuilder
         $key   = self::KEY_PREFIX.":$name:$stamp";
         $ttl   = self::TTL[$name] ?? 60;
 
-        return Cache::remember($key, $ttl, $compute);
+        return Cache::remember($key, $ttl, function () use ($compute, $name) {
+            try {
+                return $compute();
+            } catch (\Throwable $e) {
+                // Never let a single bad column / missing table nuke the whole context.
+                \Log::warning('ai.context.section_failed', [
+                    'section' => $name,
+                    'error'   => $e->getMessage(),
+                ]);
+                return ['_unavailable' => true, 'reason' => 'schema_mismatch'];
+            }
+        });
     }
+
 
     /**
      * Cheap fingerprint of a section's source tables. Includes row count and
@@ -685,27 +697,32 @@ final class AiContextBuilder
         $out = ['fertilizers' => [], 'pesticides' => [], 'pests' => []];
 
         if (Schema::hasTable('fertilizers')) {
-            $out['fertilizers'] = DB::table('fertilizers')
-                ->where('is_active', true)
-                ->select(['name', 'n_percent', 'p_percent', 'k_percent'])
+            $cols = array_values(array_filter(['name', 'n_percent', 'p_percent', 'k_percent'], fn ($c) => Schema::hasColumn('fertilizers', $c)));
+            $q = DB::table('fertilizers');
+            if (Schema::hasColumn('fertilizers', 'is_active')) $q->where('is_active', true);
+            $out['fertilizers'] = $q->select($cols ?: ['*'])
                 ->orderBy('name')->limit(40)->get()
-                ->map(fn ($r) => ['name' => $r->name, 'n' => (float) ($r->n_percent ?? 0), 'p' => (float) ($r->p_percent ?? 0), 'k' => (float) ($r->k_percent ?? 0)])
+                ->map(fn ($r) => ['name' => $r->name ?? null, 'n' => (float) ($r->n_percent ?? 0), 'p' => (float) ($r->p_percent ?? 0), 'k' => (float) ($r->k_percent ?? 0)])
                 ->all();
         }
         if (Schema::hasTable('pesticides')) {
-            $out['pesticides'] = DB::table('pesticides')
-                ->where('is_active', true)
-                ->select(['name', 'active_ingredient', 'unit'])
+            $cols = array_values(array_filter(['name', 'active_ingredient', 'unit'], fn ($c) => Schema::hasColumn('pesticides', $c)));
+            if (! in_array('name', $cols, true)) $cols = array_merge(['name'], $cols);
+            $q = DB::table('pesticides');
+            if (Schema::hasColumn('pesticides', 'is_active')) $q->where('is_active', true);
+            $out['pesticides'] = $q->select($cols)
                 ->orderBy('name')->limit(40)->get()
-                ->map(fn ($r) => ['name' => $r->name, 'active_ingredient' => $r->active_ingredient ?? null, 'unit' => $r->unit ?? null])
+                ->map(fn ($r) => ['name' => $r->name ?? null, 'active_ingredient' => $r->active_ingredient ?? null, 'unit' => $r->unit ?? null])
                 ->all();
         }
         if (Schema::hasTable('pests')) {
-            $out['pests'] = DB::table('pests')
-                ->where('is_active', true)
-                ->select(['name', 'category'])
+            $cols = array_values(array_filter(['name', 'category'], fn ($c) => Schema::hasColumn('pests', $c)));
+            if (! in_array('name', $cols, true)) $cols = array_merge(['name'], $cols);
+            $q = DB::table('pests');
+            if (Schema::hasColumn('pests', 'is_active')) $q->where('is_active', true);
+            $out['pests'] = $q->select($cols)
                 ->orderBy('name')->limit(40)->get()
-                ->map(fn ($r) => ['name' => $r->name, 'category' => $r->category ?? null])
+                ->map(fn ($r) => ['name' => $r->name ?? null, 'category' => $r->category ?? null])
                 ->all();
         }
 

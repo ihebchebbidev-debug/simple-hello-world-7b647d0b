@@ -199,7 +199,12 @@ INSTR;
      */
     private function buildOpenRouterMessages(array $messages, string $locale): array
     {
-        $fullContext = $this->contextBuilder->build();
+        try {
+            $fullContext = $this->contextBuilder->build();
+        } catch (\Throwable $e) {
+            \Log::warning('ai.context.build_failed', ['error' => $e->getMessage()]);
+            $fullContext = ['_unavailable' => true, 'reason' => 'context_build_failed'];
+        }
 
         $normalised = [];
         foreach ($messages as $message) {
@@ -216,10 +221,19 @@ INSTR;
             $normalised = array_slice($normalised, -12);
         }
 
-        // Slim context to only the sections the recent user turns actually need.
-        $routed  = $this->router->slim($fullContext, $normalised);
-        $context = $routed['context'];
-        $system  = $this->systemPrompt($locale, $context);
+        try {
+            $routed  = $this->router->slim($fullContext, $normalised);
+            $context = $routed['context'] ?? $fullContext;
+        } catch (\Throwable $e) {
+            \Log::warning('ai.context.router_failed', ['error' => $e->getMessage()]);
+            $context = $fullContext;
+        }
+        try {
+            $system = $this->systemPrompt($locale, $context);
+        } catch (\Throwable $e) {
+            \Log::warning('ai.context.system_prompt_failed', ['error' => $e->getMessage()]);
+            $system = 'You are Flehty Assistant. Live data is temporarily unavailable; answer from general knowledge and ask the user for specifics if needed.';
+        }
 
         return array_merge(
             [['role' => 'system', 'content' => $system]],
