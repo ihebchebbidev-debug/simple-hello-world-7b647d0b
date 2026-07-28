@@ -11,24 +11,6 @@ import { auth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import PasswordInput from '@/components/PasswordInput';
 import { preloadRoute } from '@/app/preloadRoutes';
-import { Sparkles } from 'lucide-react';
-import { AiChatProvider, useAiChat } from '@/features/ai-chat/AiChatProvider';
-import AiChatPanel from '@/features/ai-chat/AiChatPanel';
-
-function LoginAiChatTestButton() {
-  const { openChat } = useAiChat();
-  return (
-    <button
-      type="button"
-      onClick={openChat}
-      className="fixed bottom-5 right-5 z-20 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary-glow))] px-4 py-2.5 text-[13px] font-medium text-[hsl(var(--primary-foreground))] shadow-lg transition-transform hover:scale-105"
-      title="Test AI Assistant (no login required)"
-    >
-      <Sparkles className="h-4 w-4" strokeWidth={2} />
-      Test AI Assistant
-    </button>
-  );
-}
 
 const LoginPage = () => {
   const { t } = useTranslation();
@@ -71,7 +53,6 @@ const LoginPage = () => {
   };
 
   return (
-    <AiChatProvider>
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
         <OpenMobileAppButton onClick={() => setMobilePromptOpen(true)} />
@@ -145,10 +126,7 @@ const LoginPage = () => {
         </div>
       </div>
         <MobileAppPrompt open={mobilePromptOpen} onClose={() => setMobilePromptOpen(false)} />
-      <LoginAiChatTestButton />
-      <AiChatPanel />
     </div>
-    </AiChatProvider>
   );
 };
 

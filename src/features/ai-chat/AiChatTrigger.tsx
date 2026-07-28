@@ -29,7 +29,14 @@ export default function AiChatTrigger({ variant = 'header', collapsed = false, o
         className={`sidebar-nav-item w-full text-[hsl(var(--primary-glow))] ${collapsed ? 'justify-center px-2' : ''}`}
       >
         <Sparkles className="h-5 w-5 shrink-0" strokeWidth={2} aria-hidden />
-        {!collapsed && <span className="truncate">{t('nav.aiAssistant')}</span>}
+        {!collapsed && (
+          <span className="flex items-center gap-2 truncate">
+            <span className="truncate">{t('nav.aiAssistant')}</span>
+            <span className="rounded-full border border-[hsl(var(--primary-glow))]/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary-glow))]">
+              AI
+            </span>
+          </span>
+        )}
       </button>
     );
   }
@@ -40,9 +47,12 @@ export default function AiChatTrigger({ variant = 'header', collapsed = false, o
       onClick={handleClick}
       aria-label={label}
       title={label}
-      className="relative inline-flex items-center justify-center rounded-md p-1.5 text-[hsl(var(--primary-glow))] transition-colors hover:bg-[hsl(var(--surface-bright))]"
+      className="relative inline-flex items-center gap-1.5 rounded-md p-1.5 text-[hsl(var(--primary-glow))] transition-colors hover:bg-[hsl(var(--surface-bright))]"
     >
       <Sparkles className="h-5 w-5" strokeWidth={2} aria-hidden />
+      <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--primary-glow))]">
+        AI
+      </span>
     </button>
   );
 }
