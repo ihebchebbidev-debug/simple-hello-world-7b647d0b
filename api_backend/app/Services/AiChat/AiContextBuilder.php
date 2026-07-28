@@ -544,6 +544,26 @@ final class AiContextBuilder
             ])
             ->all();
 
+        $byPlotTargetPest = DB::table('phytosanitary_operations as op')
+            ->leftJoin('plots as plt', 'plt.id', '=', 'op.plot_id')
+            ->select([
+                DB::raw("COALESCE(plt.name, 'unknown') AS plot_name"),
+                DB::raw("COALESCE(NULLIF(op.target_pest, ''), 'unknown') AS target_pest"),
+                DB::raw('COUNT(*) AS treatments'),
+                DB::raw('SUM(op.quantity_applied) AS total_qty'),
+            ])
+            ->groupBy('plt.name', 'op.target_pest')
+            ->orderByDesc('treatments')
+            ->limit(100)
+            ->get()
+            ->map(fn ($r) => [
+                'plot_name'      => $r->plot_name ?? 'unknown',
+                'target_pest'    => $r->target_pest ?? 'unknown',
+                'treatments'     => (int) $r->treatments,
+                'total_quantity' => (float) $r->total_qty,
+            ])
+            ->all();
+
         $recent = DB::table('phytosanitary_operations as op')
             ->leftJoin('plots as plt', 'plt.id', '=', 'op.plot_id')
             ->leftJoin('pesticides as p', 'p.id', '=', 'op.pesticide_id')
@@ -575,6 +595,7 @@ final class AiContextBuilder
             'by_pesticide' => $byPest,
             'by_target_pest' => $byTargetPest,
             'by_plot' => $byPlot,
+            'by_plot_target_pest' => $byPlotTargetPest,
             'recent_treatments' => $recent,
         ];
     }
