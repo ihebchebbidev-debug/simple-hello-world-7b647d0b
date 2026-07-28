@@ -727,7 +727,15 @@ export const en = {
       down: 'Not helpful',
       thanks: 'Thanks for the feedback',
     },
-
+    history: {
+      title: 'Conversations',
+      show: 'Show history',
+      hide: 'Hide history',
+      empty: 'No saved conversations yet.',
+      loading: 'Loading history…',
+      delete: 'Delete conversation',
+      confirmDelete: 'Delete this conversation?',
+    },
   },
 } as const;
 

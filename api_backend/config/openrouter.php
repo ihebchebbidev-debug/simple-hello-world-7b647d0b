@@ -33,8 +33,15 @@ return [
     ], static fn ($m) => is_string($m) && trim($m) !== '')),
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
-    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 1600),
+    // Lower cap = faster completions on free-tier models (~30-50 tok/s).
+    // Most answers are short lookups; long analyses still fit in 700 tokens.
+    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 700),
     'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.35),
+
+    // Ask OpenRouter to route to the fastest provider serving the model,
+    // instead of the default (cheapest). Big latency win on free models.
+    // Override via OPENROUTER_PROVIDER_SORT=price to restore default routing.
+    'provider_sort' => env('OPENROUTER_PROVIDER_SORT', 'throughput'),
 
     // Identity headers OpenRouter uses to classify traffic as legitimate.
     'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'http://localhost')),
@@ -56,6 +63,10 @@ return [
         'enabled' => (bool) env('OPENROUTER_CACHE_ENABLED', true),
         'ttl'     => (int) env('OPENROUTER_CACHE_TTL', 600), // 10 minutes
     ],
+
+    // Short-TTL memo of the full context build (per-request assembly of ~15
+    // stamp queries). Set to 0 to disable.
+    'context_cache_ttl' => (int) env('OPENROUTER_CONTEXT_CACHE_TTL', 20),
 
     // Circuit breaker — trips when upstream error rate > threshold in `window` seconds.
     'breaker' => [

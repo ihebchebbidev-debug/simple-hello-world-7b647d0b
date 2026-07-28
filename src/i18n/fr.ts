@@ -727,7 +727,15 @@ export const fr = {
       down: 'Pas utile',
       thanks: 'Merci pour votre retour',
     },
-
+    history: {
+      title: 'Conversations',
+      show: 'Afficher l’historique',
+      hide: 'Masquer l’historique',
+      empty: 'Aucune conversation enregistrée.',
+      loading: 'Chargement de l’historique…',
+      delete: 'Supprimer la conversation',
+      confirmDelete: 'Supprimer cette conversation ?',
+    },
   },
 } as const;
 

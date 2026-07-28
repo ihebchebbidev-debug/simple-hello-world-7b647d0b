@@ -140,7 +140,10 @@ final class AiChatService
                 || $v === 'contains_html'
                 || $v === 'unbalanced_code_fence',
         );
-        if ($length < 200 && $hardViolations === []) {
+        // Only trigger the repair round-trip when a HARD rule broke. Cosmetic
+        // violations (bullet style, filler openers, minor length) don't justify
+        // doubling response latency — they're logged and left for a future pass.
+        if ($hardViolations === []) {
             return ['reply' => $reply, 'revised' => false, 'violations' => $check['violations']];
         }
 
@@ -200,7 +203,7 @@ INSTR;
     private function buildOpenRouterMessages(array $messages, string $locale): array
     {
         try {
-            $fullContext = $this->contextBuilder->build();
+            $fullContext = $this->cachedContextBuild();
         } catch (\Throwable $e) {
             \Log::warning('ai.context.build_failed', ['error' => $e->getMessage()]);
             $fullContext = ['_unavailable' => true, 'reason' => 'context_build_failed'];
@@ -239,6 +242,22 @@ INSTR;
             [['role' => 'system', 'content' => $system]],
             $normalised,
         );
+    }
+
+    /**
+     * Short-TTL memoization of the full live-data context. The builder already
+     * caches individual sections with stamp invalidation, but the top-level
+     * assembly still runs ~15 stamp queries per request. A 20s window is short
+     * enough to feel real-time (dashboards refresh at that cadence anyway) and
+     * long enough to cover follow-up questions in the same conversation burst.
+     */
+    private function cachedContextBuild(): array
+    {
+        $ttl = (int) config('openrouter.context_cache_ttl', 20);
+        if ($ttl <= 0) {
+            return $this->contextBuilder->build();
+        }
+        return Cache::remember('ai.chat.context.v1', $ttl, fn () => $this->contextBuilder->build());
     }
 
     // ─── Prompt cache / budget helpers ──────────────────────────────────

@@ -176,6 +176,14 @@ final class OpenRouterClient
             'max_tokens'  => (int) config('openrouter.max_tokens'),
         ], $payload);
 
+        // Route to the fastest provider for the chosen model (OpenRouter feature).
+        // Massively reduces TTFT + generation time on free-tier models where the
+        // default "cheapest" provider is often the slowest one.
+        $sort = (string) config('openrouter.provider_sort', '');
+        if ($sort !== '' && ! isset($body['provider'])) {
+            $body['provider'] = ['sort' => $sort, 'allow_fallbacks' => true];
+        }
+
         $connectTimeout = (int) config('openrouter.connect_timeout', 15);
         $reqTimeout     = (int) config('openrouter.request_timeout', 60);
         $streamIdle     = (int) config('openrouter.stream_idle_timeout', 90);

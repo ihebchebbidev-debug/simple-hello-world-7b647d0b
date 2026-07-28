@@ -74,12 +74,34 @@ final class AiContextBuilder
     /** In-request memoization of per-table stamps to avoid repeat COUNT/MAX queries. */
     private array $stampCache = [];
 
+    /** In-request memo of Schema::hasTable / hasColumn — each check is a DB round-trip. */
+    private array $tableExists = [];
+    private array $columnExists = [];
+
+    private function hasTable(string $table): bool
+    {
+        return $this->tableExists[$table] ??= Schema::hasTable($table);
+    }
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        $key = $table.'.'.$column;
+        return $this->columnExists[$key] ??= Schema::hasColumn($table, $column);
+    }
+
     /** @return array<string, mixed> */
     public function build(): array
     {
         $monthStart = now()->startOfMonth()->toDateString();
         $seasonStart = now()->subMonths(12)->toDateString();
         $this->stampCache = [];
+        $this->tableExists = [];
+        $this->columnExists = [];
+
+        // Pre-warm every source-table stamp in ONE round-trip instead of
+        // ~9 sequential COUNT(*)+MAX(updated_at) queries. Slashes context
+        // build latency for the cold path (first request after a write).
+        $this->prewarmStamps();
 
         return [
             'generated_at'   => now()->toIso8601String(),
@@ -115,6 +137,42 @@ final class AiContextBuilder
             'notifications'     => $this->section('notifications',     fn () => $this->notifications()),
             'postings'          => $this->section('postings',          fn () => $this->postings()),
         ];
+    }
+
+    /**
+     * Batch-load COUNT(*) + MAX(updated_at) for every table referenced by any
+     * section into $this->stampCache with a single UNION ALL query. Silently
+     * skips missing tables/columns; the per-table fallback in tableStamp()
+     * still handles anything not pre-warmed.
+     */
+    private function prewarmStamps(): void
+    {
+        $tables = array_values(array_unique(array_merge(...array_values(self::SOURCES))));
+        $selects = [];
+        foreach ($tables as $table) {
+            if (! $this->hasTable($table)) {
+                $this->stampCache[$table] = '0';
+                continue;
+            }
+            $hasUpdated = $this->hasColumn($table, 'updated_at');
+            // Quote table as literal so we can identify rows back in PHP.
+            $literal = "'".str_replace("'", "''", $table)."'";
+            $selects[] = $hasUpdated
+                ? "SELECT $literal AS t, COUNT(*) AS c, COALESCE(MAX(updated_at)::text,'') AS u FROM $table"
+                : "SELECT $literal AS t, COUNT(*) AS c, '' AS u FROM $table";
+        }
+        if ($selects === []) {
+            return;
+        }
+        try {
+            $rows = DB::select(implode(' UNION ALL ', $selects));
+            foreach ($rows as $row) {
+                $this->stampCache[$row->t] = ($row->c ?? 0).':'.($row->u ?? '');
+            }
+        } catch (\Throwable $e) {
+            \Log::warning('ai.context.prewarm_stamps_failed', ['error' => $e->getMessage()]);
+            // Leave $stampCache alone — tableStamp() will fall back per-table.
+        }
     }
 
     /**
@@ -165,11 +223,11 @@ final class AiContextBuilder
         if (isset($this->stampCache[$table])) {
             return $this->stampCache[$table];
         }
-        if (! Schema::hasTable($table)) {
+        if (! $this->hasTable($table)) {
             return $this->stampCache[$table] = '0';
         }
 
-        $hasUpdated = Schema::hasColumn($table, 'updated_at');
+        $hasUpdated = $this->hasColumn($table, 'updated_at');
         $sql = $hasUpdated
             ? "SELECT COUNT(*) AS c, COALESCE(MAX(updated_at)::text,'') AS u FROM $table"
             : "SELECT COUNT(*) AS c, '' AS u FROM $table";
@@ -207,12 +265,12 @@ final class AiContextBuilder
     /** @return array<string, mixed> */
     private function dashboard(string $monthStart): array
     {
-        if (! Schema::hasTable('plots')) {
+        if (! $this->hasTable('plots')) {
             return ['counts' => [], 'this_month' => ['period_start' => $monthStart]];
         }
 
-        $hasCampaigns = Schema::hasTable('campaigns');
-        $hasPostings  = Schema::hasTable('postings');
+        $hasCampaigns = $this->hasTable('campaigns');
+        $hasPostings  = $this->hasTable('postings');
 
         $row = DB::selectOne(
             'SELECT
@@ -254,7 +312,7 @@ final class AiContextBuilder
     /** @return array<int, array<string, mixed>> */
     private function plots(): array
     {
-        if (! Schema::hasTable('plots')) {
+        if (! $this->hasTable('plots')) {
             return [];
         }
 
@@ -283,7 +341,7 @@ final class AiContextBuilder
      */
     private function plotOperationRollup(): array
     {
-        if (! Schema::hasTable('plots')) {
+        if (! $this->hasTable('plots')) {
             return [];
         }
 
@@ -354,7 +412,7 @@ final class AiContextBuilder
     /** @return array<int, array<string, mixed>> */
     private function waterByPlot(?string $sinceDate = null): array
     {
-        if (! Schema::hasTable('irrigation_operations') || ! Schema::hasTable('plots')) {
+        if (! $this->hasTable('irrigation_operations') || ! $this->hasTable('plots')) {
             return [];
         }
 
@@ -390,7 +448,7 @@ final class AiContextBuilder
     /** @return array<string, mixed> */
     private function fertilizationSummary(string $monthStart): array
     {
-        if (! Schema::hasTable('fertilization_operations')) {
+        if (! $this->hasTable('fertilization_operations')) {
             return ['this_month_quantity' => 0, 'by_fertilizer' => []];
         }
 
@@ -427,7 +485,7 @@ final class AiContextBuilder
     /** @return array<string, mixed> */
     private function phytosanitarySummary(string $monthStart): array
     {
-        if (! Schema::hasTable('phytosanitary_operations')) {
+        if (! $this->hasTable('phytosanitary_operations')) {
             return ['this_month_treatments' => 0, 'by_pesticide' => []];
         }
 
@@ -464,7 +522,7 @@ final class AiContextBuilder
     /** @return array<string, mixed> */
     private function harvestSummary(string $monthStart): array
     {
-        if (! Schema::hasTable('harvest_operations')) {
+        if (! $this->hasTable('harvest_operations')) {
             return ['this_month_quantity' => 0, 'season_total_kg' => 0];
         }
 
@@ -521,7 +579,7 @@ final class AiContextBuilder
     /** @return array{month: float, season: float} */
     private function costRow(string $table, string $qtyCol, string $monthStart): array
     {
-        if (! Schema::hasTable($table)) {
+        if (! $this->hasTable($table)) {
             return ['month' => 0.0, 'season' => 0.0];
         }
         $row = DB::selectOne(
@@ -538,7 +596,7 @@ final class AiContextBuilder
     /** @return array{month: float, season: float} */
     private function laborCostRow(string $monthStart): array
     {
-        if (! Schema::hasTable('harvest_operations')) {
+        if (! $this->hasTable('harvest_operations')) {
             return ['month' => 0.0, 'season' => 0.0];
         }
         $row = DB::selectOne(
@@ -555,7 +613,7 @@ final class AiContextBuilder
     /** @return array<string, mixed> */
     private function labor(): array
     {
-        if (! Schema::hasTable('labor_config')) {
+        if (! $this->hasTable('labor_config')) {
             return ['active' => false];
         }
         $active = DB::table('labor_config')->where('is_active', true)->first();
@@ -571,7 +629,7 @@ final class AiContextBuilder
     /** @return array<string, mixed> */
     private function priceCatalog(): array
     {
-        if (! Schema::hasTable('price_history')) {
+        if (! $this->hasTable('price_history')) {
             return [];
         }
 
@@ -585,9 +643,9 @@ final class AiContextBuilder
             ORDER BY entity_type, entity_id, effective_from DESC
         '));
 
-        $fertNames = Schema::hasTable('fertilizers')
+        $fertNames = $this->hasTable('fertilizers')
             ? DB::table('fertilizers')->pluck('name', 'id')->all() : [];
-        $pestNames = Schema::hasTable('pesticides')
+        $pestNames = $this->hasTable('pesticides')
             ? DB::table('pesticides')->pluck('name', 'id')->all() : [];
 
         return $rows->map(function ($r) use ($fertNames, $pestNames) {
@@ -608,7 +666,7 @@ final class AiContextBuilder
     /** @return array<int, array<string, mixed>> */
     private function campaigns(): array
     {
-        if (! Schema::hasTable('campaigns')) {
+        if (! $this->hasTable('campaigns')) {
             return [];
         }
 
@@ -639,7 +697,7 @@ final class AiContextBuilder
 
         $unions = [];
         foreach ($tables as [$table, $type, $qtyCol]) {
-            if (! Schema::hasTable($table)) {
+            if (! $this->hasTable($table)) {
                 continue;
             }
 
@@ -682,11 +740,11 @@ final class AiContextBuilder
     private function catalogCounts(): array
     {
         return [
-            'fertilizers' => Schema::hasTable('fertilizers')
+            'fertilizers' => $this->hasTable('fertilizers')
                 ? (int) DB::table('fertilizers')->where('is_active', true)->count() : 0,
-            'pesticides' => Schema::hasTable('pesticides')
+            'pesticides' => $this->hasTable('pesticides')
                 ? (int) DB::table('pesticides')->where('is_active', true)->count() : 0,
-            'pests' => Schema::hasTable('pests')
+            'pests' => $this->hasTable('pests')
                 ? (int) DB::table('pests')->where('is_active', true)->count() : 0,
         ];
     }
@@ -696,27 +754,27 @@ final class AiContextBuilder
     {
         $out = ['fertilizers' => [], 'pesticides' => [], 'pests' => []];
 
-        if (Schema::hasTable('fertilizers')) {
-            $cols = array_values(array_filter(['name', 'n_percent', 'p_percent', 'k_percent'], fn ($c) => Schema::hasColumn('fertilizers', $c)));
+        if ($this->hasTable('fertilizers')) {
+            $cols = array_values(array_filter(['name', 'n_percent', 'p_percent', 'k_percent'], fn ($c) => $this->hasColumn('fertilizers', $c)));
             $q = DB::table('fertilizers');
-            if (Schema::hasColumn('fertilizers', 'is_active')) $q->where('is_active', true);
+            if ($this->hasColumn('fertilizers', 'is_active')) $q->where('is_active', true);
             $out['fertilizers'] = $q->select($cols ?: ['*'])
                 ->orderBy('name')->limit(40)->get()
                 ->map(fn ($r) => ['name' => $r->name ?? null, 'n' => (float) ($r->n_percent ?? 0), 'p' => (float) ($r->p_percent ?? 0), 'k' => (float) ($r->k_percent ?? 0)])
                 ->all();
         }
-        if (Schema::hasTable('pesticides')) {
+        if ($this->hasTable('pesticides')) {
             // Real schema uses `chemical_composition`; older code referenced a
             // non-existent `active_ingredient` column which blew up the whole
             // AI context build under stale Schema caches.
-            $ingredientCol = Schema::hasColumn('pesticides', 'chemical_composition')
+            $ingredientCol = $this->hasColumn('pesticides', 'chemical_composition')
                 ? 'chemical_composition'
-                : (Schema::hasColumn('pesticides', 'active_ingredient') ? 'active_ingredient' : null);
+                : ($this->hasColumn('pesticides', 'active_ingredient') ? 'active_ingredient' : null);
             $cols = ['name'];
             if ($ingredientCol) $cols[] = $ingredientCol;
-            if (Schema::hasColumn('pesticides', 'unit')) $cols[] = 'unit';
+            if ($this->hasColumn('pesticides', 'unit')) $cols[] = 'unit';
             $q = DB::table('pesticides');
-            if (Schema::hasColumn('pesticides', 'is_active')) $q->where('is_active', true);
+            if ($this->hasColumn('pesticides', 'is_active')) $q->where('is_active', true);
             $out['pesticides'] = $q->select($cols)
                 ->orderBy('name')->limit(40)->get()
                 ->map(fn ($r) => [
@@ -726,11 +784,11 @@ final class AiContextBuilder
                 ])
                 ->all();
         }
-        if (Schema::hasTable('pests')) {
-            $cols = array_values(array_filter(['name', 'category'], fn ($c) => Schema::hasColumn('pests', $c)));
+        if ($this->hasTable('pests')) {
+            $cols = array_values(array_filter(['name', 'category'], fn ($c) => $this->hasColumn('pests', $c)));
             if (! in_array('name', $cols, true)) $cols = array_merge(['name'], $cols);
             $q = DB::table('pests');
-            if (Schema::hasColumn('pests', 'is_active')) $q->where('is_active', true);
+            if ($this->hasColumn('pests', 'is_active')) $q->where('is_active', true);
             $out['pests'] = $q->select($cols)
                 ->orderBy('name')->limit(40)->get()
                 ->map(fn ($r) => ['name' => $r->name ?? null, 'category' => $r->category ?? null])
@@ -743,11 +801,11 @@ final class AiContextBuilder
     /** @return array<string, mixed> */
     private function users(): array
     {
-        if (! Schema::hasTable('users')) return ['total' => 0];
+        if (! $this->hasTable('users')) return ['total' => 0];
 
         $total = (int) DB::table('users')->count();
         $byRole = [];
-        if (Schema::hasTable('user_roles')) {
+        if ($this->hasTable('user_roles')) {
             $byRole = DB::table('user_roles')
                 ->select('role', DB::raw('COUNT(*) AS n'))
                 ->groupBy('role')->pluck('n', 'role')->all();
@@ -759,7 +817,7 @@ final class AiContextBuilder
     /** @return array<string, int> */
     private function notifications(): array
     {
-        if (! Schema::hasTable('notifications')) return [];
+        if (! $this->hasTable('notifications')) return [];
         return [
             'total'  => (int) DB::table('notifications')->count(),
             'unread' => (int) DB::table('notifications')->whereNull('read_at')->count(),
@@ -769,7 +827,7 @@ final class AiContextBuilder
     /** @return array<string, int> */
     private function postings(): array
     {
-        if (! Schema::hasTable('postings')) return [];
+        if (! $this->hasTable('postings')) return [];
         return DB::table('postings')
             ->select('status', DB::raw('COUNT(*) AS n'))
             ->groupBy('status')->pluck('n', 'status')->all();
@@ -777,7 +835,7 @@ final class AiContextBuilder
 
     private function currentPrice(string $entityType, ?string $entityId): float
     {
-        if (! Schema::hasTable('price_history')) return 0.0;
+        if (! $this->hasTable('price_history')) return 0.0;
 
         $q = DB::table('price_history')
             ->where('entity_type', $entityType)
@@ -794,13 +852,13 @@ final class AiContextBuilder
 
     private function activeWaterUnit(): string
     {
-        if (! Schema::hasTable('water_config')) return 'm3';
+        if (! $this->hasTable('water_config')) return 'm3';
         return (string) (DB::table('water_config')->where('is_active', true)->orderByDesc('created_at')->value('unit') ?? 'm3');
     }
 
     private function tableScalar(string $table, string $sql, array $bindings = []): float
     {
-        if (! Schema::hasTable($table)) {
+        if (! $this->hasTable($table)) {
             return 0.0;
         }
         $row = DB::selectOne($sql, $bindings);
