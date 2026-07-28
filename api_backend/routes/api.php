@@ -234,9 +234,9 @@ $registerGroup(['dashboard', 'v1/dashboard'], ['auth:sanctum', 'role:technician,
     Route::get('recent-activity', [DashboardController::class, 'recentActivity']);
 });
 
-// ─── AI assistant (OpenRouter) ───────────────────────────────────────────────
+// ─── AI assistant (OpenRouter) — public, no auth ─────────────────────────────
 
-$registerGroup(['ai', 'v1/ai'], ['auth:sanctum', 'role:technician,manager,admin', 'throttle:30,1'], function (): void {
+$registerGroup(['ai', 'v1/ai'], ['throttle:30,1'], function (): void {
     Route::post('chat', [AiChatController::class, 'chat']);
     Route::post('feedback', [AiChatController::class, 'feedback'])->withoutMiddleware('throttle:30,1')->middleware('throttle:120,1');
 });
