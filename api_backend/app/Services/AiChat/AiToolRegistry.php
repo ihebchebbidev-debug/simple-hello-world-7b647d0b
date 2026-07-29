@@ -328,11 +328,35 @@ final class AiToolRegistry
         $limit = max(1, min(20, (int) ($args['limit'] ?? 10)));
         $like = '%'.mb_strtolower($q).'%';
         $query = DB::table($table)->whereRaw('LOWER(name) LIKE ?', [$like]);
+
         if (Schema::hasColumn($table, 'scientific_name')) {
             $query->orWhereRaw('LOWER(scientific_name) LIKE ?', [$like]);
         }
+
+        if (Schema::hasColumn($table, 'category')) {
+            $query->orWhereRaw('LOWER(category) LIKE ?', [$like]);
+
+            if ($categoryAlias = $this->normalizeCatalogCategoryQuery($kind, $q)) {
+                $query->orWhereRaw('LOWER(category) LIKE ?', ['%'.$categoryAlias.'%']);
+            }
+        }
+
         $rows = $query->limit($limit)->get()->all();
         return ['kind' => $kind, 'query' => $q, 'results' => $rows, 'count' => count($rows)];
+    }
+
+    private function normalizeCatalogCategoryQuery(string $kind, string $query): ?string
+    {
+        if ($kind !== 'pest') {
+            return null;
+        }
+
+        return match (mb_strtolower(trim($query))) {
+            'champignon', 'champignons' => 'fungus',
+            'insecte', 'insectes' => 'insect',
+            'mauvaise herbe', 'mauvaises herbes', 'adventice', 'adventices' => 'weed',
+            default => null,
+        };
     }
 
     /** @param array<string,mixed> $args */
