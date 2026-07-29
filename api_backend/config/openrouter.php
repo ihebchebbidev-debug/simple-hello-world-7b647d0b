@@ -48,16 +48,23 @@ return [
     'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'http://localhost')),
     'title'   => env('OPENROUTER_TITLE', 'Flehty Assistant'),
 
+    // Lower max_tokens and fewer retries improve perceived response time.
+    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 600),
+    'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.35),
+
     // Timeouts (seconds).
     'connect_timeout'   => (int) env('OPENROUTER_CONNECT_TIMEOUT', 15),
     'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 60),  // non-stream hard cap
     'stream_idle_timeout' => (int) env('OPENROUTER_STREAM_IDLE_TIMEOUT', 90), // per-chunk idle
 
     // Retry / backoff.
-    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 2),
+    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 1),
     'retry_base_ms'     => (int) env('OPENROUTER_RETRY_BASE_MS', 400),
     'retry_max_ms'      => (int) env('OPENROUTER_RETRY_MAX_MS', 4000),
     'quarantine_seconds' => (int) env('OPENROUTER_QUARANTINE_SECONDS', 300),
+
+    // Fast mode: disable the agent tool loop to reduce round-trips.
+    'fast_mode' => (bool) env('OPENROUTER_FAST_MODE', false),
 
     // Tool-calling agent loop.
     // When enabled, the assistant plans + calls typed data tools (aggregations,
@@ -65,8 +72,8 @@ return [
     // on a pre-baked JSON context blob. Free models only.
     'agent' => [
         'enabled'         => (bool) env('OPENROUTER_AGENT_ENABLED', true),
-        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 4),
-        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 2048),
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 2),
+        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 1024),
     ],
 
     // Prompt cache — hash(system+messages+model) → cached reply.

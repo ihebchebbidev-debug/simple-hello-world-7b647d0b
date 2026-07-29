@@ -43,7 +43,7 @@ final class AiChatService
             ];
         }
 
-        $agentEnabled = (bool) config('openrouter.agent.enabled', true);
+        $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
         if ($agentEnabled) {
@@ -102,7 +102,7 @@ final class AiChatService
             return ['reply' => $msg, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'degraded' => true];
         }
 
-        $agentEnabled = (bool) config('openrouter.agent.enabled', true);
+        $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
         if ($agentEnabled) {
