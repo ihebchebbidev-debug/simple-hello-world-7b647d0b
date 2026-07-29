@@ -167,6 +167,11 @@ final class AiChatController extends Controller
                         $emit(['type' => 'delta', 'content' => $delta]);
                     },
                     $subjectId,
+                    static function (array $event) use ($emit): void {
+                        // Forward plan / tool_start / tool_end events verbatim
+                        // so the UI can render reasoning + tool activity chips.
+                        $emit($event);
+                    },
                 );
 
                 // Self-check may have rewritten the reply after streaming. If so,

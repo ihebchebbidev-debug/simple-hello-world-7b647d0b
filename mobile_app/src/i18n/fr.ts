@@ -137,4 +137,15 @@ export const fr = {
     never: 'Jamais',
   },
   notFound: { title: 'Page introuvable', cta: 'Revenir à l\'accueil' },
+  aiChat: {
+    open: 'Assistant IA',
+    title: 'Assistant Flehty',
+    subtitle: 'Analyste terrain — irrigation, fertilisation, récolte…',
+    empty: 'Posez une question sur vos parcelles, campagnes ou opérations.',
+    placeholder: 'Ex : Consommation d\'eau en juillet dernier',
+    send: 'Envoyer',
+    newChat: 'Nouveau',
+    thinking: 'Réflexion…',
+    plan: 'Plan',
+  },
 } as const;

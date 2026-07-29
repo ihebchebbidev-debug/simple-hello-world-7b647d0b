@@ -26,10 +26,11 @@ return [
     // a slug is retired (OpenRouter returns 404 for removed models — surface as
     // `model_not_found` in the client).
     'models' => array_values(array_filter([
+        // Free tool-capable models. Ordered by tool-calling reliability.
         env('OPENROUTER_MODEL',            'deepseek/deepseek-chat-v3.1:free'),
-        env('OPENROUTER_MODEL_FALLBACK',   'meta-llama/llama-3.3-70b-instruct:free'),
-        env('OPENROUTER_MODEL_FALLBACK_2', 'qwen/qwen-2.5-72b-instruct:free'),
-        env('OPENROUTER_MODEL_FALLBACK_3', 'google/gemini-2.0-flash-exp:free'),
+        env('OPENROUTER_MODEL_FALLBACK',   'google/gemini-2.0-flash-exp:free'),
+        env('OPENROUTER_MODEL_FALLBACK_2', 'meta-llama/llama-3.3-70b-instruct:free'),
+        env('OPENROUTER_MODEL_FALLBACK_3', 'qwen/qwen-2.5-72b-instruct:free'),
     ], static fn ($m) => is_string($m) && trim($m) !== '')),
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
@@ -57,6 +58,16 @@ return [
     'retry_base_ms'     => (int) env('OPENROUTER_RETRY_BASE_MS', 400),
     'retry_max_ms'      => (int) env('OPENROUTER_RETRY_MAX_MS', 4000),
     'quarantine_seconds' => (int) env('OPENROUTER_QUARANTINE_SECONDS', 300),
+
+    // Tool-calling agent loop.
+    // When enabled, the assistant plans + calls typed data tools (aggregations,
+    // per-plot/per-campaign/YoY breakdowns, catalog lookups) instead of relying
+    // on a pre-baked JSON context blob. Free models only.
+    'agent' => [
+        'enabled'         => (bool) env('OPENROUTER_AGENT_ENABLED', true),
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 4),
+        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 2048),
+    ],
 
     // Prompt cache — hash(system+messages+model) → cached reply.
     'cache' => [

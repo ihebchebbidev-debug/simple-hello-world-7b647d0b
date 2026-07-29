@@ -1,71 +1,121 @@
-# Customer remarks — full implementation plan
+# Upgrade the Flehty AI assistant
 
-Consolidated from `Remarques_sur_la_2ème_version` and `Remarques_sur_la_3ème_version`. Items deduplicated; v3 supersedes v2 where they conflict.
+Turn the JSON-lookup bot into a small tool-calling analyst. Keep OpenRouter free models only.
 
-## A. Terminology (global)
-1. Replace **"Ravageurs" → "Bioagresseurs"** everywhere: sidebar, page titles, table headers, report columns, i18n FR/EN, mobile app.
+## 1. Switch the model chain to tool-capable free models
 
-## B. Sidebar / Navigation
-2. Reorder admin sidebar to: **Tableau de bord · Configuration · Campagnes · Parcelles · Main d'œuvre · Eau · Engrais · Pesticides · Bioagresseurs · Rapports** (+ Utilisateurs / Notifications / Sync / Logs / Aide kept after).
+Update `config/openrouter.php` model chain (all `:free`, all support function-calling):
 
-## C. Dashboard
-3. Rename **"Activité récente" → "Liste des opérations culturales"**.
-4. Show **exact date** (dd/mm/yyyy) instead of "today / yesterday".
-5. **Click a row** → open the technician's entry form pre-filled, with **Modifier** and **Supprimer** actions (reuse `OperationDetailsModal`).
-6. Add **filters: date · parcelle · type d'opération** above the list.
-7. Replace the four stat cards' icons with **shortcut tiles to the 5 reports** (Irrigation, Fertilisation, Phyto, Récolte, Coût) — clicking navigates to the report.
+```
+1. deepseek/deepseek-chat-v3.1:free      (primary, strong tool use)
+2. meta-llama/llama-3.3-70b-instruct:free
+3. qwen/qwen-2.5-72b-instruct:free
+4. google/gemini-2.0-flash-exp:free      (fallback, tool-calling)
+```
 
-## D. Configuration pages
-8. **Parcelles**: remove column **"Début campagne"**.
-9. **Parcelles / Engrais / Pesticides / Campagnes**: the **"Supprimer"** button currently deactivates — must actually DELETE (hard delete via API). Keep a separate "Désactiver / Activer" toggle.
-10. **Engrais & Pesticides** create/edit modals: add **price field** so the price can be entered when adding the item (calls existing price-history endpoint on save).
+Add `tools` + `tool_choice: "auto"` support in `OpenRouterClient::chat()` (non-stream path only — tool loops don't stream partial function calls reliably on free models). Keep `chatStream()` unchanged for the final answer pass.
 
-## E. Numeric formatting
-11. **Prices & rates**: display & input with **3 decimals** (not 4) — Tunisia convention. Audit `format.ts`, all price inputs/tables.
+## 2. New service: `AiToolRegistry` — the retrieval layer
 
-## F. Reports — shared
-12. Reorder filters left→right: **Campagne · Culture · Parcelle · Date** in `ReportToolbar`.
-13. **Double-click** a plot row → open the per-plot operations history page (already exists at `/reports/history/:type/:plotId`) — wire it on every report.
-14. Fix the **Campagne filter** so it actually scopes the data (it's currently broken on Irrigation, Fertilisation, Phyto).
+Replaces the pre-baked context blob for anything beyond the tiny baseline. Each tool is a pure PHP method with a JSON schema; the model picks which to call.
 
-## G. Irrigation report
-15. Add the missing **Parcelle filter**.
-16. Fix **Culture filter**.
-17. Rename column header **"CUMUL (M³)" → "m³/parcelle"** and **"EAU" → "m³/ha"** (lowercase m³).
+Tools (all read-only, all scoped by role):
 
-## H. Fertilisation report
-18. Fix **quantité/ha** calculation (currently wrong).
-19. Fix **cumul par parcelle** calculation.
-20. Monthly pivot (parcelles × mois): **default to current campaign only** so it doesn't blow up across multiple years.
-21. Fix all filters (campagne / culture / parcelle).
+- `get_overview()` — small KPI snapshot (counts + active campaign). Cheap, always allowed.
+- `list_plots(filter?, campaign_id?, crop?)` — id, name, area, crop, active campaign.
+- `list_campaigns(status?)` — active/past campaigns with dates + crop.
+- `get_operations(type, plot_id?, campaign_id?, from?, to?, limit?=50)` — irrigation/fertilization/phyto/harvest rows with dates, quantities, costs.
+- `aggregate_operations(type, group_by, metric, from?, to?, plot_id?, campaign_id?, crop?)`
+  - `group_by`: `day|week|month|quarter|year|campaign|plot|crop|product`
+  - `metric`: `sum_quantity|sum_cost|sum_volume_m3|sum_yield_kg|count|avg_cost_per_kg`
+  - Returns a small time series or grouped table (max 60 buckets).
+- `compare_periods(type, metric, period_a, period_b, plot_id?, crop?)` — YoY / MoM / arbitrary window compare with delta + %.
+- `search_catalog(kind, query)` — fertilizers / pesticides / pests by name or scientific name (RAG-lite over the existing tables).
+- `recent_operations(limit?=10)` — cross-type latest activity feed.
+- `get_prices(kind, item_id?, from?, to?)` — price history series.
 
-## I. Phytosanitaire report
-22. Fix **pesticide/ha** calculation.
-23. Fix all filters incl. campagne.
-24. Rename "Ravageur ciblé" header → "Bioagresseur ciblé".
+Every tool result is capped (≤ 60 rows / ≤ 2 KB serialized) and stamps `currency`, `units`, `generated_at`.
 
-## J. Mobile app
-25. **Phytosanitaire**: allow **3 decimals** for the product quantity input (`step="0.001"`, validation).
-26. **Récolte**: remove the **"Jours travaillés"** field from the form.
-27. Replace "Ravageurs" wording with "Bioagresseurs" in mobile i18n.
+## 3. New service: `AiAgentLoop` — plan-then-answer
 
-## K. Backend (if needed)
-- Confirm DELETE endpoints exist for plots, fertilizers, pesticides, campaigns (and are not soft-deletes). Add hard-delete routes if missing.
-- Verify `campaign_id` filter is accepted on `/reports/irrigation`, `/reports/fertilization`, `/reports/phytosanitary` and propagated to queries.
+Replaces the current single-shot call in `AiChatService::reply` / `replyStream`.
 
----
+Loop (max 4 iterations, hard budget cap):
 
-## Execution order
-1. Terminology + sidebar reorder (A, B) — low risk, touches many files.
-2. Configuration fixes (D) + price decimals (E).
-3. Dashboard rework (C).
-4. Reports shared + per-report fixes (F–I).
-5. Mobile (J).
-6. Backend touch-ups discovered along the way (K).
+```text
+turn 0: system + tools schema + user
+        → model returns either tool_calls OR final answer
+turn 1..N: append tool results → model reasons again
+final: streamed answer to the client
+```
 
-## Out of scope (will flag, not change)
-- Visual redesign of report tables.
-- Adding new report types.
-- Mobile app native shell changes (only web bundle under `mobile_app/`).
+Reasoning trace: the model is instructed to first emit a short internal `plan` field via a lightweight `plan(steps)` pseudo-tool (max 4 steps, 200 chars) before invoking data tools. The plan is streamed to the UI as a collapsed "Thinking…" section (new `type: 'plan'` NDJSON event). Chain-of-thought is never exposed beyond that short plan.
 
-After approval I'll execute top-to-bottom, committing logical batches and verifying after each.
+Streaming behavior:
+
+- Intermediate tool-call rounds: non-streamed (JSON call).
+- Final answer round: streamed as today via `chatStream()`.
+- New NDJSON event types added by `AiChatController::streamResponse`:
+  - `plan` — steps array
+  - `tool` — `{name, args, ok, ms}` (no result body, just activity)
+  - existing `delta` / `revise` / `done` / `error` unchanged
+
+## 4. Retire the keyword `PromptRouter`
+
+Removed from the call path. The tool loop makes it redundant: the model asks for exactly the data it needs. `AiContextBuilder` shrinks to a tiny `baseline_context()` (counts, currency, units, active campaign, plot list ids+names) always sent with the system prompt so the model has enough to *choose tools*.
+
+`PromptRouter.php` + `AiContextBuilder.php` heavy sections kept but only invoked *by tools* (e.g. `aggregate_operations` reuses the existing SQL builders). Delete `PromptRouterTest.php`, add `AiToolRegistryTest.php`.
+
+## 5. Flexible aggregations
+
+`aggregate_operations` and `compare_periods` implement the missing windows via SQL:
+
+- Week: `date_trunc('week', occurred_at)`
+- Quarter: `date_trunc('quarter', occurred_at)`
+- Campaign: join `campaigns` on date range
+- Crop: join `plots.crop`
+- YoY: two windowed queries + delta
+
+Sensible caps: max 24 months of daily data, 60 buckets returned, one metric per call.
+
+## 6. Frontend changes (small)
+
+`src/lib/aiChat.ts`:
+- Extend `StreamEvent` union with `plan` and `tool`.
+- Pass them to two new optional callbacks `onPlan(steps)` and `onTool(activity)`.
+
+`src/features/ai-chat/` chat window:
+- Render plan steps in a collapsible "Reasoning" panel above the streamed answer.
+- Render tool activity as small chips ("queried irrigation · 120 ms").
+- No changes to markdown rendering of the final reply.
+
+## 7. Tests
+
+- `AiToolRegistryTest` — one test per tool (schema, caps, role scoping).
+- `AiAgentLoopTest` — mocked OpenRouter returns `tool_calls` → verify loop dispatches, feeds results back, stops on final answer, respects iteration cap.
+- Update `AiChatTest` to fake the two-round exchange (tool call → final answer).
+
+## Files touched
+
+Backend:
+- `config/openrouter.php` — model chain, add `tools_enabled` flag
+- `app/Services/AiChat/OpenRouterClient.php` — add tools/tool_choice + tool_calls parsing
+- `app/Services/AiChat/AiToolRegistry.php` — new
+- `app/Services/AiChat/AiAgentLoop.php` — new
+- `app/Services/AiChat/AiChatService.php` — delegate to agent loop, drop router call
+- `app/Services/AiChat/AiContextBuilder.php` — add `baseline()`; keep aggregation helpers, called by tools
+- `app/Http/Controllers/Api/AiChatController.php` — forward `plan`/`tool` events
+- `tests/Feature/AiChat/AiChatTest.php` — updated
+- `tests/Unit/AiChat/AiToolRegistryTest.php` — new
+- `tests/Unit/AiChat/AiAgentLoopTest.php` — new
+- `tests/Unit/AiChat/PromptRouterTest.php` — removed
+
+Frontend:
+- `src/lib/aiChat.ts` — new event types
+- `src/features/ai-chat/*` — plan panel + tool chips (single component change)
+
+## Non-goals
+
+- No paid models, no vision, no voice.
+- No RAG vector store — catalog "search" is SQL `ILIKE` (Pest/Fertilizer/Pesticide tables are small).
+- No changes to feedback endpoint, cache layer, circuit breaker, token budget, or auth.

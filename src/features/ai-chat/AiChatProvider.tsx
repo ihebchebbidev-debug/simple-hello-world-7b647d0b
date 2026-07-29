@@ -396,16 +396,47 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
             }
           },
           controller.signal,
-          (finalReply) => {
-            // Server-side self-check produced a corrected reply; replace draft.
-            if (rafRef.current != null) {
-              cancelAnimationFrame(rafRef.current);
-              rafRef.current = null;
-            }
-            chunkBufferRef.current = '';
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)),
-            );
+          {
+            onRevise: (finalReply) => {
+              if (rafRef.current != null) {
+                cancelAnimationFrame(rafRef.current);
+                rafRef.current = null;
+              }
+              chunkBufferRef.current = '';
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)),
+              );
+            },
+            onPlan: (steps) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, plan: steps } : m)),
+              );
+            },
+            onToolStart: (name, args) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, tools: [...(m.tools ?? []), { name, args }] }
+                    : m,
+                ),
+              );
+            },
+            onToolEnd: (name, ok, preview) => {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== assistantId) return m;
+                  const tools = [...(m.tools ?? [])];
+                  // Update the most recent matching tool that has no ok yet.
+                  for (let i = tools.length - 1; i >= 0; i--) {
+                    if (tools[i].name === name && tools[i].ok === undefined) {
+                      tools[i] = { ...tools[i], ok, preview };
+                      return { ...m, tools };
+                    }
+                  }
+                  return { ...m, tools: [...tools, { name, ok, preview }] };
+                }),
+              );
+            },
           },
         );
 
@@ -575,15 +606,46 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           }
         },
         controller.signal,
-        (finalReply) => {
-          if (rafRef.current != null) {
-            cancelAnimationFrame(rafRef.current);
-            rafRef.current = null;
-          }
-          chunkBufferRef.current = '';
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)),
-          );
+        {
+          onRevise: (finalReply) => {
+            if (rafRef.current != null) {
+              cancelAnimationFrame(rafRef.current);
+              rafRef.current = null;
+            }
+            chunkBufferRef.current = '';
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)),
+            );
+          },
+          onPlan: (steps) => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, plan: steps } : m)),
+            );
+          },
+          onToolStart: (name, args) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, tools: [...(m.tools ?? []), { name, args }] }
+                  : m,
+              ),
+            );
+          },
+          onToolEnd: (name, ok, preview) => {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const tools = [...(m.tools ?? [])];
+                for (let i = tools.length - 1; i >= 0; i--) {
+                  if (tools[i].name === name && tools[i].ok === undefined) {
+                    tools[i] = { ...tools[i], ok, preview };
+                    return { ...m, tools };
+                  }
+                }
+                return { ...m, tools: [...tools, { name, ok, preview }] };
+              }),
+            );
+          },
         },
       );
 

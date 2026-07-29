@@ -16,6 +16,8 @@ final class AiChatService
         private readonly ResponseValidator $validator,
         private readonly PromptRouter $router,
         private readonly TokenBudget $budget,
+        private readonly AiAgentLoop $agent,
+        private readonly AiToolRegistry $toolRegistry,
     ) {}
 
     /**
@@ -41,9 +43,23 @@ final class AiChatService
             ];
         }
 
-        $payload = $this->buildOpenRouterMessages($messages, $locale);
+        $agentEnabled = (bool) config('openrouter.agent.enabled', true);
+        $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
-        $reply = $this->openRouter->chat($payload);
+        if ($agentEnabled) {
+            try {
+                $buf = '';
+                $reply = $this->agent->run($payload, static function (string $d) use (&$buf) { $buf .= $d; });
+                if (trim($reply) === '' && $buf !== '') {
+                    $reply = $buf;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
+                $reply = $this->openRouter->chat($payload);
+            }
+        } else {
+            $reply = $this->openRouter->chat($payload);
+        }
         $this->recordUsage($subjectId, $payload);
 
         $final = $this->selfCheck($reply, $messages, $locale, $payload);
@@ -70,6 +86,7 @@ final class AiChatService
         ?string $conversationId,
         callable $onDelta,
         int|string|null $subjectId = null,
+        ?callable $onEvent = null,
     ): array {
         $id = $conversationId ?: (string) Str::uuid();
 
@@ -85,9 +102,19 @@ final class AiChatService
             return ['reply' => $msg, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'degraded' => true];
         }
 
-        $payload = $this->buildOpenRouterMessages($messages, $locale);
+        $agentEnabled = (bool) config('openrouter.agent.enabled', true);
+        $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
-        $streamed = $this->openRouter->chatStream($payload, $onDelta);
+        if ($agentEnabled) {
+            try {
+                $streamed = $this->agent->run($payload, $onDelta, $onEvent);
+            } catch (\Throwable $e) {
+                Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
+                $streamed = $this->openRouter->chatStream($payload, $onDelta);
+            }
+        } else {
+            $streamed = $this->openRouter->chatStream($payload, $onDelta);
+        }
         $this->recordUsage($subjectId, $payload);
 
         $final = $this->selfCheck($streamed, $messages, $locale, $payload);
@@ -200,7 +227,7 @@ INSTR;
      * @param  array<int, array{role: string, content: string}>  $messages
      * @return array<int, array{role: string, content: string}>
      */
-    private function buildOpenRouterMessages(array $messages, string $locale): array
+    private function buildOpenRouterMessages(array $messages, string $locale, bool $agentMode = false): array
     {
         try {
             $fullContext = $this->cachedContextBuild();
@@ -224,15 +251,23 @@ INSTR;
             $normalised = array_slice($normalised, -12);
         }
 
-        try {
-            $routed  = $this->router->slim($fullContext, $normalised);
-            $context = $routed['context'] ?? $fullContext;
-        } catch (\Throwable $e) {
-            \Log::warning('ai.context.router_failed', ['error' => $e->getMessage()]);
-            $context = $fullContext;
+        // In agent mode we no longer prebake a big JSON snapshot — the model
+        // pulls exactly what it needs through tools. Keep only a tiny baseline.
+        if ($agentMode) {
+            $context = array_intersect_key($fullContext, array_flip(['generated_at', 'currency', 'units', 'period']));
+        } else {
+            try {
+                $routed  = $this->router->slim($fullContext, $normalised);
+                $context = $routed['context'] ?? $fullContext;
+            } catch (\Throwable $e) {
+                \Log::warning('ai.context.router_failed', ['error' => $e->getMessage()]);
+                $context = $fullContext;
+            }
         }
         try {
-            $system = $this->systemPrompt($locale, $context);
+            $system = $agentMode
+                ? $this->agentSystemPrompt($locale, $context)
+                : $this->systemPrompt($locale, $context);
         } catch (\Throwable $e) {
             \Log::warning('ai.context.system_prompt_failed', ['error' => $e->getMessage()]);
             $system = 'You are Flehty Assistant. Live data is temporarily unavailable; answer from general knowledge and ask the user for specifics if needed.';
@@ -242,6 +277,52 @@ INSTR;
             [['role' => 'system', 'content' => $system]],
             $normalised,
         );
+    }
+
+    /**
+     * Compact system prompt used in agent (tool-calling) mode. No pre-baked
+     * JSON snapshot — the model must query data through the exposed tools.
+     *
+     * @param  array<string, mixed>  $baseline
+     */
+    private function agentSystemPrompt(string $locale, array $baseline): string
+    {
+        $french = str_starts_with(strtolower($locale), 'fr');
+        $language = $french ? 'French' : 'English';
+        $baselineJson = json_encode($baseline, JSON_UNESCAPED_UNICODE) ?: '{}';
+
+        return <<<PROMPT
+You are Flehty Assistant — a professional farm-operations analyst inside the Flehty admin app.
+Currency is MAD unless stated otherwise. Default reply language: {$language}; mirror the user's language if different.
+
+## How you work (tool-calling mode)
+You do NOT have a pre-baked data snapshot. Instead, you have typed READ-ONLY tools to query live data.
+
+Reasoning protocol:
+1. If the question needs 2+ lookups, comparisons, or a breakdown — FIRST call `plan` with 1–4 short steps. Do this only once per turn.
+2. Whenever the user mentions a period ("last july", "juillet dernier", "this month", "cette saison", "Q2 2024", "30 derniers jours"…) — call `resolve_date_range` FIRST with the raw phrase, then pass the returned `from`/`to` to other tools. Never guess dates yourself.
+3. Call the smallest set of data tools you need. Prefer `aggregate_operations` and `compare_periods` over raw row dumps.
+4. Resolve entities (plot name → plot_id) via `list_plots`; campaigns via `list_campaigns`; catalog items via `search_catalog`.
+5. When you have enough data, stop calling tools and write the final answer.
+
+## Voice & precision
+- Executive-brief: numbers first, context second. No preambles, no filler ("Sure", "Voici"), no emoji.
+- Quote every number from tool results verbatim. Attach units (m³, kg, MAD, ha). Never hedge with "around" when you have an exact value.
+- Dates in ISO (`YYYY-MM-DD` or `YYYY-MM`). Never invent a date.
+- Zero is a valid answer — write "0 <unit>", not "no data".
+- If a tool returns `ok:false` or empty results, say so plainly in one line and suggest the exact module to check.
+
+## Formatting
+- Clean GitHub-flavoured Markdown. `-` bullets. Bold only key numbers/entities.
+- Adaptive length: greeting → 1 sentence; lookup → 1 short sentence; comparison → short intro + tight bullets or a ≤6-row table; deep analysis only if explicitly requested.
+- Never open with a heading. Do not repeat the question. No "As an AI".
+
+## Scope
+Answer questions about plots, campaigns, water/irrigation, fertilization, phytosanitary treatments, harvest, costs, users, notifications, catalog, and reports. For off-topic requests (weather, news, personal advice, etc.), refuse briefly in the user's language.
+
+## Baseline (tiny — everything else comes from tools)
+{$baselineJson}
+PROMPT;
     }
 
     /**

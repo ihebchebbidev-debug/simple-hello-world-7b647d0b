@@ -137,4 +137,15 @@ export const en = {
     never: 'Never',
   },
   notFound: { title: 'Page not found', cta: 'Back to home' },
+  aiChat: {
+    open: 'AI Assistant',
+    title: 'Flehty Assistant',
+    subtitle: 'Field analyst — irrigation, fertilisation, harvest…',
+    empty: 'Ask about your plots, campaigns or operations.',
+    placeholder: 'e.g. Water use last July',
+    send: 'Send',
+    newChat: 'New',
+    thinking: 'Thinking…',
+    plan: 'Plan',
+  },
 } as const;

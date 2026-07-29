@@ -16,7 +16,17 @@ type StreamEvent =
   | { type: 'delta'; content: string }
   | { type: 'revise'; content: string; violations?: string[] }
   | { type: 'done'; reply: string; conversation_id: string | null; revised?: boolean }
+  | { type: 'plan'; steps: string[] }
+  | { type: 'tool_start'; name: string; args?: Record<string, unknown> }
+  | { type: 'tool_end'; name: string; ok?: boolean; preview?: string }
   | { type: 'error'; message: string; code?: string };
+
+export type AiChatStreamCallbacks = {
+  onPlan?: (steps: string[]) => void;
+  onToolStart?: (name: string, args?: Record<string, unknown>) => void;
+  onToolEnd?: (name: string, ok?: boolean, preview?: string) => void;
+  onRevise?: (finalReply: string) => void;
+};
 
 function unwrapReply(payload: unknown): { reply: string; conversationId: string | null } {
   const root = payload as Record<string, unknown>;
@@ -57,8 +67,10 @@ export async function streamAiChatMessage(
   body: AiChatRequest,
   onDelta: (chunk: string) => void,
   signal?: AbortSignal,
-  onRevise?: (finalReply: string) => void,
+  onRevise?: ((finalReply: string) => void) | AiChatStreamCallbacks,
 ): Promise<AiChatResponse> {
+  const cbs: AiChatStreamCallbacks =
+    typeof onRevise === 'function' ? { onRevise } : onRevise ?? {};
   const token = getAuthToken();
   const res = await fetch(`${BACKEND_URL}/api/ai/chat`, {
     method: 'POST',
@@ -124,7 +136,13 @@ export async function streamAiChatMessage(
       } else if (event.type === 'revise' && event.content) {
         // Server-side self-check produced a corrected reply; replace the streamed draft.
         reply = event.content;
-        onRevise?.(event.content);
+        cbs.onRevise?.(event.content);
+      } else if (event.type === 'plan') {
+        cbs.onPlan?.(event.steps ?? []);
+      } else if (event.type === 'tool_start') {
+        cbs.onToolStart?.(event.name, event.args);
+      } else if (event.type === 'tool_end') {
+        cbs.onToolEnd?.(event.name, event.ok, event.preview);
       } else if (event.type === 'done') {
         reply = event.reply || reply;
         conversationId = event.conversation_id ?? conversationId;

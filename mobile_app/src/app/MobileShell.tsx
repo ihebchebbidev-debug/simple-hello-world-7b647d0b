@@ -1,14 +1,17 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { Home, RefreshCw, Settings } from 'lucide-react';
+import { Home, RefreshCw, Settings, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { cn } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import OutboxStatusBar from '@/components/OutboxStatusBar';
+import AiChatSheet from '@/features/ai-chat/AiChatSheet';
 
 const MobileShell = () => {
   const { t } = useTranslation();
   const { pending, syncing, failed } = useOfflineQueue();
+  const [aiOpen, setAiOpen] = useState(false);
   const pendingCount = pending.length + syncing.length;
   const failedCount = failed.length;
   const tabBadge = pendingCount + failedCount;
@@ -23,6 +26,17 @@ const MobileShell = () => {
     <ProtectedRoute>
       <div className="flex flex-col min-h-screen bg-background text-foreground">
         <OutboxStatusBar />
+        <button
+          type="button"
+          onClick={() => setAiOpen(true)}
+          aria-label={t('aiChat.open')}
+          title={t('aiChat.open')}
+          className="fixed top-3 right-3 z-40 inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--primary-glow))]/40 bg-[hsl(var(--surface-container))]/95 backdrop-blur px-3 py-1.5 text-[hsl(var(--primary-glow))] shadow-md active:scale-95 transition-transform"
+          style={{ top: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
+        >
+          <Sparkles className="h-4 w-4" strokeWidth={2} />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">AI</span>
+        </button>
         <main className="flex-1"><Outlet /></main>
         <nav
           className="fixed bottom-0 inset-x-0 h-16 border-t border-border bg-[hsl(var(--surface-container))] flex"
@@ -51,6 +65,7 @@ const MobileShell = () => {
             </NavLink>
           ))}
         </nav>
+        <AiChatSheet open={aiOpen} onClose={() => setAiOpen(false)} />
       </div>
     </ProtectedRoute>
   );

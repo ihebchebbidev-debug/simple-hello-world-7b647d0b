@@ -2,19 +2,72 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   Check,
+  CheckCircle2,
+  Cog,
   Copy,
   Droplets,
   FileBarChart2,
   Leaf,
+  Lightbulb,
   RefreshCw,
   ThumbsUp,
   ThumbsDown,
+  XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import AiChatMarkdown from './AiChatMarkdown';
 import AiChatTypingIndicator from './AiChatTypingIndicator';
 import { useMobileKeyboardInset } from './useMobileKeyboardInset';
 import type { AiChatMessage, AiChatRating } from './types';
+
+function AgentActivity({ message }: { message: AiChatMessage }) {
+  const hasPlan = (message.plan?.length ?? 0) > 0;
+  const hasTools = (message.tools?.length ?? 0) > 0;
+  if (!hasPlan && !hasTools) return null;
+
+  return (
+    <div className="mb-2 space-y-1.5">
+      {hasPlan && (
+        <div className="rounded-lg border border-border/50 bg-[hsl(var(--surface-container))] px-3 py-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <Lightbulb className="h-3 w-3" aria-hidden />
+            <span>Plan</span>
+          </div>
+          <ol className="ml-4 list-decimal space-y-0.5 text-[12px] text-foreground/85">
+            {message.plan!.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {hasTools && (
+        <div className="flex flex-wrap gap-1.5">
+          {message.tools!.map((tool, i) => {
+            const pending = tool.ok === undefined;
+            const ok = tool.ok === true;
+            const Icon = pending ? Cog : ok ? CheckCircle2 : XCircle;
+            return (
+              <span
+                key={i}
+                title={tool.preview ?? JSON.stringify(tool.args ?? {})}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] tabular-nums ${
+                  pending
+                    ? 'border-border/50 bg-[hsl(var(--surface-container-high))] text-muted-foreground'
+                    : ok
+                      ? 'border-[hsl(var(--primary)/0.3)] bg-[hsl(var(--primary)/0.08)] text-[hsl(var(--primary-glow))]'
+                      : 'border-destructive/40 bg-destructive/10 text-destructive'
+                }`}
+              >
+                <Icon className={`h-3 w-3 ${pending ? 'animate-spin' : ''}`} aria-hidden />
+                <span className="font-mono">{tool.name}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useTranslation();
@@ -101,8 +154,9 @@ function MessageBubble({
   const isUser = message.role === 'user';
   const isError = message.status === 'error';
   const emptyAssistant = !isUser && !message.content.trim();
+  const hasAgentActivity = !isUser && ((message.plan?.length ?? 0) > 0 || (message.tools?.length ?? 0) > 0);
 
-  if (emptyAssistant && streaming) {
+  if (emptyAssistant && streaming && !hasAgentActivity) {
     return <AiChatTypingIndicator />;
   }
 
@@ -130,6 +184,7 @@ function MessageBubble({
                 : 'text-foreground'
           }`}
         >
+          {!isUser && !isError && <AgentActivity message={message} />}
           {isUser || isError || streaming ? (
             message.content
           ) : (

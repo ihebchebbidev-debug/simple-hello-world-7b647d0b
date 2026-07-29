@@ -51,8 +51,27 @@ final class OpenRouterClient
         }
     }
 
-    /** @param array<int, array<string, string>> $messages */
+    /** @param array<int, array<string, mixed>> $messages */
     public function chat(array $messages): string
+    {
+        $msg = $this->chatRaw($messages, null);
+        $content = (string) ($msg['content'] ?? '');
+        if (trim($content) === '') {
+            $this->breaker->recordFailure();
+            throw new RuntimeException('empty_reply: OpenRouter returned an empty reply.');
+        }
+        return trim($content);
+    }
+
+    /**
+     * Full non-stream call that returns the raw assistant message array
+     * so callers can inspect `tool_calls` in addition to `content`.
+     *
+     * @param  array<int, array<string, mixed>>  $messages
+     * @param  array<int, array<string, mixed>>|null  $tools  OpenAI-style function tool definitions.
+     * @return array{content: ?string, tool_calls: array<int, array<string, mixed>>}
+     */
+    public function chatRaw(array $messages, ?array $tools = null): array
     {
         $this->assertBreakerClosed();
 
@@ -64,8 +83,13 @@ final class OpenRouterClient
         foreach ($models as $model) {
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
                 $key = $this->keys->next();
+                $payload = ['messages' => $messages, 'stream' => false, 'model' => $model];
+                if ($tools !== null && $tools !== []) {
+                    $payload['tools']       = $tools;
+                    $payload['tool_choice'] = 'auto';
+                }
                 try {
-                    $response = $this->request($key, ['messages' => $messages, 'stream' => false, 'model' => $model]);
+                    $response = $this->request($key, $payload);
                 } catch (ConnectionException $e) {
                     $this->breaker->recordFailure();
                     $lastError = $e->getMessage();
@@ -76,15 +100,21 @@ final class OpenRouterClient
 
                 if ($response->successful()) {
                     $json    = $response->json();
-                    $content = $json['choices'][0]['message']['content'] ?? null;
+                    $message = $json['choices'][0]['message'] ?? [];
+                    $content = $message['content'] ?? null;
+                    $toolCalls = is_array($message['tool_calls'] ?? null) ? $message['tool_calls'] : [];
                     $this->captureUsage($json);
 
-                    if (! is_string($content) || trim($content) === '') {
+                    // Empty content is OK when the model requested tools.
+                    if ((! is_string($content) || trim($content) === '') && $toolCalls === []) {
                         $this->breaker->recordFailure();
                         throw new RuntimeException('empty_reply: OpenRouter returned an empty reply.');
                     }
                     $this->breaker->recordSuccess();
-                    return trim($content);
+                    return [
+                        'content'    => is_string($content) ? $content : null,
+                        'tool_calls' => $toolCalls,
+                    ];
                 }
 
                 $status = $response->status();
