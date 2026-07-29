@@ -36,8 +36,8 @@ return [
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
     // Lower cap = faster completions on free-tier models (~30-50 tok/s).
     // Most answers are short lookups; long analyses still fit in 700 tokens.
-    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 700),
-    'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.35),
+    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 1100),
+    'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.2),
 
     // Ask OpenRouter to route to the fastest provider serving the model,
     // instead of the default (cheapest). Big latency win on free models.
@@ -68,8 +68,8 @@ return [
     // on a pre-baked JSON context blob. Free models only.
     'agent' => [
         'enabled'         => (bool) env('OPENROUTER_AGENT_ENABLED', true),
-        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 2),
-        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 1024),
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 5),
+        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 6000),
     ],
 
     // Prompt cache — hash(system+messages+model) → cached reply.

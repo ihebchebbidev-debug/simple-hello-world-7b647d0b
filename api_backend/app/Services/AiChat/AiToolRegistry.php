@@ -17,9 +17,12 @@ use Throwable;
  */
 final class AiToolRegistry
 {
+    use AiFarmTools;
+
     public function __construct(
         private readonly NaturalDateParser $dates = new NaturalDateParser(),
     ) {}
+
 
     private const OPERATION_TYPES = ['irrigation', 'fertilization', 'phytosanitary', 'harvest'];
 
@@ -103,8 +106,11 @@ final class AiToolRegistry
             $this->fn('resolve_date_range', 'Turn a natural-language date phrase (FR or EN) into a concrete {from, to} window. Supports: "today"/"aujourd\'hui", "last week"/"semaine dernière", "this month"/"ce mois", "last july"/"juillet dernier", "juillet 2024", "Q2 2024"/"2e trimestre 2024", "2024", "last 30 days"/"30 derniers jours", "YTD"/"depuis le début de l\'année", "this season"/"cette saison" (uses active campaign), "last season". Call this FIRST whenever the user mentions a period, then pass from/to to the other tools.', [
                 'phrase' => ['type' => 'string', 'description' => 'The raw date expression from the user (FR or EN).'],
             ], ['phrase']),
+
+            ...$this->farmDefinitions(),
         ];
     }
+
 
     /**
      * Dispatch a tool call by name. Never throws — errors become part of the
@@ -127,8 +133,10 @@ final class AiToolRegistry
                 'search_catalog'       => $this->toolSearchCatalog($args),
                 'recent_operations'    => $this->toolRecentOperations($args),
                 'resolve_date_range'   => $this->toolResolveDate($args),
-                default                => ['error' => 'unknown_tool', 'name' => $name],
+                default                => $this->callFarm($name, $args)
+                    ?? ['error' => 'unknown_tool', 'name' => $name],
             };
+
             return array_merge([
                 'ok'           => ! isset($data['error']),
                 'generated_at' => now()->toIso8601String(),

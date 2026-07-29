@@ -41,14 +41,30 @@ final class AiAgentLoop
         $toolDefs   = $this->tools->definitions();
 
         $transcript = $messages;
+        $usedTools  = [];   // tool names that returned ok
+        $failedOnly = false;
 
         for ($iter = 0; $iter < $maxIters; $iter++) {
             $msg = $this->openRouter->chatRaw($transcript, $toolDefs);
             $toolCalls = $msg['tool_calls'] ?? [];
 
             if ($toolCalls === []) {
-                // Model produced final content directly — stream it out synthetically.
                 $content = (string) ($msg['content'] ?? '');
+
+                // Guard: the model answered from thin air without ever touching
+                // the data. Push it back once to gather evidence first.
+                if ($usedTools === [] && $iter === 0) {
+                    $transcript[] = [
+                        'role'    => 'assistant',
+                        'content' => $content !== '' ? $content : '(no answer yet)',
+                    ];
+                    $transcript[] = [
+                        'role'    => 'user',
+                        'content' => '[internal] You answered without querying the data. Unless this was a pure greeting or an off-topic refusal, call the appropriate data tool(s) now (plot/period questions → water_per_ha, nutrient_per_ha, treatments, fertilization_history, irrigation_history, harvest_history, cost_per_ha, plot_info, product_info) and only then answer with real figures.',
+                    ];
+                    continue;
+                }
+
                 if ($content !== '') {
                     $onDelta($content);
                     return $content;
@@ -62,6 +78,9 @@ final class AiAgentLoop
                 'content'    => (string) ($msg['content'] ?? ''),
                 'tool_calls' => $toolCalls,
             ];
+
+            $roundOk = 0;
+            $roundData = 0;
 
             foreach ($toolCalls as $call) {
                 $name = (string) ($call['function']['name'] ?? '');
@@ -77,6 +96,14 @@ final class AiAgentLoop
 
                 $result = $this->tools->call($name, $args);
                 $encoded = $this->encodeResult($result, $maxResBytes);
+
+                if ($name !== 'plan') {
+                    $roundData++;
+                    if (($result['ok'] ?? false) === true) {
+                        $roundOk++;
+                        $usedTools[] = $name;
+                    }
+                }
 
                 if ($name !== 'plan' && $onEvent !== null) {
                     $onEvent([
@@ -94,7 +121,18 @@ final class AiAgentLoop
                     'content'     => $encoded,
                 ];
             }
+
+            // Every data tool failed this round: nudge one explicit repair pass
+            // (usually a wrong plot name — the payload carries available_plots).
+            if ($roundData > 0 && $roundOk === 0 && ! $failedOnly && $iter < $maxIters - 1) {
+                $failedOnly = true;
+                $transcript[] = [
+                    'role'    => 'user',
+                    'content' => '[internal] Every tool call above failed or matched nothing. Read the error payload (it may list `available_plots`) and retry ONCE with corrected arguments — fix the plot name, widen or drop the date window. If it still cannot resolve, say plainly what is missing.',
+                ];
+            }
         }
+
 
         // Final round: force natural-language answer (no tools) and stream it.
         $transcript[] = [
@@ -119,7 +157,7 @@ final class AiAgentLoop
         $json = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
         if (mb_strlen($json) <= $maxBytes) return $json;
         // Truncate arrays if the payload is too large.
-        foreach (['rows', 'plots', 'campaigns', 'results', 'recent', 'buckets'] as $k) {
+        foreach (['rows', 'plots', 'campaigns', 'results', 'recent', 'buckets', 'products'] as $k) {
             if (isset($result[$k]) && is_array($result[$k]) && count($result[$k]) > 10) {
                 $result[$k] = array_slice($result[$k], 0, 10);
                 $result['_truncated'] = true;
