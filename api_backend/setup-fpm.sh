@@ -250,7 +250,21 @@ server {
 
     client_max_body_size 25m;
 
-    # gzip is configured globally in conf.d/zz-gzip.conf
+    # gzip is configured globally in conf.d/zz-gzip.conf. Keep streaming AI
+    # responses unbuffered so heartbeat bytes reach the browser immediately.
+    location = /api/ai/chat {
+        try_files /index.php =404;
+        gzip off;
+        fastcgi_buffering off;
+        fastcgi_request_buffering off;
+        fastcgi_pass unix:${FPM_SOCK};
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$realpath_root/index.php;
+        fastcgi_param DOCUMENT_ROOT \$realpath_root;
+        fastcgi_read_timeout 300;
+        fastcgi_send_timeout 300;
+    }
 
     location / {
         try_files \$uri \$uri/ /index.php?\$query_string;
@@ -263,7 +277,8 @@ server {
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
         fastcgi_param DOCUMENT_ROOT \$realpath_root;
-        fastcgi_read_timeout 60;
+        fastcgi_read_timeout 300;
+        fastcgi_send_timeout 300;
     }
 
     location ~ /\.(?!well-known).* { deny all; }

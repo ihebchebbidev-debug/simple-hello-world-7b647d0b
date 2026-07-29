@@ -162,6 +162,14 @@ final class AiChatController extends Controller
     private function streamResponse(array $messages, string $locale, ?string $conversationId, int|string|null $subjectId = null): StreamedResponse
     {
         return response()->stream(function () use ($messages, $locale, $conversationId, $subjectId): void {
+            @ini_set('output_buffering', 'off');
+            @ini_set('zlib.output_compression', '0');
+
+            while (ob_get_level() > 0) {
+                @ob_end_flush();
+            }
+            ob_implicit_flush(true);
+
             $emit = static function (array $payload): void {
                 echo json_encode($payload, JSON_UNESCAPED_UNICODE)."\n";
                 if (ob_get_level() > 0) {
@@ -224,9 +232,9 @@ final class AiChatController extends Controller
                 $emit(['type' => 'error', 'code' => 'ai_error', 'message' => 'Could not generate a reply.']);
             }
         }, 200, [
-            'Content-Type'      => 'application/x-ndjson; charset=utf-8',
-            'Cache-Control'     => 'no-cache, no-store',
-            'X-Accel-Buffering' => 'no',
+            'Content-Type'       => 'application/x-ndjson; charset=utf-8',
+            'Cache-Control'      => 'no-cache, no-store, no-transform',
+            'X-Accel-Buffering'  => 'no',
         ]);
     }
 }

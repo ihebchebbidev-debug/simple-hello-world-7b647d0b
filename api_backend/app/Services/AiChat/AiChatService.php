@@ -43,6 +43,11 @@ final class AiChatService
             ];
         }
 
+        if (($shortcut = $this->deterministicFarmAnswer($messages, $locale)) !== null) {
+            $this->cachePut($earlyKey, $shortcut);
+            return ['reply' => $shortcut, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
+        }
+
         $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
@@ -100,6 +105,12 @@ final class AiChatService
             $msg = $this->budgetExhaustedMessage($locale);
             $onDelta($msg);
             return ['reply' => $msg, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'degraded' => true];
+        }
+
+        if (($shortcut = $this->deterministicFarmAnswer($messages, $locale)) !== null) {
+            $onDelta($shortcut);
+            $this->cachePut($earlyKey, $shortcut);
+            return ['reply' => $shortcut, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
         $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
@@ -221,6 +232,106 @@ INSTR;
             Log::warning('ai.chat.self_check_repair_failed', ['message' => $e->getMessage()]);
             return ['reply' => $reply, 'revised' => false, 'violations' => $check['violations']];
         }
+    }
+
+    /**
+     * Fast deterministic answers for common farm-data questions that do not need
+     * model reasoning. This avoids long upstream tool loops for simple lookups
+     * such as treatment dates by pest and plot.
+     *
+     * @param  array<int, array{role: string, content: string}>  $messages
+     */
+    private function deterministicFarmAnswer(array $messages, string $locale): ?string
+    {
+        $question = '';
+        for ($i = count($messages) - 1; $i >= 0; $i--) {
+            if (($messages[$i]['role'] ?? '') === 'user') {
+                $question = trim((string) ($messages[$i]['content'] ?? ''));
+                break;
+            }
+        }
+        if ($question === '') {
+            return null;
+        }
+
+        $lower = mb_strtolower($question);
+        $asksTreatmentDates = (str_contains($lower, 'date') || str_contains($lower, 'quand') || str_contains($lower, 'when'))
+            && (str_contains($lower, 'traitement') || str_contains($lower, 'treatment'));
+        if (! $asksTreatmentDates) {
+            return null;
+        }
+
+        $plot = null;
+        if (preg_match('/\b(?:parcelle|plot|bloc|block)\s+([\p{L}\p{N}_-]+)/iu', $question, $m) === 1) {
+            $plot = trim($m[1]);
+        }
+        if ($plot === null || $plot === '') {
+            return null;
+        }
+
+        $pest = null;
+        if (preg_match('/\b(?:mildiou|o[ïi]dium|cicadelle|botrytis|cochenille|acarien|puceron|maladie|pest)\b/iu', $question, $m) === 1) {
+            $pest = trim($m[0]);
+        } elseif (preg_match('/\b(?:sur|contre|pour|for)\s+(?:le|la|les|l\'|the)?\s*([^,?.]+?)\s+(?:de\s+la\s+)?(?:parcelle|plot|bloc|block)\b/iu', $question, $m) === 1) {
+            $pest = trim($m[1]);
+        }
+        if ($pest === null || $pest === '') {
+            return null;
+        }
+
+        try {
+            $data = $this->toolRegistry->call('treatments', [
+                'plot'  => $plot,
+                'pest'  => $pest,
+                'order' => 'asc',
+                'limit' => 40,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('ai.chat.deterministic_shortcut_failed', ['message' => $e->getMessage()]);
+            return null;
+        }
+
+        if (! empty($data['error'])) {
+            if (($data['error'] ?? '') === 'plot_not_found') {
+                $available = array_slice(array_values((array) ($data['available_plots'] ?? [])), 0, 12);
+                return $this->isFrench($locale)
+                    ? 'Je ne trouve pas la parcelle « '.$plot.' ». Parcelles disponibles : '.implode(', ', $available).'.'
+                    : 'I cannot find plot “'.$plot.'”. Available plots: '.implode(', ', $available).'.';
+            }
+            return null;
+        }
+
+        $rows = array_values((array) ($data['rows'] ?? []));
+        $count = (int) ($data['treatment_count'] ?? count($rows));
+        if ($count === 0 || $rows === []) {
+            return $this->isFrench($locale)
+                ? 'Aucun traitement contre '.$pest.' n’est enregistré pour la parcelle '.$plot.'.'
+                : 'No treatment against '.$pest.' is recorded for plot '.$plot.'.';
+        }
+
+        $lines = [];
+        foreach ($rows as $row) {
+            $date = (string) ($row['date'] ?? '');
+            if ($date === '') {
+                continue;
+            }
+            $product = trim((string) ($row['product'] ?? ''));
+            $lines[] = $product !== '' ? '- '.$date.' — '.$product : '- '.$date;
+        }
+        if ($lines === []) {
+            return null;
+        }
+
+        $header = $this->isFrench($locale)
+            ? 'Traitements contre '.$pest.' sur la parcelle '.$plot.' : '.$count.' date'.($count > 1 ? 's' : '').'.'
+            : 'Treatments against '.$pest.' on plot '.$plot.': '.$count.' date'.($count > 1 ? 's' : '').'.';
+
+        return $header."\n".implode("\n", $lines);
+    }
+
+    private function isFrench(string $locale): bool
+    {
+        return str_starts_with(mb_strtolower($locale), 'fr');
     }
 
     /**
