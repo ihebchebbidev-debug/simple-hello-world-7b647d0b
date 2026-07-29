@@ -30,7 +30,7 @@ export function cleanAssistantText(raw: string): string {
   if (raw.trim() === '') return raw;
 
   const cleaned = raw
-    .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\s*$/gim, '')
+    .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*(?:\{[^}]*\}|\[[^\]]*\]|[^\r\n]*)\s*$/gim, '')
     .replace(/\b(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\b/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ')

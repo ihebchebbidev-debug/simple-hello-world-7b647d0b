@@ -53,7 +53,7 @@ export function cleanAssistantText(raw: string): string {
   const cleaned = raw
     // Remove stray tool/artifact tokens like `tick :search_catalog`,
     // `tool_call_id: call_123`, or other agent internals from the model stream.
-    .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\s*$/gim, '')
+    .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*(?:\{[^}]*\}|\[[^\]]*\]|[^\r\n]*)\s*$/gim, '')
     .replace(/\b(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\b/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ')

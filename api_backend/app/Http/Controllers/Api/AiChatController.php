@@ -49,7 +49,7 @@ final class AiChatController extends Controller
     private static function sanitizeAssistantText(string $raw): string
     {
         $cleaned = preg_replace([
-            '/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\s*$/m',
+            '/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*(?:\{[^\}]*\}|\[[^\]]*\]|[^\r\n]*)\s*$/m',
             '/\b(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\b/i',
             '/\n{3,}/',
             '/[ \t]{2,}/',
@@ -180,9 +180,11 @@ final class AiChatController extends Controller
                     },
                     $subjectId,
                     static function (array $event) use ($emit): void {
-                        // Forward plan / tool_start / tool_end events verbatim
-                        // so the UI can render reasoning + tool activity chips.
-                        $emit($event);
+                        if (($event['type'] ?? '') === 'plan') {
+                            $emit($event);
+                        }
+                        // Tool start/end events are internal agent metadata and
+                        // should not be surfaced in the user-facing stream.
                     },
                 );
 
