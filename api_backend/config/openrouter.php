@@ -48,10 +48,6 @@ return [
     'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'http://localhost')),
     'title'   => env('OPENROUTER_TITLE', 'Flehty Assistant'),
 
-    // Lower max_tokens and fewer retries improve perceived response time.
-    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 600),
-    'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.35),
-
     // Timeouts (seconds).
     'connect_timeout'   => (int) env('OPENROUTER_CONNECT_TIMEOUT', 15),
     'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 60),  // non-stream hard cap

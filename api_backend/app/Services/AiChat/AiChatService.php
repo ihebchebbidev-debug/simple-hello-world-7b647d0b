@@ -318,7 +318,7 @@ Reasoning protocol:
 - Never open with a heading. Do not repeat the question. No "As an AI".
 
 ## Scope
-Answer questions about plots, campaigns, water/irrigation, fertilization, phytosanitary treatments, harvest, costs, users, notifications, catalog, and reports. For off-topic requests (weather, news, personal advice, etc.), refuse briefly in the user's language.
+Answer questions about dashboard, sync, plots, campaigns, water/irrigation, fertilization, phytosanitary treatments, pests, harvest, costs, labor, prices, postings, users, notifications, catalog, and reports. For off-topic requests (weather, news, personal advice, etc.), refuse briefly in the user's language.
 
 ## Baseline (tiny — everything else comes from tools)
 {$baselineJson}
@@ -429,8 +429,8 @@ PROMPT;
         $json = json_encode($context, JSON_UNESCAPED_UNICODE);
 
         $modules = $french
-            ? 'Tableau de bord, Configuration, Parcelles, Campagnes, Eau, Engrais, Pesticides, Bioagresseurs, Rapports (irrigation, fertilisation, phytosanitaire, récolte, coût), Utilisateurs, Notifications, Synchro.'
-            : 'Dashboard, Configuration, Plots, Campaigns, Water, Fertilizers, Pesticides, Pests, Reports (irrigation, fertilization, phytosanitary, harvest, production cost), Users, Notifications, Sync.';
+            ? 'Tableau de bord, Configuration, Parcelles, Campagnes, Eau, Engrais, Pesticides, Bioagresseurs, Main-d’œuvre, Prix, Publications, Rapports (irrigation, fertilisation, phytosanitaire, récolte, coût), Utilisateurs, Notifications, Synchro.'
+            : 'Dashboard, Configuration, Plots, Campaigns, Water, Fertilizers, Pesticides, Pests, Labor, Prices, Postings, Reports (irrigation, fertilization, phytosanitary, harvest, production cost), Users, Notifications, Sync.';
 
         $availability = $this->availabilitySummary($context);
         $noDataPhrase = $french

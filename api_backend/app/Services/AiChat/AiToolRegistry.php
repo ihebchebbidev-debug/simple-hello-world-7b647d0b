@@ -352,9 +352,9 @@ final class AiToolRegistry
         }
 
         return match (mb_strtolower(trim($query))) {
-            'champignon', 'champignons' => 'fungus',
-            'insecte', 'insectes' => 'insect',
-            'mauvaise herbe', 'mauvaises herbes', 'adventice', 'adventices' => 'weed',
+            'champignon', 'champignons', 'mildiou', 'oidium', 'oïdium', 'fungi' => 'fungus',
+            'insecte', 'insectes', 'puceron', 'pucerons', 'aphid', 'aphids', 'bugs', 'insects' => 'insect',
+            'mauvaise herbe', 'mauvaises herbes', 'adventice', 'adventices', 'weed', 'weeds' => 'weed',
             default => null,
         };
     }

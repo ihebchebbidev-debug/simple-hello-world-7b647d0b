@@ -24,7 +24,7 @@ final class AiToolRegistryTest extends TestCase
         ]);
 
         Pest::factory()->create([
-            'name' => 'Pucerons',
+            'name' => 'Green Aphid',
             'scientific_name' => 'Aphididae',
             'category' => 'insect',
         ]);
@@ -40,5 +40,17 @@ final class AiToolRegistryTest extends TestCase
         $this->assertSame('champignons', $result['query']);
         $this->assertCount(1, $result['results']);
         $this->assertSame('Mildiou', $result['results'][0]->name);
+
+        $result2 = $registry->call('search_catalog', [
+            'kind' => 'pest',
+            'query' => 'pucerons',
+            'limit' => 20,
+        ]);
+
+        $this->assertTrue($result2['ok']);
+        $this->assertSame('pest', $result2['kind']);
+        $this->assertSame('pucerons', $result2['query']);
+        $this->assertCount(1, $result2['results']);
+        $this->assertSame('Green Aphid', $result2['results'][0]->name);
     }
 }
