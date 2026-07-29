@@ -156,7 +156,7 @@ function MessageBubble({
   const emptyAssistant = !isUser && !message.content.trim();
   const hasAgentActivity = !isUser && ((message.plan?.length ?? 0) > 0 || (message.tools?.length ?? 0) > 0);
 
-  if (emptyAssistant && streaming && !hasAgentActivity) {
+  if (emptyAssistant && streaming) {
     return <AiChatTypingIndicator />;
   }
 

@@ -47,6 +47,21 @@ function unwrapReply(payload: unknown): { reply: string; conversationId: string 
   return { reply, conversationId };
 }
 
+export function cleanAssistantText(raw: string): string {
+  if (raw.trim() === '') return raw;
+
+  const cleaned = raw
+    // Remove stray tool/artifact tokens like `tick :search_catalog` from the
+    // model stream without affecting surrounding text.
+    .replace(/^\s*\btick\s*:\s*[\w-]+\b\s*$/gim, '')
+    .replace(/\btick\s*:\s*[\w-]+\b/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+
+  return cleaned;
+}
+
 function parseErrorMessage(payload: unknown, fallback: string): string {
   const root = payload as Record<string, unknown>;
   const error = root?.error as Record<string, unknown> | undefined;
@@ -131,12 +146,16 @@ export async function streamAiChatMessage(
       }
 
       if (event.type === 'delta' && event.content) {
-        reply += event.content;
-        onDelta(event.content);
+        const chunk = cleanAssistantText(event.content);
+        if (chunk) {
+          reply += chunk;
+          onDelta(chunk);
+        }
       } else if (event.type === 'revise' && event.content) {
         // Server-side self-check produced a corrected reply; replace the streamed draft.
-        reply = event.content;
-        cbs.onRevise?.(event.content);
+        const revised = cleanAssistantText(event.content);
+        reply = revised;
+        cbs.onRevise?.(revised);
       } else if (event.type === 'plan') {
         cbs.onPlan?.(event.steps ?? []);
       } else if (event.type === 'tool_start') {
@@ -144,7 +163,7 @@ export async function streamAiChatMessage(
       } else if (event.type === 'tool_end') {
         cbs.onToolEnd?.(event.name, event.ok, event.preview);
       } else if (event.type === 'done') {
-        reply = event.reply || reply;
+        reply = cleanAssistantText(event.reply || reply);
         conversationId = event.conversation_id ?? conversationId;
       } else if (event.type === 'error') {
         throw Object.assign(new Error(event.message || 'Stream error'), {
@@ -188,11 +207,12 @@ export async function postAiChatMessage(body: AiChatRequest): Promise<AiChatResp
   }
 
   const { reply, conversationId } = unwrapReply(json);
-  if (!reply.trim()) {
+  const cleanedReply = cleanAssistantText(reply);
+  if (!cleanedReply.trim()) {
     throw new Error('Empty assistant reply');
   }
 
-  return { reply: reply.trim(), conversationId };
+  return { reply: cleanedReply.trim(), conversationId };
 }
 
 export type AiChatFeedbackPayload = {
