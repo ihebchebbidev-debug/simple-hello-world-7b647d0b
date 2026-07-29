@@ -26,6 +26,19 @@ export type AiChatStreamCallbacks = {
 
 export type AiChatResponse = { reply: string; conversationId: string | null };
 
+export function cleanAssistantText(raw: string): string {
+  if (raw.trim() === '') return raw;
+
+  const cleaned = raw
+    .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\s*$/gim, '')
+    .replace(/\b(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\b/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+
+  return cleaned;
+}
+
 type StreamEvent =
   | { type: 'delta'; content: string }
   | { type: 'revise'; content: string }
@@ -91,11 +104,15 @@ export async function streamAiChatMessage(
       try { evt = JSON.parse(trimmed) as StreamEvent; } catch { continue; }
 
       if (evt.type === 'delta' && evt.content) {
-        reply += evt.content;
-        cbs.onDelta(evt.content);
+        const chunk = cleanAssistantText(evt.content);
+        if (chunk) {
+          reply += chunk;
+          cbs.onDelta(chunk);
+        }
       } else if (evt.type === 'revise' && evt.content) {
-        reply = evt.content;
-        cbs.onRevise?.(evt.content);
+        const revised = cleanAssistantText(evt.content);
+        reply = revised;
+        cbs.onRevise?.(revised);
       } else if (evt.type === 'plan') {
         cbs.onPlan?.(evt.steps ?? []);
       } else if (evt.type === 'tool_start') {
@@ -103,7 +120,7 @@ export async function streamAiChatMessage(
       } else if (evt.type === 'tool_end') {
         cbs.onToolEnd?.(evt.name, evt.ok, evt.preview);
       } else if (evt.type === 'done') {
-        reply = evt.reply || reply;
+        reply = cleanAssistantText(evt.reply || reply);
         conversationId = evt.conversation_id ?? conversationId;
       } else if (evt.type === 'error') {
         throw Object.assign(new Error(evt.message || 'Stream error'), { code: evt.code });

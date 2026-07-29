@@ -46,6 +46,18 @@ final class AiChatController extends Controller
         };
     }
 
+    private static function sanitizeAssistantText(string $raw): string
+    {
+        $cleaned = preg_replace([
+            '/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\s*$/m',
+            '/\b(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\b/i',
+            '/\n{3,}/',
+            '/[ \t]{2,}/',
+        ], ['', '', "\n\n", ' '], $raw);
+
+        return trim((string) $cleaned);
+    }
+
     /**
      * Log a thumbs-up / thumbs-down rating for a specific assistant reply.
      * Upserts on (user_id, message_client_id) so a user can flip their vote
@@ -164,7 +176,7 @@ final class AiChatController extends Controller
                     $locale,
                     $conversationId,
                     static function (string $delta) use ($emit): void {
-                        $emit(['type' => 'delta', 'content' => $delta]);
+                        $emit(['type' => 'delta', 'content' => self::sanitizeAssistantText($delta)]);
                     },
                     $subjectId,
                     static function (array $event) use ($emit): void {
@@ -179,14 +191,14 @@ final class AiChatController extends Controller
                 if (! empty($result['revised']) && ($result['reply'] ?? '') !== '') {
                     $emit([
                         'type'       => 'revise',
-                        'content'    => $result['reply'],
+                        'content'    => self::sanitizeAssistantText((string) $result['reply']),
                         'violations' => $result['violations'] ?? [],
                     ]);
                 }
 
                 $emit([
                     'type'            => 'done',
-                    'reply'           => $result['reply'],
+                    'reply'           => self::sanitizeAssistantText((string) $result['reply']),
                     'conversation_id' => $result['conversation_id'],
                     'revised'         => (bool) ($result['revised'] ?? false),
                     'cached'          => (bool) ($result['cached'] ?? false),
