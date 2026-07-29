@@ -42,6 +42,7 @@ final class AiContextBuilder
         'recent_operations' => 30,
         'catalog'           => 300,
         'catalog_items'     => 600,
+        'pests'             => 600,
         'users'             => 600,
         'notifications'     => 30,
         'postings'          => 30,
@@ -63,6 +64,7 @@ final class AiContextBuilder
         'recent_operations' => ['irrigation_operations', 'fertilization_operations', 'phytosanitary_operations', 'harvest_operations'],
         'catalog'           => ['fertilizers', 'pesticides', 'pests'],
         'catalog_items'     => ['fertilizers', 'pesticides', 'pests'],
+        'pests'             => ['pests'],
         'users'             => ['users', 'user_roles'],
         'notifications'    => ['notifications'],
         'postings'          => ['postings'],
@@ -133,6 +135,7 @@ final class AiContextBuilder
             'recent_operations' => $this->section('recent_operations', fn () => $this->recentOperations()),
             'catalog'           => $this->section('catalog',           fn () => $this->catalogCounts()),
             'catalog_items'     => $this->section('catalog_items',     fn () => $this->catalogItems()),
+            'pests'             => $this->section('pests',             fn () => $this->pestCatalog()),
             'users'             => $this->section('users',             fn () => $this->users()),
             'notifications'     => $this->section('notifications',     fn () => $this->notifications()),
             'postings'          => $this->section('postings',          fn () => $this->postings()),
@@ -875,13 +878,17 @@ final class AiContextBuilder
                 ->all();
         }
         if ($this->hasTable('pests')) {
-            $cols = array_values(array_filter(['name', 'category'], fn ($c) => $this->hasColumn('pests', $c)));
+            $cols = array_values(array_filter(['name', 'scientific_name', 'category'], fn ($c) => $this->hasColumn('pests', $c)));
             if (! in_array('name', $cols, true)) $cols = array_merge(['name'], $cols);
             $q = DB::table('pests');
             if ($this->hasColumn('pests', 'is_active')) $q->where('is_active', true);
             $out['pests'] = $q->select($cols)
-                ->orderBy('name')->limit(40)->get()
-                ->map(fn ($r) => ['name' => $r->name ?? null, 'category' => $r->category ?? null])
+                ->orderBy('name')->limit(200)->get()
+                ->map(fn ($r) => [
+                    'name' => $r->name ?? null,
+                    'scientific_name' => $r->scientific_name ?? null,
+                    'category' => $r->category ?? null,
+                ])
                 ->all();
         }
 
@@ -944,6 +951,35 @@ final class AiContextBuilder
     {
         if (! $this->hasTable('water_config')) return 'm3';
         return (string) (DB::table('water_config')->where('is_active', true)->orderByDesc('created_at')->value('unit') ?? 'm3');
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function pestCatalog(): array
+    {
+        if (! $this->hasTable('pests')) {
+            return [];
+        }
+
+        $cols = array_values(array_filter(['name', 'scientific_name', 'category'], fn ($c) => $this->hasColumn('pests', $c)));
+        if (! in_array('name', $cols, true)) {
+            $cols = array_merge(['name'], $cols);
+        }
+
+        $q = DB::table('pests');
+        if ($this->hasColumn('pests', 'is_active')) {
+            $q->where('is_active', true);
+        }
+
+        return $q->select($cols)
+            ->orderBy('name')
+            ->limit(200)
+            ->get()
+            ->map(fn ($r) => [
+                'name' => $r->name ?? null,
+                'scientific_name' => $r->scientific_name ?? null,
+                'category' => $r->category ?? null,
+            ])
+            ->all();
     }
 
     private function tableScalar(string $table, string $sql, array $bindings = []): float

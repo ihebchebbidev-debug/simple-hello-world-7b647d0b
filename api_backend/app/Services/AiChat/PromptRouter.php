@@ -31,7 +31,8 @@ final class PromptRouter
         'plot_operations'   => ['operation', 'opération', 'operations', 'parcelle', 'parcelles', 'plot', 'field', 'champ', 'terrain', 'parcel', 'bloc'],
         'recent_operations' => ['recent', 'récent', 'dernier', 'latest', 'today', 'aujourd'],
         'catalog'           => ['catalog', 'catalogue', 'produit', 'product', 'inventory', 'stock'],
-        'catalog_items'     => ['catalog', 'catalogue', 'produit', 'product', 'inventory', 'stock', 'sku'],
+        'catalog_items'     => ['catalog', 'catalogue', 'produit', 'product', 'inventory', 'stock', 'sku', 'scientific', 'scientifique'],
+        'pests'             => ['pest', 'bioagresseur', 'bioagresseurs', 'stress', 'infestation', 'insecte', 'insectes', 'champignon', 'mildiou', 'parasite', 'parasites', 'scientific', 'scientifique'],
         'users'             => ['user', 'utilisateur', 'role', 'admin', 'technicien', 'manager', 'équipe', 'equipe', 'team'],
         'notifications'     => ['notif', 'alerte', 'alert', 'message'],
         'postings'          => ['sync', 'synchro', 'offline', 'posting', 'queue'],
@@ -61,6 +62,11 @@ final class PromptRouter
             }
         }
 
+        if ($this->looksLikeScientificName($needleLc)) {
+            $keep['pests'] = true;
+            $keep['phytosanitary'] = true;
+        }
+
         // If the router matched nothing beyond baseline, keep the previous
         // behaviour of sending the full context — safer than answering blind.
         $matched = array_diff(array_keys($keep), self::BASELINE);
@@ -76,6 +82,12 @@ final class PromptRouter
         }
 
         return ['context' => $slim, 'sections' => array_keys($slim)];
+    }
+
+    /** @param array<int, array{role: string, content: string}> $messages */
+    private function looksLikeScientificName(string $needle): bool
+    {
+        return preg_match('/\b[A-Z][a-z]+ [a-z]{2,}\b/', $needle) === 1;
     }
 
     /** @param array<int, array{role: string, content: string}> $messages */
