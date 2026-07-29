@@ -107,7 +107,7 @@ final class AiContextBuilder
 
         return [
             'generated_at'   => now()->toIso8601String(),
-            'currency'       => 'MAD',
+            'currency'       => 'TND',
             'units'          => ['area' => 'ha', 'water' => 'm3', 'fertilizer' => 'kg', 'harvest' => 'kg'],
             'period'         => ['this_month_start' => $monthStart, 'season_lookback_start' => $seasonStart],
             'dashboard'         => $this->section('dashboard',         fn () => $this->dashboard($monthStart)),
@@ -395,14 +395,14 @@ final class AiContextBuilder
                 'phyto_treatments'=> (int) $r->phyto_count,
                 'phyto_qty'       => (float) $r->phyto_qty,
                 'harvest_kg'      => (float) $r->harvest_kg,
-                'cost_breakdown_mad' => [
+                'cost_breakdown_tnd' => [
                     'irrigation'   => round((float) $r->irrigation_cost, 2),
                     'fertilizer'   => round((float) $r->fertilizer_cost, 2),
                     'phytosanitary'=> round((float) $r->phyto_cost, 2),
                     'labor'        => round((float) $r->labor_cost, 2),
                     'total'        => round($totalCost, 2),
                 ],
-                'cost_per_ha_mad' => $r->surface_area_ha > 0
+                'cost_per_ha_tnd' => $r->surface_area_ha > 0
                     ? round($totalCost / (float) $r->surface_area_ha, 2)
                     : null,
                 'yield_kg_per_ha' => $r->surface_area_ha > 0
@@ -471,7 +471,7 @@ final class AiContextBuilder
                 'fertilizer'   => $r->fertilizer ?? 'unknown',
                 'applications' => (int) $r->applications,
                 'total_kg'     => (float) $r->total_kg,
-                'total_cost_mad' => round((float) $r->total_cost, 2),
+                'total_cost_tnd' => round((float) $r->total_cost, 2),
             ])
             ->all();
 
@@ -508,7 +508,7 @@ final class AiContextBuilder
                 'pesticide'      => $r->pesticide ?? 'unknown',
                 'treatments'     => (int) $r->treatments,
                 'total_quantity' => (float) $r->total_qty,
-                'total_cost_mad' => round((float) $r->total_cost, 2),
+                'total_cost_tnd' => round((float) $r->total_cost, 2),
             ])
             ->all();
 
@@ -626,7 +626,7 @@ final class AiContextBuilder
             ),
             'season_total_kg'      => (float) ($row->season_kg ?? 0),
             'total_man_days'       => (float) ($row->man_days ?? 0),
-            'total_labor_cost_mad' => round((float) ($row->labor_cost ?? 0), 2),
+            'total_labor_cost_tnd' => round((float) ($row->labor_cost ?? 0), 2),
         ];
     }
 
@@ -642,7 +642,7 @@ final class AiContextBuilder
         $totalMonth  = $irr['month']  + $fer['month']  + $phy['month']  + $lab['month'];
 
         return [
-            'currency' => 'MAD',
+            'currency' => 'TND',
             'this_month' => [
                 'irrigation'   => $irr['month'],
                 'fertilizer'   => $fer['month'],
@@ -705,8 +705,8 @@ final class AiContextBuilder
 
         return [
             'active'                    => (bool) $active,
-            'current_daily_rate_mad'    => $currentRate,
-            'currency'                  => 'MAD',
+            'current_daily_rate_tnd'    => $currentRate,
+            'currency'                  => 'TND',
         ];
     }
 

@@ -132,7 +132,7 @@ final class AiToolRegistry
             return array_merge([
                 'ok'           => ! isset($data['error']),
                 'generated_at' => now()->toIso8601String(),
-                'currency'     => 'MAD',
+                'currency'     => 'TND',
             ], $data);
         } catch (Throwable $e) {
             return [
@@ -441,7 +441,7 @@ final class AiToolRegistry
 
     private function metricUnit(string $type, string $metric): string
     {
-        if ($metric === 'sum_cost')   return 'MAD';
+        if ($metric === 'sum_cost')   return 'TND';
         if ($metric === 'count')      return 'ops';
         return match ($type) {
             'irrigation'    => 'm3',
