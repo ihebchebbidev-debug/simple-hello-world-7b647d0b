@@ -50,7 +50,7 @@ return [
 
     // Timeouts (seconds).
     'connect_timeout'   => (int) env('OPENROUTER_CONNECT_TIMEOUT', 15),
-    'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 60),  // non-stream hard cap
+    'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 45),  // non-stream hard cap (< proxy 60s idle timeout)
     'stream_idle_timeout' => (int) env('OPENROUTER_STREAM_IDLE_TIMEOUT', 90), // per-chunk idle
 
     // Retry / backoff.

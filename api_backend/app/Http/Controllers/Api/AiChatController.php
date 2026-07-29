@@ -170,6 +170,12 @@ final class AiChatController extends Controller
                 flush();
             };
 
+            // Flush a first byte immediately: the agent tool loop can run for
+            // well over a minute before the first delta, and proxies (nginx
+            // proxy_read_timeout, default 60s) drop an idle upstream response,
+            // which surfaces in the browser as "Failed to fetch".
+            $emit(['type' => 'ping']);
+
             try {
                 $result = $this->aiChat->replyStream(
                     $messages,
@@ -182,9 +188,12 @@ final class AiChatController extends Controller
                     static function (array $event) use ($emit): void {
                         if (($event['type'] ?? '') === 'plan') {
                             $emit($event);
+                            return;
                         }
                         // Tool start/end events are internal agent metadata and
-                        // should not be surfaced in the user-facing stream.
+                        // should not be surfaced in the user-facing stream — but
+                        // they still keep the connection alive as heartbeats.
+                        $emit(['type' => 'ping']);
                     },
                 );
 

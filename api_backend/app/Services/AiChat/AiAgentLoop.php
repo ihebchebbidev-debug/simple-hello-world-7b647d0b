@@ -45,8 +45,15 @@ final class AiAgentLoop
         $failedOnly = false;
 
         for ($iter = 0; $iter < $maxIters; $iter++) {
+            // Keep the HTTP response alive while the (non-streaming) planning
+            // round runs — proxies drop idle upstream connections after ~60s.
+            if ($onEvent !== null) {
+                $onEvent(['type' => 'tick', 'iteration' => $iter]);
+            }
+
             $msg = $this->openRouter->chatRaw($transcript, $toolDefs);
             $toolCalls = $msg['tool_calls'] ?? [];
+
 
             if ($toolCalls === []) {
                 $content = (string) ($msg['content'] ?? '');

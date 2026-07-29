@@ -37,7 +37,22 @@ export default {
           red: 'hsl(var(--chart-red))',
         },
       },
+      keyframes: {
+        'fade-in': {
+          '0%': { opacity: '0', transform: 'translateY(4px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'ai-chat-progress': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(300%)' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 220ms ease-out both',
+        'ai-chat-progress': 'ai-chat-progress 1.6s ease-in-out infinite',
+      },
     },
+
   },
   plugins: [],
 } satisfies Config;

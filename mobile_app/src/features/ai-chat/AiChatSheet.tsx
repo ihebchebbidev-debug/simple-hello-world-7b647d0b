@@ -4,6 +4,7 @@ import { Cog, Lightbulb, SendHorizontal, Sparkles, X } from 'lucide-react';
 import i18n from '@/i18n';
 import { streamAiChatMessage, type AiChatMessage } from '@/lib/aiChat';
 import { cn } from '@/lib/utils';
+import AiChatThinkingIndicator from './AiChatThinkingIndicator';
 
 interface Props {
   open: boolean;
@@ -162,15 +163,9 @@ const AiChatSheet = ({ open, onClose }: Props) => {
         ))}
 
         {sending && messages[messages.length - 1]?.role === 'assistant' && !messages[messages.length - 1].content && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground pl-1">
-            <span className="inline-flex gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce" />
-              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:120ms]" />
-              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:240ms]" />
-            </span>
-            <span>{t('aiChat.thinking')}</span>
-          </div>
+          <AiChatThinkingIndicator />
         )}
+
       </div>
 
       <div
