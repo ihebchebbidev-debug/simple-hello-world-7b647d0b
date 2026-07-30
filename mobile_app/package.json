@@ -15,8 +15,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "cap:sync": "cap sync android",
-    "cap:android": "cap run android",
-    "build:android": "npm run build:android-web && npx cap add android || true && npx cap sync android && cd android && gradlew.bat assembleRelease"
+    "cap:android": "cap run android"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
@@ -40,6 +39,7 @@
     "react-dom": "^18.3.1",
     "react-i18next": "^15.0.2",
     "react-router-dom": "^6.26.2",
+    "sharp": "^0.35.3",
     "tailwind-merge": "^3.6.0",
     "vite-plugin-pwa": "^1.3.0",
     "workbox-background-sync": "^7.4.1",
