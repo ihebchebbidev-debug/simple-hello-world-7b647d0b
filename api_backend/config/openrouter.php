@@ -11,34 +11,59 @@ declare(strict_types=1);
 | on 429/5xx, and quarantines a key on 401/402/429 for `quarantine_seconds`.
 */
 
+/**
+ * Collect API keys for a prefix from the environment.
+ *
+ * Accepts, in order:
+ *   - OPENROUTER_..._API_KEYS  → comma / whitespace / semicolon separated list
+ *   - OPENROUTER_..._API_KEY   → single primary key
+ *   - OPENROUTER_..._API_KEY_2 … _10 → numbered fallback keys
+ *
+ * Blanks are ignored and duplicates removed while preserving order.
+ *
+ * @return array<int, string>
+ */
+$openrouterKeys = static function (string $base): array {
+    $collected = [];
+
+    $push = static function ($value) use (&$collected): void {
+        if (! is_string($value)) {
+            return;
+        }
+        foreach (preg_split('/[\s,;]+/', $value) ?: [] as $part) {
+            $part = trim($part);
+            if ($part !== '') {
+                $collected[] = $part;
+            }
+        }
+    };
+
+    $push(env($base.'S'));       // e.g. OPENROUTER_API_KEYS
+    $push(env($base));           // e.g. OPENROUTER_API_KEY
+    for ($i = 2; $i <= 10; $i++) {
+        $push(env($base.'_'.$i)); // e.g. OPENROUTER_API_KEY_2 … _10
+    }
+
+    return array_values(array_unique($collected));
+};
+
 return [
     // Shared key pool — round-robin, with automatic quarantine on 401/402/429.
-    // Populate OPENROUTER_API_KEY plus up to three fallbacks. Blanks are ignored.
-    'api_keys' => array_values(array_filter([
-        env('OPENROUTER_API_KEY'),
-        env('OPENROUTER_API_KEY_2'),
-        env('OPENROUTER_API_KEY_3'),
-        env('OPENROUTER_API_KEY_4'),
-    ], static fn ($k) => is_string($k) && trim($k) !== '')),
+    // Set OPENROUTER_API_KEY plus OPENROUTER_API_KEY_2…_10, and/or a
+    // comma-separated OPENROUTER_API_KEYS list. Blanks/duplicates are ignored.
+    'api_keys' => $openrouterKeys('OPENROUTER_API_KEY'),
 
     // Optional dedicated key lanes. This lets the tool-planning model, the final
     // answer model, and the repair/fallback model run on separate free keys when
     // available, instead of all competing for the same quota. Empty lanes fall
-    // back to the shared `api_keys` pool above.
-    'planner_api_keys' => array_values(array_filter([
-        env('OPENROUTER_PLANNER_API_KEY'),
-        env('OPENROUTER_PLANNER_API_KEY_2'),
-    ], static fn ($k) => is_string($k) && trim($k) !== '')),
+    // back to the shared `api_keys` pool above, and every lane also appends the
+    // shared pool as a last-resort fallback at runtime.
+    'planner_api_keys' => $openrouterKeys('OPENROUTER_PLANNER_API_KEY'),
 
-    'answer_api_keys' => array_values(array_filter([
-        env('OPENROUTER_ANSWER_API_KEY'),
-        env('OPENROUTER_ANSWER_API_KEY_2'),
-    ], static fn ($k) => is_string($k) && trim($k) !== '')),
+    'answer_api_keys' => $openrouterKeys('OPENROUTER_ANSWER_API_KEY'),
 
-    'repair_api_keys' => array_values(array_filter([
-        env('OPENROUTER_REPAIR_API_KEY'),
-        env('OPENROUTER_REPAIR_API_KEY_2'),
-    ], static fn ($k) => is_string($k) && trim($k) !== '')),
+    'repair_api_keys' => $openrouterKeys('OPENROUTER_REPAIR_API_KEY'),
+
 
     // Model fallback chain — first entry is primary; used in order on upstream failure.
     // Defaults target OpenRouter's currently-available free tier; override per env if

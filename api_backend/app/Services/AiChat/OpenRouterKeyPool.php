@@ -61,8 +61,12 @@ final class OpenRouterKeyPool
     }
 
     /**
-     * Return the next non-quarantined key. Falls back to any key when all
-     * are quarantined (so a transient global outage doesn't lock us out).
+     * Return the next non-quarantined key for the lane.
+     *
+     * Order of preference:
+     *   1. a healthy key from the requested lane (round-robin),
+     *   2. a healthy key from the shared pool (lane fallback),
+     *   3. the next lane key even if quarantined (never hard-fail).
      */
     public function next(string $purpose = 'default'): string
     {
@@ -80,12 +84,20 @@ final class OpenRouterKeyPool
             }
         }
 
+        // Lane exhausted — borrow a healthy key from the shared pool.
+        foreach ($this->keys as $fallback) {
+            if (! in_array($fallback, $keys, true) && ! $this->isQuarantined($fallback)) {
+                return $fallback;
+            }
+        }
+
         // All quarantined — advance the cursor and return the picked key so
         // successive requests spread load instead of hammering one degraded key.
         $idx = $cursor % $count;
         Cache::put($cursorKey, ($idx + 1) % $count, 3600);
         return $keys[$idx];
     }
+
 
     public function markFailed(string $key, int $status): void
     {
