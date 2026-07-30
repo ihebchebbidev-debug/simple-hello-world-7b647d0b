@@ -51,7 +51,7 @@ final class AiAgentLoop
                 $onEvent(['type' => 'tick', 'iteration' => $iter]);
             }
 
-            $msg = $this->openRouter->chatRaw($transcript, $toolDefs);
+            $msg = $this->openRouter->chatRaw($transcript, $toolDefs, 'planner');
             $toolCalls = $msg['tool_calls'] ?? [];
 
 
@@ -147,15 +147,29 @@ final class AiAgentLoop
             'content' => '[internal] Based only on the tool results above, write the final answer for the user now. Do not call any more tools. Follow the voice, precision and formatting rules from the system prompt.',
         ];
 
+        $emitted = '';
+        $tracking = static function (string $delta) use ($onDelta, &$emitted): void {
+            $emitted .= $delta;
+            $onDelta($delta);
+        };
+
         try {
-            return $this->openRouter->chatStream($transcript, $onDelta);
+            return $this->openRouter->chatStream($transcript, $tracking, 'answer');
         } catch (Throwable $e) {
             Log::warning('ai.agent.final_stream_failed', ['message' => $e->getMessage()]);
+
+            // Bytes already reached the client — never re-emit a second full
+            // answer on top of the partial one.
+            if (trim($emitted) !== '') {
+                return trim($emitted);
+            }
+
             // Fall back to non-streaming so the user still gets something useful.
-            $fallback = $this->openRouter->chat($transcript);
+            $fallback = $this->openRouter->chat($transcript, 'answer');
             $onDelta($fallback);
             return $fallback;
         }
+
     }
 
     /** @param array<string, mixed> $result */

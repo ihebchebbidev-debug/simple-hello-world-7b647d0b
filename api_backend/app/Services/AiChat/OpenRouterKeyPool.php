@@ -18,16 +18,36 @@ use RuntimeException;
 final class OpenRouterKeyPool
 {
     private const CACHE_PREFIX = 'openrouter.key.quarantine.';
-    private const CURSOR_KEY   = 'openrouter.key.cursor';
+    private const CURSOR_KEY   = 'openrouter.key.cursor.';
 
     /** @var array<int, string> */
     private array $keys;
+
+    /** @var array<string, array<int, string>> */
+    private array $lanes;
 
     public function __construct()
     {
         /** @var array<int, string> $keys */
         $keys = (array) config('openrouter.api_keys', []);
         $this->keys = array_values(array_filter($keys, static fn ($k) => is_string($k) && trim($k) !== ''));
+
+        $this->lanes = [
+            'default' => $this->keys,
+            'planner' => $this->configuredLane('planner_api_keys'),
+            'answer'  => $this->configuredLane('answer_api_keys'),
+            'repair'  => $this->configuredLane('repair_api_keys'),
+        ];
+
+        if ($this->keys === []) {
+            foreach (['planner', 'answer', 'repair'] as $lane) {
+                if (($this->lanes[$lane] ?? []) !== []) {
+                    $this->keys = $this->lanes[$lane];
+                    $this->lanes['default'] = $this->keys;
+                    break;
+                }
+            }
+        }
 
         if ($this->keys === []) {
             throw new RuntimeException('No OpenRouter API keys configured. Set OPENROUTER_API_KEY (and optional _2/_3/_4).');
@@ -44,16 +64,18 @@ final class OpenRouterKeyPool
      * Return the next non-quarantined key. Falls back to any key when all
      * are quarantined (so a transient global outage doesn't lock us out).
      */
-    public function next(): string
+    public function next(string $purpose = 'default'): string
     {
-        $count  = count($this->keys);
-        $cursor = (int) Cache::get(self::CURSOR_KEY, 0);
+        $keys = $this->keysFor($purpose);
+        $count  = count($keys);
+        $cursorKey = self::CURSOR_KEY.$this->normalisePurpose($purpose);
+        $cursor = (int) Cache::get($cursorKey, 0);
 
         for ($i = 0; $i < $count; $i++) {
             $idx = ($cursor + $i) % $count;
-            $key = $this->keys[$idx];
+            $key = $keys[$idx];
             if (! $this->isQuarantined($key)) {
-                Cache::put(self::CURSOR_KEY, ($idx + 1) % $count, 3600);
+                Cache::put($cursorKey, ($idx + 1) % $count, 3600);
                 return $key;
             }
         }
@@ -61,8 +83,8 @@ final class OpenRouterKeyPool
         // All quarantined — advance the cursor and return the picked key so
         // successive requests spread load instead of hammering one degraded key.
         $idx = $cursor % $count;
-        Cache::put(self::CURSOR_KEY, ($idx + 1) % $count, 3600);
-        return $this->keys[$idx];
+        Cache::put($cursorKey, ($idx + 1) % $count, 3600);
+        return $keys[$idx];
     }
 
     public function markFailed(string $key, int $status): void
@@ -82,5 +104,26 @@ final class OpenRouterKeyPool
     private function hash(string $key): string
     {
         return substr(hash('sha256', $key), 0, 16);
+    }
+
+    /** @return array<int, string> */
+    private function configuredLane(string $configKey): array
+    {
+        /** @var array<int, string> $keys */
+        $keys = (array) config('openrouter.'.$configKey, []);
+        return array_values(array_filter($keys, static fn ($k) => is_string($k) && trim($k) !== ''));
+    }
+
+    /** @return array<int, string> */
+    private function keysFor(string $purpose): array
+    {
+        $purpose = $this->normalisePurpose($purpose);
+        $lane = $this->lanes[$purpose] ?? [];
+        return $lane !== [] ? $lane : $this->keys;
+    }
+
+    private function normalisePurpose(string $purpose): string
+    {
+        return in_array($purpose, ['planner', 'answer', 'repair'], true) ? $purpose : 'default';
     }
 }

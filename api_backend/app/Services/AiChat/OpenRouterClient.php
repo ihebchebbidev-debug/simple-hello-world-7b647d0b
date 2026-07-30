@@ -52,9 +52,9 @@ final class OpenRouterClient
     }
 
     /** @param array<int, array<string, mixed>> $messages */
-    public function chat(array $messages): string
+    public function chat(array $messages, string $purpose = 'answer'): string
     {
-        $msg = $this->chatRaw($messages, null);
+        $msg = $this->chatRaw($messages, null, $purpose);
         $content = (string) ($msg['content'] ?? '');
         if (trim($content) === '') {
             $this->breaker->recordFailure();
@@ -71,18 +71,18 @@ final class OpenRouterClient
      * @param  array<int, array<string, mixed>>|null  $tools  OpenAI-style function tool definitions.
      * @return array{content: ?string, tool_calls: array<int, array<string, mixed>>}
      */
-    public function chatRaw(array $messages, ?array $tools = null): array
+    public function chatRaw(array $messages, ?array $tools = null, string $purpose = 'planner'): array
     {
         $this->assertBreakerClosed();
 
-        $models     = $this->models();
+        $models     = $this->models($purpose);
         $maxRetries = max(0, (int) config('openrouter.max_retries', 2));
         $lastError  = null;
         $this->lastStatus = 0;
 
         foreach ($models as $model) {
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
-                $key = $this->keys->next();
+                $key = $this->keys->next($purpose);
                 $payload = ['messages' => $messages, 'stream' => false, 'model' => $model];
                 if ($tools !== null && $tools !== []) {
                     $payload['tools']       = $tools;
@@ -136,18 +136,18 @@ final class OpenRouterClient
     }
 
     /** @param array<int, array<string, string>> $messages */
-    public function chatStream(array $messages, callable $onDelta): string
+    public function chatStream(array $messages, callable $onDelta, string $purpose = 'answer'): string
     {
         $this->assertBreakerClosed();
 
-        $models     = $this->models();
+        $models     = $this->models($purpose);
         $maxRetries = max(0, (int) config('openrouter.max_retries', 2));
         $lastError  = null;
         $this->lastStatus = 0;
 
         foreach ($models as $model) {
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
-                $key = $this->keys->next();
+                $key = $this->keys->next($purpose);
                 try {
                     $response = $this->request(
                         $key,
@@ -297,9 +297,18 @@ final class OpenRouterClient
     }
 
     /** @return array<int, string> */
-    private function models(): array
+    private function models(string $purpose = 'default'): array
     {
-        $models = array_values(array_filter((array) config('openrouter.models', []), static fn ($m) => is_string($m) && trim($m) !== ''));
+        $configKey = match ($purpose) {
+            'planner' => 'planner_models',
+            'answer'  => 'answer_models',
+            'repair'  => 'repair_models',
+            default   => 'models',
+        };
+        $models = array_values(array_filter((array) config('openrouter.'.$configKey, []), static fn ($m) => is_string($m) && trim($m) !== ''));
+        if ($models === [] && $configKey !== 'models') {
+            $models = array_values(array_filter((array) config('openrouter.models', []), static fn ($m) => is_string($m) && trim($m) !== ''));
+        }
         if ($models === []) {
             throw new RuntimeException('No OpenRouter model configured.');
         }

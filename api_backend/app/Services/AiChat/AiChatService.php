@@ -60,10 +60,10 @@ final class AiChatService
                 }
             } catch (\Throwable $e) {
                 Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
-                $reply = $this->openRouter->chat($payload);
+                $reply = $this->openRouter->chat($payload, 'answer');
             }
         } else {
-            $reply = $this->openRouter->chat($payload);
+            $reply = $this->openRouter->chat($payload, 'answer');
         }
         $this->recordUsage($subjectId, $payload);
 
@@ -116,16 +116,29 @@ final class AiChatService
         $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
+        $emitted = '';
+        $trackedDelta = static function (string $chunk) use ($onDelta, &$emitted): void {
+            $emitted .= $chunk;
+            $onDelta($chunk);
+        };
+
         if ($agentEnabled) {
             try {
-                $streamed = $this->agent->run($payload, $onDelta, $onEvent);
+                $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
             } catch (\Throwable $e) {
                 Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
-                $streamed = $this->openRouter->chatStream($payload, $onDelta);
+                if (trim($emitted) !== '') {
+                    // Partial answer already reached the client: keep it instead of
+                    // streaming a second, duplicated answer on top of it.
+                    $streamed = trim($emitted);
+                } else {
+                    $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
+                }
             }
         } else {
-            $streamed = $this->openRouter->chatStream($payload, $onDelta);
+            $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
         }
+
         $this->recordUsage($subjectId, $payload);
 
         $final = $this->selfCheck($streamed, $messages, $locale, $payload);
@@ -222,7 +235,7 @@ INSTR;
             $repairPayload = array_merge($systemOnly, [
                 ['role' => 'user', 'content' => $repairInstruction],
             ]);
-            $revised = trim($this->openRouter->chat($repairPayload));
+            $revised = trim($this->openRouter->chat($repairPayload, 'repair'));
             if ($revised === '') {
                 return ['reply' => $reply, 'revised' => false, 'violations' => $check['violations']];
             }
@@ -244,10 +257,16 @@ INSTR;
     private function deterministicFarmAnswer(array $messages, string $locale): ?string
     {
         $question = '';
+        $allUserQuestions = [];
         for ($i = count($messages) - 1; $i >= 0; $i--) {
             if (($messages[$i]['role'] ?? '') === 'user') {
-                $question = trim((string) ($messages[$i]['content'] ?? ''));
-                break;
+                $content = $this->visibleUserQuestion((string) ($messages[$i]['content'] ?? ''));
+                if ($content !== '') {
+                    $allUserQuestions[] = $content;
+                    if ($question === '') {
+                        $question = $content;
+                    }
+                }
             }
         }
         if ($question === '') {
@@ -261,38 +280,48 @@ INSTR;
             return null;
         }
 
-        $plot = null;
-        if (preg_match('/\b(?:parcelle|plot|bloc|block)\s+([\p{L}\p{N}_-]+)/iu', $question, $m) === 1) {
-            $plot = trim($m[1]);
-        }
-        if ($plot === null || $plot === '') {
-            return null;
+        $plot = $this->extractPlotName($question);
+        if (($plot === null || $plot === '') && $allUserQuestions !== []) {
+            foreach ($allUserQuestions as $prior) {
+                $plot = $this->extractPlotName($prior);
+                if ($plot !== null && $plot !== '') {
+                    break;
+                }
+            }
         }
 
-        $pest = null;
-        if (preg_match('/\b(?:mildiou|o[ïi]dium|cicadelle|botrytis|cochenille|acarien|puceron|maladie|pest)\b/iu', $question, $m) === 1) {
-            $pest = trim($m[0]);
-        } elseif (preg_match('/\b(?:sur|contre|pour|for)\s+(?:le|la|les|l\'|the)?\s*([^,?.]+?)\s+(?:de\s+la\s+)?(?:parcelle|plot|bloc|block)\b/iu', $question, $m) === 1) {
-            $pest = trim($m[1]);
+        $pest = $this->extractPestName($question);
+        if (($pest === null || $pest === '') && $allUserQuestions !== []) {
+            foreach ($allUserQuestions as $prior) {
+                $pest = $this->extractPestName($prior);
+                if ($pest !== null && $pest !== '') {
+                    break;
+                }
+            }
         }
         if ($pest === null || $pest === '') {
             return null;
         }
 
+        $scoped = $plot !== null && $plot !== '';
+        $callArgs = [
+            'pest'  => $pest,
+            'order' => 'asc',
+            'limit' => 40,
+        ];
+        if ($scoped) {
+            $callArgs['plot'] = $plot;
+        }
+
         try {
-            $data = $this->toolRegistry->call('treatments', [
-                'plot'  => $plot,
-                'pest'  => $pest,
-                'order' => 'asc',
-                'limit' => 40,
-            ]);
+            $data = $this->toolRegistry->call('treatments', $callArgs);
         } catch (\Throwable $e) {
             Log::warning('ai.chat.deterministic_shortcut_failed', ['message' => $e->getMessage()]);
             return null;
         }
 
         if (! empty($data['error'])) {
-            if (($data['error'] ?? '') === 'plot_not_found') {
+            if (($data['error'] ?? '') === 'plot_not_found' && $scoped) {
                 $available = array_slice(array_values((array) ($data['available_plots'] ?? [])), 0, 12);
                 return $this->isFrench($locale)
                     ? 'Je ne trouve pas la parcelle « '.$plot.' ». Parcelles disponibles : '.implode(', ', $available).'.'
@@ -303,10 +332,13 @@ INSTR;
 
         $rows = array_values((array) ($data['rows'] ?? []));
         $count = (int) ($data['treatment_count'] ?? count($rows));
+        $scopeFr = $scoped ? ' sur la parcelle '.$plot : ' (toutes parcelles)';
+        $scopeEn = $scoped ? ' on plot '.$plot : ' (all plots)';
+
         if ($count === 0 || $rows === []) {
             return $this->isFrench($locale)
-                ? 'Aucun traitement contre '.$pest.' n’est enregistré pour la parcelle '.$plot.'.'
-                : 'No treatment against '.$pest.' is recorded for plot '.$plot.'.';
+                ? 'Aucun traitement contre '.$pest.' n’est enregistré'.$scopeFr.'.'
+                : 'No treatment against '.$pest.' is recorded'.$scopeEn.'.';
         }
 
         $lines = [];
@@ -315,23 +347,76 @@ INSTR;
             if ($date === '') {
                 continue;
             }
+            $parts = [$date];
+            if (! $scoped) {
+                $rowPlot = trim((string) ($row['plot'] ?? ''));
+                if ($rowPlot !== '') {
+                    $parts[] = $rowPlot;
+                }
+            }
             $product = trim((string) ($row['product'] ?? ''));
-            $lines[] = $product !== '' ? '- '.$date.' — '.$product : '- '.$date;
+            if ($product !== '') {
+                $parts[] = $product;
+            }
+            $lines[] = '- '.implode(' — ', $parts);
         }
         if ($lines === []) {
             return null;
         }
 
+        $shown = count($lines);
         $header = $this->isFrench($locale)
-            ? 'Traitements contre '.$pest.' sur la parcelle '.$plot.' : '.$count.' date'.($count > 1 ? 's' : '').'.'
-            : 'Treatments against '.$pest.' on plot '.$plot.': '.$count.' date'.($count > 1 ? 's' : '').'.';
+            ? 'Traitements contre '.$pest.$scopeFr.' : '.$count.' date'.($count > 1 ? 's' : '').'.'
+            : 'Treatments against '.$pest.$scopeEn.': '.$count.' date'.($count > 1 ? 's' : '').'.';
 
-        return $header."\n".implode("\n", $lines);
+        $footer = '';
+        if ($count > $shown) {
+            $footer = $this->isFrench($locale)
+                ? "\n(".$shown.' premières dates affichées sur '.$count.'.)'
+                : "\n(Showing the first ".$shown.' of '.$count.' dates.)';
+        }
+
+        return $header."\n".implode("\n", $lines).$footer;
     }
+
 
     private function isFrench(string $locale): bool
     {
         return str_starts_with(mb_strtolower($locale), 'fr');
+    }
+
+    private function visibleUserQuestion(string $raw): string
+    {
+        $content = trim($raw);
+        if (preg_match('/Requête utilisateur\s*:\s*(.+)\s*$/isu', $content, $m) === 1) {
+            return trim($m[1]);
+        }
+        if (preg_match('/User request\s*:\s*(.+)\s*$/isu', $content, $m) === 1) {
+            return trim($m[1]);
+        }
+        return $content;
+    }
+
+    private function extractPlotName(string $question): ?string
+    {
+        if (preg_match('/\b(?:parcelle|plot|bloc|block)\s+([\p{L}\p{N}_-]+)/iu', $question, $m) === 1) {
+            return trim($m[1]);
+        }
+        if (preg_match('/\b([A-Z]{1,3}\s*-?\s*\d{1,4})\b/u', $question, $m) === 1) {
+            return preg_replace('/\s+/', '', trim($m[1])) ?: trim($m[1]);
+        }
+        return null;
+    }
+
+    private function extractPestName(string $question): ?string
+    {
+        if (preg_match('/\b(?:mildiou|mildew|plasmopara|o[ïi]dium|oidium|cicadelle|botrytis|cochenille|acarien|puceron|ceratitis\s+capitata|c[ée]ratite|maladie|pest)\b/iu', $question, $m) === 1) {
+            return trim($m[0]);
+        }
+        if (preg_match('/\b(?:sur|contre|pour|for)\s+(?:le|la|les|l\'|the)?\s*([^,?.]+?)\s+(?:de\s+la\s+)?(?:parcelle|plot|bloc|block)\b/iu', $question, $m) === 1) {
+            return trim($m[1]);
+        }
+        return null;
     }
 
     /**

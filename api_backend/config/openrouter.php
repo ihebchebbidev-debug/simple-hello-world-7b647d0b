@@ -12,13 +12,32 @@ declare(strict_types=1);
 */
 
 return [
-    // Key pool — round-robin, with automatic quarantine on 401/402/429.
+    // Shared key pool — round-robin, with automatic quarantine on 401/402/429.
     // Populate OPENROUTER_API_KEY plus up to three fallbacks. Blanks are ignored.
     'api_keys' => array_values(array_filter([
         env('OPENROUTER_API_KEY'),
         env('OPENROUTER_API_KEY_2'),
         env('OPENROUTER_API_KEY_3'),
         env('OPENROUTER_API_KEY_4'),
+    ], static fn ($k) => is_string($k) && trim($k) !== '')),
+
+    // Optional dedicated key lanes. This lets the tool-planning model, the final
+    // answer model, and the repair/fallback model run on separate free keys when
+    // available, instead of all competing for the same quota. Empty lanes fall
+    // back to the shared `api_keys` pool above.
+    'planner_api_keys' => array_values(array_filter([
+        env('OPENROUTER_PLANNER_API_KEY'),
+        env('OPENROUTER_PLANNER_API_KEY_2'),
+    ], static fn ($k) => is_string($k) && trim($k) !== '')),
+
+    'answer_api_keys' => array_values(array_filter([
+        env('OPENROUTER_ANSWER_API_KEY'),
+        env('OPENROUTER_ANSWER_API_KEY_2'),
+    ], static fn ($k) => is_string($k) && trim($k) !== '')),
+
+    'repair_api_keys' => array_values(array_filter([
+        env('OPENROUTER_REPAIR_API_KEY'),
+        env('OPENROUTER_REPAIR_API_KEY_2'),
     ], static fn ($k) => is_string($k) && trim($k) !== '')),
 
     // Model fallback chain — first entry is primary; used in order on upstream failure.
@@ -31,6 +50,24 @@ return [
         env('OPENROUTER_MODEL_FALLBACK',   'google/gemini-2.0-flash-exp:free'),
         env('OPENROUTER_MODEL_FALLBACK_2', 'meta-llama/llama-3.3-70b-instruct:free'),
         env('OPENROUTER_MODEL_FALLBACK_3', 'qwen/qwen-2.5-72b-instruct:free'),
+    ], static fn ($m) => is_string($m) && trim($m) !== '')),
+
+    // Optional dedicated model lanes. Planner = best tool-calling/data-finding;
+    // answer = concise final wording; repair = cheap language/format cleanup.
+    // Empty lanes fall back to `models` above.
+    'planner_models' => array_values(array_filter([
+        env('OPENROUTER_PLANNER_MODEL',            env('OPENROUTER_MODEL', 'deepseek/deepseek-chat-v3.1:free')),
+        env('OPENROUTER_PLANNER_MODEL_FALLBACK',   env('OPENROUTER_MODEL_FALLBACK_2', 'qwen/qwen-2.5-72b-instruct:free')),
+    ], static fn ($m) => is_string($m) && trim($m) !== '')),
+
+    'answer_models' => array_values(array_filter([
+        env('OPENROUTER_ANSWER_MODEL',            env('OPENROUTER_MODEL_FALLBACK', 'google/gemini-2.0-flash-exp:free')),
+        env('OPENROUTER_ANSWER_MODEL_FALLBACK',   env('OPENROUTER_MODEL_FALLBACK_3', 'meta-llama/llama-3.3-70b-instruct:free')),
+    ], static fn ($m) => is_string($m) && trim($m) !== '')),
+
+    'repair_models' => array_values(array_filter([
+        env('OPENROUTER_REPAIR_MODEL',            env('OPENROUTER_ANSWER_MODEL', 'qwen/qwen-2.5-72b-instruct:free')),
+        env('OPENROUTER_REPAIR_MODEL_FALLBACK',   env('OPENROUTER_MODEL_FALLBACK', 'google/gemini-2.0-flash-exp:free')),
     ], static fn ($m) => is_string($m) && trim($m) !== '')),
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),

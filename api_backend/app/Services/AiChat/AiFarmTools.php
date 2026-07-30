@@ -441,10 +441,15 @@ trait AiFarmTools
         $this->applyWindow($q, 'po', $from, $to);
 
         if (! empty($args['pest'])) {
-            $like = '%'.mb_strtolower((string) $args['pest']).'%';
-            $q->where(function ($w) use ($like) {
-                $w->whereRaw('LOWER(po.target_pest) LIKE ?', [$like])
-                  ->orWhereRaw('LOWER(COALESCE(po.remarks, \'\')) LIKE ?', [$like]);
+            $likes = array_map(
+                static fn (string $term): string => '%'.mb_strtolower($term).'%',
+                $this->pestSearchTerms((string) $args['pest']),
+            );
+            $q->where(function ($w) use ($likes) {
+                foreach ($likes as $like) {
+                    $w->orWhereRaw('LOWER(po.target_pest) LIKE ?', [$like])
+                      ->orWhereRaw('LOWER(COALESCE(po.remarks, \'\')) LIKE ?', [$like]);
+                }
             });
         }
         if (! empty($args['product'])) {
@@ -483,6 +488,28 @@ trait AiFarmTools
             'rows'            => $rows,
             'returned'        => count($rows),
         ];
+    }
+
+    /** @return array<int, string> */
+    private function pestSearchTerms(string $raw): array
+    {
+        $needle = trim(mb_strtolower($raw));
+        $terms = [$needle];
+
+        $norm = self::normLabel($needle);
+        $aliases = [
+            'mildiou' => ['mildiou', 'mildew', 'plasmopara', 'downy mildew'],
+            'oidium'  => ['oïdium', 'oidium', 'powdery mildew', 'erysiphe', 'uncinula'],
+            'botrytis'=> ['botrytis', 'pourriture grise', 'gray mold', 'grey mold'],
+            'ceratite'=> ['cératite', 'ceratite', 'ceratitis capitata', 'mouche méditerranéenne'],
+        ];
+        foreach ($aliases as $key => $values) {
+            if ($norm !== '' && (str_contains($norm, $key) || str_contains($key, $norm))) {
+                $terms = array_merge($terms, $values);
+            }
+        }
+
+        return array_values(array_unique(array_filter($terms, static fn ($term) => trim($term) !== '')));
     }
 
     /** @param array<string,mixed> $args */
