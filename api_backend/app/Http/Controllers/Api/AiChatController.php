@@ -114,7 +114,6 @@ final class AiChatController extends Controller
             AiFeedback::updateOrCreate(
                 ['user_id' => $userId, 'message_client_id' => substr($clientKey, 0, 64)],
                 [
-                [
                     'conversation_id' => $data['conversation_id'] ?? null,
                     'rating'          => $data['rating'],
                     'locale'          => $data['locale'] ?? null,
