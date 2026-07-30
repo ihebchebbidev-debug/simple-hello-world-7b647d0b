@@ -17,7 +17,19 @@ use Throwable;
 
 final class AiChatController extends Controller
 {
-    public function __construct(private readonly AiChatService $aiChat) {}
+    private ?AiChatService $aiChatInstance = null;
+
+    /**
+     * Resolved lazily: if the assistant cannot be constructed (e.g. no
+     * OpenRouter key configured), the failure must surface as a typed AI
+     * error inside the request handlers instead of a generic 500 thrown
+     * during container resolution.
+     */
+    private function aiChat(): AiChatService
+    {
+        return $this->aiChatInstance ??= app(AiChatService::class);
+    }
+
 
     /**
      * Split a "code: message" runtime exception into (code, http_status, user_message).
@@ -30,7 +42,15 @@ final class AiChatController extends Controller
         $code = 'ai_error';
         if (preg_match('/^([a-z_]+):/', $raw, $m) === 1) {
             $code = $m[1];
+        } elseif (stripos($raw, 'openrouter api key') !== false) {
+            // Thrown by OpenRouterKeyPool when the environment has no usable key.
+            $code = 'config_missing';
         }
+
+        if ($code === 'config_missing') {
+            return ['code' => 'config_missing', 'status' => 503, 'message' => 'The assistant is not configured: no OpenRouter API key is set on the server.'];
+        }
+
 
         return match ($code) {
             'circuit_open'    => ['code' => 'circuit_open',    'status' => 503, 'message' => 'Assistant paused after repeated upstream failures. Retrying shortly.'],
@@ -141,7 +161,7 @@ final class AiChatController extends Controller
         }
 
         try {
-            $result = $this->aiChat->reply($data['messages'], $locale, $conversationId, $subjectId);
+            $result = $this->aiChat()->reply($data['messages'], $locale, $conversationId, $subjectId);
 
             return ApiResponse::ok([
                 'reply'           => $result['reply'],
@@ -156,7 +176,12 @@ final class AiChatController extends Controller
             Log::warning('ai.chat.failed', ['code' => $info['code'], 'message' => $e->getMessage()]);
             return ApiResponse::error($info['code'], $info['message'], $info['status']);
         } catch (Throwable $e) {
-            Log::error('ai.chat.error', ['message' => $e->getMessage()]);
+            Log::error('ai.chat.error', [
+                'exception' => $e::class,
+                'message'   => $e->getMessage(),
+                'file'      => $e->getFile(),
+                'line'      => $e->getLine(),
+            ]);
             return ApiResponse::error('ai_error', 'Could not generate a reply.', 500);
         }
     }
@@ -190,7 +215,7 @@ final class AiChatController extends Controller
             $emit(['type' => 'ping']);
 
             try {
-                $result = $this->aiChat->replyStream(
+                $result = $this->aiChat()->replyStream(
                     $messages,
                     $locale,
                     $conversationId,
@@ -233,7 +258,12 @@ final class AiChatController extends Controller
                 Log::warning('ai.chat.stream_failed', ['code' => $info['code'], 'message' => $e->getMessage()]);
                 $emit(['type' => 'error', 'code' => $info['code'], 'message' => $info['message']]);
             } catch (Throwable $e) {
-                Log::error('ai.chat.stream_error', ['message' => $e->getMessage()]);
+                Log::error('ai.chat.stream_error', [
+                    'exception' => $e::class,
+                    'message'   => $e->getMessage(),
+                    'file'      => $e->getFile(),
+                    'line'      => $e->getLine(),
+                ]);
                 $emit(['type' => 'error', 'code' => 'ai_error', 'message' => 'Could not generate a reply.']);
             }
         }, 200, [
