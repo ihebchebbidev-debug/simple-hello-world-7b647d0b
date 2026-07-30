@@ -28,6 +28,14 @@ trait AiFarmTools
      */
     private ?string $plotMatchNote = null;
 
+    /** Pre-aggregated daily rollup — the fast path for period/stat questions. */
+    private ?AiDailyRollup $rollup = null;
+
+    private function rollup(): AiDailyRollup
+    {
+        return $this->rollup ??= new AiDailyRollup();
+    }
+
     /** @return array<int, array<string, mixed>> */
     private function farmDefinitions(): array
     {
@@ -433,51 +441,73 @@ trait AiFarmTools
         [$from, $to] = $this->windowFrom($args);
 
         $ids = array_map(static fn ($p) => $p->id, $plots);
-        $m3 = self::m3Expr();
-        $q = DB::table('irrigation_operations')
-            ->selectRaw("plot_id,
-                COALESCE(SUM($m3),0) AS qty,
-                COUNT(*) AS n,
-                COALESCE(SUM(($m3) * price_at_entry),0) AS cost,
-                COUNT(*) FILTER (WHERE water_quantity IS NULL) AS missing_qty,
-                COUNT(*) FILTER (WHERE price_at_entry IS NULL) AS missing_price,
-                COUNT(DISTINCT LOWER(TRIM(COALESCE(unit_at_entry, 'm3')))) AS unit_variants,
-                MIN(operation_date) AS first_date,
-                MAX(operation_date) AS last_date")
-            ->whereIn('plot_id', $ids)
-            ->groupBy('plot_id');
-        $this->applyWindow($q, 'irrigation_operations', $from, $to);
-        $agg = collect($q->get())->keyBy('plot_id');
+
+        // Fast, stable path: pre-aggregated daily rollup. Units are normalised
+        // at build time, so repeating the same question cannot yield a
+        // different total. Falls back to the raw scan when the rollup is
+        // unavailable or would have to serve a stale figure.
+        $source = 'daily_rollup';
+        $agg = $this->rollup()->aggregate('irrigation', array_map('strval', $ids), $from, $to);
+        if ($agg === null) {
+            $source = 'live_scan';
+            $m3 = self::m3Expr();
+            $q = DB::table('irrigation_operations')
+                ->selectRaw("plot_id,
+                    COALESCE(SUM($m3),0) AS qty,
+                    COUNT(*) AS ops,
+                    COALESCE(SUM(($m3) * price_at_entry),0) AS cost,
+                    COUNT(*) FILTER (WHERE water_quantity IS NULL) AS missing_qty,
+                    COUNT(*) FILTER (WHERE price_at_entry IS NULL) AS missing_price,
+                    COUNT(DISTINCT LOWER(TRIM(COALESCE(unit_at_entry, 'm3')))) AS unit_variants,
+                    MIN(operation_date) AS first_date,
+                    MAX(operation_date) AS last_date")
+                ->whereIn('plot_id', $ids)
+                ->groupBy('plot_id');
+            $this->applyWindow($q, 'irrigation_operations', $from, $to);
+            $agg = [];
+            foreach ($q->get() as $r) {
+                $agg[(string) $r->plot_id] = [
+                    'ops'           => (int) $r->ops,
+                    'qty'           => (float) $r->qty,
+                    'cost'          => (float) $r->cost,
+                    'missing_qty'   => (int) $r->missing_qty,
+                    'missing_price' => (int) $r->missing_price,
+                    'unit_variants' => (int) $r->unit_variants,
+                    'first_date'    => $r->first_date ? Carbon::parse((string) $r->first_date)->toDateString() : null,
+                    'last_date'     => $r->last_date ? Carbon::parse((string) $r->last_date)->toDateString() : null,
+                ];
+            }
+        }
 
         $rows = [];
         $sumPerHa = 0.0; $withArea = 0;
         foreach ($plots as $p) {
-            $a = $agg->get((string) $p->id);
-            $qty = (float) ($a->qty ?? 0);
+            $a = $agg[(string) $p->id] ?? [];
+            $qty = (float) ($a['qty'] ?? 0);
             $ha  = self::ha($p);
             $perHa = self::perHa($qty, $ha);
             if ($perHa !== null) { $sumPerHa += $perHa; $withArea++; }
             $row = [
                 'plot'            => $names[(string) $p->id],
                 'surface_area_ha' => $ha,
-                'irrigations'     => (int) ($a->n ?? 0),
+                'irrigations'     => (int) ($a['ops'] ?? 0),
                 'total_m3'        => round($qty, 2),
                 'm3_per_ha'       => $perHa,
-                'cost_tnd'        => round((float) ($a->cost ?? 0), 2),
-                'first_date'      => $a->first_date ?? null,
-                'last_date'       => $a->last_date ?? null,
+                'cost_tnd'        => round((float) ($a['cost'] ?? 0), 2),
+                'first_date'      => $a['first_date'] ?? null,
+                'last_date'       => $a['last_date'] ?? null,
             ];
 
             // Data-quality flags. The model MUST relay these instead of
             // presenting a partial total as an exhaustive one.
             $warnings = [];
-            if ((int) ($a->missing_qty ?? 0) > 0) {
-                $warnings[] = (int) $a->missing_qty.' irrigation(s) have no recorded volume and count as 0 m³.';
+            if ((int) ($a['missing_qty'] ?? 0) > 0) {
+                $warnings[] = (int) $a['missing_qty'].' irrigation(s) have no recorded volume and count as 0 m³.';
             }
-            if ((int) ($a->missing_price ?? 0) > 0) {
-                $warnings[] = (int) $a->missing_price.' irrigation(s) have no price snapshot; cost is understated.';
+            if ((int) ($a['missing_price'] ?? 0) > 0) {
+                $warnings[] = (int) $a['missing_price'].' irrigation(s) have no price snapshot; cost is understated.';
             }
-            if ((int) ($a->unit_variants ?? 0) > 1) {
+            if ((int) ($a['unit_variants'] ?? 0) > 1) {
                 $warnings[] = 'Mixed source units on this plot; volumes were converted to m³ before summing.';
             }
             if ($warnings !== []) $row['warnings'] = $warnings;
@@ -488,6 +518,7 @@ trait AiFarmTools
         return [
             'result_kind'      => 'aggregate',
             'applied_filters'  => $this->appliedFilters($args, $from, $to, $names),
+            'computed_from'    => $source,
             'unit'             => 'm3/ha',
             'plots'            => array_slice($rows, 0, 40),
             'plot_count'       => count($rows),
@@ -733,7 +764,12 @@ trait AiFarmTools
             ];
         }
 
-        return [
+        // Per-day totals from the pre-aggregated rollup. They cover the WHOLE
+        // window even when the row listing is truncated, so a "détail" answer
+        // can stay complete and its total can be checked against the listing.
+        $daily = $this->rollup()->daily('irrigation', array_map('strval', $ids), $from, $to, 62);
+
+        $out = [
             'result_kind'      => 'listing',
             'applied_filters'  => $this->appliedFilters($args, $from, $to, $names),
             'irrigation_count' => $total,
@@ -743,6 +779,13 @@ trait AiFarmTools
             'order'            => $order,
             'rows'             => $rows,
         ];
+
+        if ($daily !== null && $daily !== []) {
+            $out['daily_totals'] = array_slice($daily, 0, 62);
+            $out['daily_totals_note'] = 'Pre-aggregated per-day totals for the full window (not truncated). Use these when `truncated` is true.';
+        }
+
+        return $out;
     }
 
     /** @param array<string,mixed> $args */

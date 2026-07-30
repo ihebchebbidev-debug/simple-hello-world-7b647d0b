@@ -29,6 +29,9 @@ final class OpenRouterClient
     /** Last upstream HTTP status seen (0 when no HTTP response reached us, e.g. connection error). */
     private int $lastStatus = 0;
 
+    /** Cause of the last empty/failed stream, extracted from the SSE body (HTTP 200 can still carry an error). */
+    private ?string $lastStreamError = null;
+
     public function __construct(
         private readonly OpenRouterKeyPool $keys,
         private readonly CircuitBreaker $breaker,
@@ -107,8 +110,30 @@ final class OpenRouterClient
 
                     // Empty content is OK when the model requested tools.
                     if ((! is_string($content) || trim($content) === '') && $toolCalls === []) {
+                        // An empty completion is a TRANSIENT provider hiccup, not a
+                        // terminal error: throwing here killed the whole agent run on
+                        // the first blip and dropped the user onto the tool-less
+                        // fallback. Treat it like any retryable failure so the
+                        // remaining attempts and fallback models get their turn.
                         $this->breaker->recordFailure();
-                        throw new RuntimeException('empty_reply: OpenRouter returned an empty reply.');
+                        $finish = $json['choices'][0]['finish_reason'] ?? 'unknown';
+                        $lastError = "empty completion from {$model} (finish_reason={$finish})";
+                        $this->lastStatus = 0;
+
+                        // finish_reason=length means the budget was consumed before any
+                        // visible text (typically by reasoning tokens) — retrying the
+                        // identical request just burns it again, so move to the next model.
+                        if ($finish === 'length') {
+                            Log::warning('ai.openrouter.empty_completion_truncated', [
+                                'model' => $model, 'purpose' => $purpose,
+                            ]);
+                            break;
+                        }
+                        if ($attempt < $maxRetries) {
+                            $this->sleepBackoff($attempt, null);
+                            continue;
+                        }
+                        break; // exhausted this model → fall through to the next one
                     }
                     $this->breaker->recordSuccess();
                     return [
@@ -132,7 +157,14 @@ final class OpenRouterClient
             }
         }
 
-        throw new RuntimeException($this->classify($this->lastStatus).': '.($lastError ?? 'unknown error'));
+        // Keep the empty-completion cause visible instead of relabelling it
+        // "network" (classify(0)) — that mislabel is what surfaced to users as
+        // a bogus "network error" when the provider simply returned nothing.
+        $code = ($this->lastStatus === 0 && is_string($lastError) && str_contains($lastError, 'empty completion'))
+            ? 'empty_reply'
+            : $this->classify($this->lastStatus);
+
+        throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
     }
 
     /** @param array<int, array<string, string>> $messages */
@@ -177,23 +209,51 @@ final class OpenRouterClient
                 }
 
                 // Stream: no retry once bytes start flowing.
+                $emittedBytes = 0;
+                $countingDelta = static function (string $chunk) use ($onDelta, &$emittedBytes): void {
+                    $emittedBytes += strlen($chunk);
+                    $onDelta($chunk);
+                };
                 try {
-                    $full = $this->consumeStream($response, $onDelta);
+                    $full = $this->consumeStream($response, $countingDelta);
                 } catch (\Throwable $e) {
+                    // Nothing reached the client yet → safe to retry cleanly.
+                    if ($emittedBytes === 0 && $attempt < $maxRetries) {
+                        $this->breaker->recordFailure();
+                        $lastError = 'stream interrupted: '.$e->getMessage();
+                        $this->sleepBackoff($attempt, null);
+                        continue;
+                    }
                     $this->breaker->recordFailure();
                     throw new RuntimeException('network: OpenRouter stream interrupted: '.$e->getMessage(), 0, $e);
                 }
 
                 if (trim($full) === '') {
+                    // No content and no bytes emitted: retry, then fall back to the
+                    // next model rather than failing the request outright.
                     $this->breaker->recordFailure();
-                    throw new RuntimeException('empty_reply: OpenRouter stream returned no content.');
+                    $lastError = 'empty stream from '.$model
+                        .($this->lastStreamError !== null ? ' ('.$this->lastStreamError.')' : '');
+                    $this->lastStatus = 0;
+                    Log::warning('ai.openrouter.empty_stream', [
+                        'model' => $model, 'purpose' => $purpose, 'cause' => $this->lastStreamError,
+                    ]);
+                    if ($attempt < $maxRetries) {
+                        $this->sleepBackoff($attempt, null);
+                        continue;
+                    }
+                    break; // next model
                 }
                 $this->breaker->recordSuccess();
                 return trim($full);
             }
         }
 
-        throw new RuntimeException($this->classify($this->lastStatus).': '.($lastError ?? 'unknown error'));
+        $code = ($this->lastStatus === 0 && is_string($lastError) && str_contains($lastError, 'empty stream'))
+            ? 'empty_reply'
+            : $this->classify($this->lastStatus);
+
+        throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
     }
 
     /** @param array<string, mixed> $payload */
@@ -246,6 +306,8 @@ final class OpenRouterClient
         $body = $response->toPsrResponse()->getBody();
         $full = '';
         $lastRawUsage = null;
+        $this->lastStreamError = null;
+        $reasoningOnly = 0;
 
         while (! $body->eof()) {
             $line = $this->readLine($body);
@@ -260,15 +322,42 @@ final class OpenRouterClient
             if (! is_array($json)) {
                 continue;
             }
+            // OpenRouter reports mid-stream failures (rate limit, upstream 5xx,
+            // moderation) as an error object inside the SSE body with HTTP 200.
+            // Swallowing it turned a real, explainable failure into a blank
+            // "empty reply" with no cause in the logs.
+            if (isset($json['error'])) {
+                $err = $json['error'];
+                $this->lastStreamError = is_array($err)
+                    ? trim((string) ($err['message'] ?? 'provider error')
+                        .(isset($err['code']) ? ' [code '.$err['code'].']' : ''))
+                    : (string) $err;
+                continue;
+            }
             if (isset($json['usage']) && is_array($json['usage'])) {
                 $lastRawUsage = $json['usage'];
             }
-            $delta = $json['choices'][0]['delta']['content'] ?? null;
+            $choice = $json['choices'][0] ?? [];
+            if (($choice['finish_reason'] ?? null) === 'length' && $full === '') {
+                $this->lastStreamError = 'output truncated before any text (finish_reason=length)';
+            }
+            $delta = $choice['delta']['content'] ?? null;
+            // Reasoning models emit thinking tokens on a separate field; those
+            // are not an answer, but they prove the stream was alive.
+            if ((! is_string($delta) || $delta === '')
+                && is_string($choice['delta']['reasoning'] ?? null)
+                && $choice['delta']['reasoning'] !== '') {
+                $reasoningOnly++;
+            }
             if (! is_string($delta) || $delta === '') {
                 continue;
             }
             $full .= $delta;
             $onDelta($delta);
+        }
+
+        if ($full === '' && $reasoningOnly > 0 && $this->lastStreamError === null) {
+            $this->lastStreamError = 'model emitted only reasoning tokens, no answer text';
         }
 
         if ($lastRawUsage !== null) {

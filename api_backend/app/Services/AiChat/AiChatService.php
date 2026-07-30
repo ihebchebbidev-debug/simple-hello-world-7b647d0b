@@ -63,6 +63,11 @@ final class AiChatService
                 }
             } catch (\Throwable $e) {
                 Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
+                // Rebuild without the agent prompt: the tool-oriented prompt sent
+                // to a tool-less call is what produced long, English, data-free
+                // answers. The tool-less prompt keeps voice, locale and honesty
+                // rules and tells the model it has no live data.
+                $payload = $this->buildOpenRouterMessages($messages, $locale, false);
                 $reply = $this->openRouter->chat($payload, 'answer');
             }
         } else {
@@ -136,6 +141,9 @@ final class AiChatService
                     // streaming a second, duplicated answer on top of it.
                     $streamed = trim($emitted);
                 } else {
+                    // See reply(): the agent prompt must not be reused for a
+                    // tool-less call, or the model invents data in the wrong language.
+                    $payload = $this->buildOpenRouterMessages($messages, $locale, false);
                     $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
                 }
             }
