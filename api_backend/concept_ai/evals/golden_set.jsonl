@@ -1,5 +1,0 @@
-{"suite":"AgroQA-FR","q":"Quelle est la conductivité électrique idéale pour une tomate hors-sol ?","choices":["1.5 mS/cm","2.5 mS/cm","4.0 mS/cm","6.0 mS/cm"],"answer":2}
-{"suite":"AgroQA-FR","q":"À quel stade phénologique le blé tendre est-il le plus sensible au stress hydrique ?","choices":["Tallage","Montaison","Épiaison","Maturité"],"answer":2}
-{"suite":"AgroQA-EN","q":"Which soil texture typically has the highest available water capacity?","choices":["Sand","Silt loam","Clay","Loamy sand"],"answer":1}
-{"suite":"ParcelReasoning","q":"Given parcel P-12 has soil_moisture=18% and NDVI dropping 0.05/week, what should I do first?","tools_expected":["parcel_lookup"]}
-{"suite":"IrrigationPlan","q":"Plan 7 days of drip irrigation for parcel P-07 targeting 32% moisture with a 20 000 L/day cap.","tools_expected":["parcel_lookup","irrigation_plan"]}

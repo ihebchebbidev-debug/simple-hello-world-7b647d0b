@@ -13,9 +13,10 @@ namespace App\Services\AiChat;
 final class ResponseValidator
 {
     /**
+     * @param  array<int, string>  $evidence  Raw JSON of the tool results the answer was built from.
      * @return array{ok: bool, violations: array<int, string>, detected_lang: string, target_lang: string}
      */
-    public function check(string $reply, string $lastUserMessage, string $locale): array
+    public function check(string $reply, string $lastUserMessage, string $locale, array $evidence = []): array
     {
         $violations = [];
         $target = $this->detectLang($lastUserMessage, $locale);
@@ -62,12 +63,79 @@ final class ResponseValidator
             $violations[] = "too_long({$wordCount}w)";
         }
 
+        // ── Data-integrity rules ────────────────────────────────────────
+        // Style is cheap to police; a wrong number is what actually costs
+        // the user trust, so check the claims against the tool results.
+
+        // The assistant can only ever see what its filters returned. Any
+        // claim of exhaustiveness is unverifiable by construction.
+        $exhaustive = '/\b(l\W?ensemble des (enregistrements|donn[ée]es|op[ée]rations)'
+            .'|l\W?int[ée]gralit[ée] des'
+            .'|tous les enregistrements|toutes les op[ée]rations enregistr[ée]es'
+            .'|all (the )?records|every (single )?record|the complete set of)\b/iu';
+        if (preg_match($exhaustive, $reply)) {
+            $violations[] = 'claims_exhaustiveness';
+        }
+
+        if ($evidence !== []) {
+            $unsupported = $this->unsupportedNumbers($reply, $evidence);
+            if ($unsupported !== []) {
+                $violations[] = 'unsupported_numbers('.implode(',', array_slice($unsupported, 0, 5)).')';
+            }
+        }
+
         return [
             'ok'            => $violations === [],
             'violations'    => $violations,
             'detected_lang' => $actual,
             'target_lang'   => $target,
         ];
+    }
+
+    /**
+     * Numbers stated in the reply that appear in no tool result.
+     *
+     * Only meaningful magnitudes are checked: small integers are dates,
+     * counts and list markers, and flagging them would be pure noise.
+     *
+     * @param  array<int, string>  $evidence
+     * @return array<int, string>
+     */
+    private function unsupportedNumbers(string $reply, array $evidence): array
+    {
+        $known = [];
+        foreach ($this->numbersIn(implode(' ', $evidence)) as $n) {
+            $known[] = $n;
+            $known[] = round($n, 2);
+            $known[] = round($n, 1);
+            $known[] = round($n);
+        }
+        if ($known === []) return [];
+
+        $bad = [];
+        foreach ($this->numbersIn($reply) as $n) {
+            // Skip integers below 100 (days, months, counts) and years.
+            if ($n == floor($n) && ($n < 100 || ($n >= 1900 && $n <= 2200))) continue;
+
+            foreach ($known as $k) {
+                if (abs($k - $n) <= 0.011) continue 2;
+            }
+            $bad[] = rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+        }
+
+        return array_values(array_unique($bad));
+    }
+
+    /** @return array<int, float> */
+    private function numbersIn(string $text): array
+    {
+        // Collapse thousands separators (space, NBSP, narrow NBSP) so
+        // "1 234,50" and "1234.5" compare equal.
+        $t = preg_replace('/(\d)[\x{0020}\x{00a0}\x{202f}](\d{3})\b/u', '$1$2', $text) ?? $text;
+
+        if (! preg_match_all('/-?\d+(?:[.,]\d+)?/u', $t, $m)) return [];
+
+        return array_map(static fn (string $s): float => (float) str_replace(',', '.', $s), $m[0]);
     }
 
     /**

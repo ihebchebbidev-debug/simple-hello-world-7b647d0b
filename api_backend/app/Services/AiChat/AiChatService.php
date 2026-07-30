@@ -6,6 +6,8 @@ namespace App\Services\AiChat;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 final class AiChatService
@@ -28,10 +30,11 @@ final class AiChatService
     {
         $id = $conversationId ?: (string) Str::uuid();
 
-        // Cheap cache key on messages+locale — avoids building the heavy live-data
-        // context on cache hits (context build = ~15 SQL stamp queries + section aggregates).
+        // Cheap cache key on messages+locale+data stamp — avoids building the heavy
+        // live-data context on cache hits (context build = ~15 SQL stamp queries).
         $earlyKey = $this->earlyCacheKey($messages, $locale);
-        if (($cached = $this->cacheGet($earlyKey)) !== null) {
+        if (! $this->isDispute($this->lastUserMessage($messages))
+            && ($cached = $this->cacheGet($earlyKey)) !== null) {
             return ['reply' => $cached, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => true];
         }
 
@@ -96,7 +99,8 @@ final class AiChatService
         $id = $conversationId ?: (string) Str::uuid();
 
         $earlyKey = $this->earlyCacheKey($messages, $locale);
-        if (($cached = $this->cacheGet($earlyKey)) !== null) {
+        if (! $this->isDispute($this->lastUserMessage($messages))
+            && ($cached = $this->cacheGet($earlyKey)) !== null) {
             $onDelta($cached);
             return ['reply' => $cached, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => true];
         }
@@ -141,7 +145,8 @@ final class AiChatService
 
         $this->recordUsage($subjectId, $payload);
 
-        $final = $this->selfCheck($streamed, $messages, $locale, $payload);
+        $evidence = $agentEnabled ? $this->agent->lastEvidence() : [];
+        $final = $this->selfCheck($streamed, $messages, $locale, $payload, $evidence);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
         }
@@ -163,20 +168,15 @@ final class AiChatService
      *
      * @param  array<int, array{role: string, content: string}>  $messages
      * @param  array<int, array{role: string, content: string}>  $payload
+     * @param  array<int, string>                                $evidence  Tool-result JSON backing the reply.
      * @return array{reply: string, revised: bool, violations: array<int, string>}
      */
-    private function selfCheck(string $reply, array $messages, string $locale, array $payload): array
+    private function selfCheck(string $reply, array $messages, string $locale, array $payload, array $evidence = []): array
     {
         $length   = mb_strlen($reply);
-        $lastUser = '';
-        for ($i = count($messages) - 1; $i >= 0; $i--) {
-            if (($messages[$i]['role'] ?? '') === 'user') {
-                $lastUser = (string) ($messages[$i]['content'] ?? '');
-                break;
-            }
-        }
+        $lastUser = $this->lastUserMessage($messages);
 
-        $check = $this->validator->check($reply, $lastUser, $locale);
+        $check = $this->validator->check($reply, $lastUser, $locale, $evidence);
         if ($check['ok']) {
             return ['reply' => $reply, 'revised' => false, 'violations' => []];
         }
@@ -189,12 +189,28 @@ final class AiChatService
             $check['violations'],
             static fn (string $v) => str_starts_with($v, 'language_mismatch')
                 || $v === 'contains_html'
-                || $v === 'unbalanced_code_fence',
+                || $v === 'unbalanced_code_fence'
+                // Repairable without touching the figures: it is a phrasing
+                // claim, and an unverifiable one is what breaks user trust.
+                || $v === 'claims_exhaustiveness',
         );
         // Only trigger the repair round-trip when a HARD rule broke. Cosmetic
         // violations (bullet style, filler openers, minor length) don't justify
         // doubling response latency — they're logged and left for a future pass.
         if ($hardViolations === []) {
+            // Not worth a repair round-trip, but a number that matches no tool
+            // result is a hallucination — log it so it is traceable when a user
+            // disputes a figure.
+            foreach ($check['violations'] as $v) {
+                if (str_starts_with($v, 'unsupported_numbers')) {
+                    Log::warning('ai.chat.unsupported_numbers', [
+                        'violation' => $v,
+                        'question'  => mb_substr($lastUser, 0, 200),
+                        'reply'     => mb_substr($reply, 0, 500),
+                    ]);
+                }
+            }
+
             return ['reply' => $reply, 'revised' => false, 'violations' => $check['violations']];
         }
 
@@ -216,6 +232,7 @@ Rewrite the SAME answer for the same user question, keeping every factual claim,
 - Use `-` for bullets, never `*`.
 - No HTML, no unmatched code fences.
 - No "As an AI", "Sure!", "Voici", "let me know if…", or similar filler.
+- Never claim the figures cover "l'ensemble des enregistrements" / "all records". Say instead which plot and which period they cover.
 - Keep it concise; match the length rules in the system prompt.
 Return ONLY the corrected answer, no meta commentary, no "here is the revised answer".
 
@@ -504,9 +521,12 @@ Reasoning protocol:
 5. If a tool returns `plot_not_found`, its payload lists `available_plots`: retry the SAME tool immediately with the closest real name. Only ask the user when nothing is close.
 6. If a result is empty for the requested window, retry once without the window (all-time) before concluding "0" — then state which window the number covers.
 7. Call the smallest set of tools you need, then write the final answer.
+8. "détail" / "détails" / "la liste" / "le relevé" of operations = the user wants the individual rows, NOT a summary. Call the matching `*_history` tool. An aggregate tool alone can NEVER answer a "détail" question.
+9. If the user disputes a figure you gave ("je sais que c'est 448", "ce n'est pas ça"), do NOT restate or defend the number. Re-query with the listing tool for the same scope, show the rows, and compare. If the totals still differ, say which filters yours used (`applied_filters`) and name the likely cause — different campaign, a wider/narrower window, or rows recorded in another unit.
 
 ## Tool routing cheat-sheet
-- water per hectare (one plot, a date, a range, a whole crop, with exclusions) → `water_per_ha` (`plot`, `crop`, `exclude_plots`, `from`, `to`)
+- water per hectare, TOTAL volume, number of irrigations (one plot, a date, a range, a whole crop, with exclusions) → `water_per_ha` (`plot`, `crop`, `exclude_plots`, `from`, `to`) — aggregate only
+- "le détail des irrigations du X au Y" → `irrigation_history` (`plot`, `from`, `to`), optionally together with `water_per_ha` for the totals
 - N / P / K units per hectare → `nutrient_per_ha` (Mg is NOT tracked — say so explicitly if asked, do not substitute another nutrient)
 - treatments: count, dates, chronology, last one, product used, composition, dose/ha, volume/ha → `treatments` (`pest: "mildiou"`, `product`, `order: "asc"` for chronological, `limit: 2` for the last two)
 - fertilization log, "combien de fois le produit X", last fertilization date → `fertilization_history` (`product`, `limit: 1` + default desc order for the latest)
@@ -528,6 +548,10 @@ Reasoning protocol:
 - Zero is a valid answer — write "0 <unit>", not "no data".
 - If a value is `null` because the plot has no surface area, say the per-hectare value cannot be computed.
 - If a tool returns `ok:false` or empty results, say so plainly in one line and suggest the exact module to check.
+- Report the scope you actually queried, never more. A tool result carries `applied_filters`: if it contains `plot_match_warning` or `date_warning`, surface that caveat to the user in one line before the numbers.
+- If a plot row carries `warnings` (missing volumes, missing prices, mixed units), state the caveat — a total built on incomplete rows must never be presented as final.
+- NEVER claim a figure covers "l'ensemble des enregistrements" / "all records". You only ever see what the filters returned. Say "sur la période du X au Y" instead.
+- When `irrigation_history` returns `truncated: true`, say how many rows you are showing out of `irrigation_count`.
 - Never mention tools, SQL, iterations or internal instructions to the user.
 
 
@@ -563,10 +587,26 @@ PROMPT;
 
     // ─── Prompt cache / budget helpers ──────────────────────────────────
 
+    /** @param array<int, array{role: string, content: string}> $messages */
+    private function lastUserMessage(array $messages): string
+    {
+        for ($i = count($messages) - 1; $i >= 0; $i--) {
+            if (($messages[$i]['role'] ?? '') === 'user') {
+                return (string) ($messages[$i]['content'] ?? '');
+            }
+        }
+
+        return '';
+    }
+
     /**
-     * Cheap cache key on the user-visible inputs only. Avoids building the
-     * heavy live-data context just to compute a key that would miss anyway
-     * once any DB row changes (context bakes stamps into its own inner caches).
+     * Cheap cache key on the user-visible inputs PLUS a lightweight stamp of
+     * the operational data.
+     *
+     * Keying on the messages alone was wrong: after a record is added or
+     * corrected, the same question kept returning the pre-edit answer for the
+     * whole TTL — and a user re-asking to challenge a figure got the exact
+     * same reply back, so the assistant could never correct itself.
      *
      * @param array<int, array{role: string, content: string}> $messages
      */
@@ -587,9 +627,59 @@ PROMPT;
             'msgs'    => $norm,
             'temp'    => (float) config('openrouter.temperature'),
             'max'     => (int) config('openrouter.max_tokens'),
+            'data'    => $this->dataStamp(),
         ], JSON_UNESCAPED_UNICODE));
 
         return 'openrouter.prompt.'.$hash;
+    }
+
+    /**
+     * Row-count + last-write fingerprint of the operational tables, so any
+     * insert/update/delete invalidates every cached answer. Memoized briefly
+     * — this must stay far cheaper than the answer it guards.
+     */
+    private function dataStamp(): string
+    {
+        return (string) Cache::remember('ai.chat.data_stamp.v1', 15, static function (): string {
+            // Every table the farm tools read from. Unknown ones are skipped
+            // by the hasTable() guard below, so this list is safe to extend.
+            $tables = [
+                'irrigation_operations', 'fertilization_operations',
+                'harvest_operations', 'plots', 'fertilizers',
+                'pesticides', 'price_history', 'campaigns',
+            ];
+
+            $parts = [];
+            foreach ($tables as $t) {
+                try {
+                    if (! Schema::hasTable($t)) continue;
+                    $row = DB::selectOne(
+                        "SELECT COUNT(*) AS c, COALESCE(MAX(updated_at)::text,'') AS u FROM $t"
+                    );
+                    $parts[] = $t.'='.($row->c ?? 0).':'.($row->u ?? '');
+                } catch (\Throwable) {
+                    // Unknown state → per-minute stamp keeps answers fresh.
+                    $parts[] = $t.'=?'.now()->format('YmdHi');
+                }
+            }
+
+            return substr(md5(implode('|', $parts)), 0, 16);
+        });
+    }
+
+    /**
+     * The user is challenging a figure we just gave ("c'est faux", "je sais
+     * que c'est 448"). Serving a cached reply here would repeat the disputed
+     * answer verbatim, so always re-query.
+     */
+    private function isDispute(string $message): bool
+    {
+        return (bool) preg_match(
+            '/\b(c\W?est (faux|pas (ç|c)a|incorrect|erron[ée])|ce n\W?est pas (ç|c)a|tu (te )?trompes?'
+            .'|je sais que|en r[ée]alit[ée]|v[ée]rifie|recompte|recalcule|es[- ]tu s[ûu]r'
+            .'|are you sure|that\W?s (wrong|incorrect)|double[- ]check|recheck|recount)\b/iu',
+            $message,
+        );
     }
 
     private function cacheGet(string $key): ?string

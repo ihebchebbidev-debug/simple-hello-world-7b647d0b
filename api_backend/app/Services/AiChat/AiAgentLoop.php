@@ -23,10 +23,25 @@ use Throwable;
  */
 final class AiAgentLoop
 {
+    /**
+     * Raw JSON of every successful data-tool result from the last run().
+     * Used by the post-generation validator to check that the numbers in
+     * the reply actually came from the data.
+     *
+     * @var array<int, string>
+     */
+    private array $evidence = [];
+
     public function __construct(
         private readonly OpenRouterClient $openRouter,
         private readonly AiToolRegistry $tools,
     ) {}
+
+    /** @return array<int, string> */
+    public function lastEvidence(): array
+    {
+        return $this->evidence;
+    }
 
     /**
      * @param  array<int, array<string, mixed>>  $messages       Full transcript (system + user/assistant turns)
@@ -36,6 +51,7 @@ final class AiAgentLoop
      */
     public function run(array $messages, callable $onDelta, ?callable $onEvent = null): string
     {
+        $this->evidence = [];
         $maxIters   = max(1, (int) config('openrouter.agent.max_iterations', 4));
         $maxResBytes = max(256, (int) config('openrouter.agent.max_tool_result', 2048));
         $toolDefs   = $this->tools->definitions();
@@ -109,6 +125,7 @@ final class AiAgentLoop
                     if (($result['ok'] ?? false) === true) {
                         $roundOk++;
                         $usedTools[] = $name;
+                        $this->evidence[] = $encoded;
                     }
                 }
 
@@ -144,7 +161,7 @@ final class AiAgentLoop
         // Final round: force natural-language answer (no tools) and stream it.
         $transcript[] = [
             'role'    => 'user',
-            'content' => '[internal] Based only on the tool results above, write the final answer for the user now. Do not call any more tools. Follow the voice, precision and formatting rules from the system prompt.',
+            'content' => '[internal] Based ONLY on the tool results above, write the final answer for the user now. Do not call any more tools. Follow the voice, precision and formatting rules from the system prompt. Before you write: (1) every figure you state must appear literally in a tool result — never add, average or extrapolate numbers yourself; (2) state the scope you actually queried (plot + period) and never claim the figures cover "l\'ensemble des enregistrements" or "all records"; (3) if any result carries `_truncated`, `warnings`, `plot_match_warning` or `date_warning`, say so in one short line before the numbers.',
         ];
 
         $emitted = '';
@@ -172,19 +189,59 @@ final class AiAgentLoop
 
     }
 
-    /** @param array<string, mixed> $result */
+    /**
+     * Encode a tool result for the transcript within the byte budget.
+     *
+     * The model must NEVER receive a payload cut mid-JSON: it silently
+     * reads half a row as a whole one and reports a total that matches
+     * nothing. So we shrink list fields progressively — always leaving
+     * valid JSON — and record explicitly how many rows were dropped so the
+     * answer can disclose that the listing is partial.
+     *
+     * @param array<string, mixed> $result
+     */
     private function encodeResult(array $result, int $maxBytes): string
     {
-        $json = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        $encode = static fn (array $r): string =>
+            json_encode($r, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+
+        $json = $encode($result);
         if (mb_strlen($json) <= $maxBytes) return $json;
-        // Truncate arrays if the payload is too large.
-        foreach (['rows', 'plots', 'campaigns', 'results', 'recent', 'buckets', 'products'] as $k) {
-            if (isset($result[$k]) && is_array($result[$k]) && count($result[$k]) > 10) {
-                $result[$k] = array_slice($result[$k], 0, 10);
-                $result['_truncated'] = true;
+
+        $listKeys = ['rows', 'plots', 'campaigns', 'results', 'recent', 'buckets', 'products'];
+
+        // Step down the row cap until the whole payload fits.
+        foreach ([25, 15, 10, 6, 3, 1] as $cap) {
+            $shrunk = $result;
+            $dropped = 0;
+            foreach ($listKeys as $k) {
+                if (isset($shrunk[$k]) && is_array($shrunk[$k]) && count($shrunk[$k]) > $cap) {
+                    $dropped += count($shrunk[$k]) - $cap;
+                    $shrunk[$k] = array_slice($shrunk[$k], 0, $cap);
+                }
             }
+            if ($dropped > 0) {
+                $shrunk['_truncated'] = true;
+                $shrunk['_rows_omitted'] = $dropped;
+                $shrunk['_truncation_notice'] = "This payload was shortened: {$dropped} row(s) are not shown. Aggregate fields (counts and totals) still cover ALL rows. Do not recompute a total by adding up the rows below, and tell the user the list is partial.";
+            }
+            $json = $encode($shrunk);
+            if (mb_strlen($json) <= $maxBytes) return $json;
         }
-        $json = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
-        return mb_substr($json, 0, $maxBytes);
+
+        // Last resort: drop the lists entirely rather than emit broken JSON.
+        $minimal = $result;
+        foreach ($listKeys as $k) unset($minimal[$k]);
+        $minimal['_truncated'] = true;
+        $minimal['_truncation_notice'] = 'The detailed rows were too large to include. Only the summary fields above are available — state that the per-row detail could not be loaded rather than inventing rows.';
+        $json = $encode($minimal);
+        if (mb_strlen($json) <= $maxBytes) return $json;
+
+        // Still oversized (a single huge scalar): return valid JSON, not a slice.
+        return $encode([
+            'ok'    => (bool) ($result['ok'] ?? false),
+            'error' => 'result_too_large',
+            'note'  => 'The tool result exceeded the transcript budget and was dropped. Ask the user to narrow the period or the plot instead of guessing figures.',
+        ]);
     }
 }

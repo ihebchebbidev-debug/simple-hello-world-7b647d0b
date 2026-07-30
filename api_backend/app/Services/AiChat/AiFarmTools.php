@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services\AiChat;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 /**
  * High-level, question-shaped read-only tools.
@@ -19,6 +21,13 @@ use Illuminate\Support\Facades\Schema;
  */
 trait AiFarmTools
 {
+    /**
+     * How the last `resolvePlots()` call matched the requested label.
+     * Surfaced in `applied_filters` so the assistant can disclose a guess
+     * instead of silently answering about a different plot.
+     */
+    private ?string $plotMatchNote = null;
+
     /** @return array<int, array<string, mixed>> */
     private function farmDefinitions(): array
     {
@@ -34,7 +43,7 @@ trait AiFarmTools
                 'crop' => $crop,
             ]),
 
-            $this->fn('water_per_ha', 'Irrigation water received per hectare. Returns, per plot: total m³, m³/ha, number of irrigations, cost; plus the average m³/ha across the selected plots. Use for "quantité d\'eau/ha reçue par la parcelle X" (today, a date range, or a whole crop with exclusions).', [
+            $this->fn('water_per_ha', 'AGGREGATE ONLY. Irrigation water received per hectare. Returns, per plot: total m³, m³/ha, number of irrigations, cost; plus the average m³/ha across the selected plots. Use for "quantité d\'eau/ha reçue par la parcelle X" (today, a date range, or a whole crop with exclusions). Do NOT use this when the user asks for "le détail", "la liste", "les dates" or a per-irrigation breakdown — call irrigation_history instead (or both, and reconcile the totals).', [
                 'plot'          => $plot,
                 'crop'          => $crop,
                 'exclude_plots' => $exclude,
@@ -72,7 +81,7 @@ trait AiFarmTools
                 'limit'   => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
             ]),
 
-            $this->fn('irrigation_history', 'Individual irrigation events: date, m³, m³/ha, cost. Use for "les dates des 3 dernières irrigations".', [
+            $this->fn('irrigation_history', 'Individual irrigation events, one row each: date, m³, m³/ha, cost. Use for "les dates des 3 dernières irrigations" and for ANY request for "le détail"/"la liste" of irrigations over a period. Rows are capped by `limit`; always compare `returned_rows` with `irrigation_count` and tell the user when the list is truncated.', [
                 'plot'  => $plot,
                 'crop'  => $crop,
                 'from'  => $from,
@@ -170,6 +179,7 @@ trait AiFarmTools
 
         $plot = trim((string) ($args['plot'] ?? ''));
         $crop = trim((string) ($args['crop'] ?? ''));
+        $this->plotMatchNote = null;
 
         $applyCrop = function ($q) use ($crop) {
             if ($crop !== '') {
@@ -221,6 +231,12 @@ trait AiFarmTools
                             }
                             if ($best !== null && $bestScore >= 60.0) {
                                 $rows = [$best];
+                                $this->plotMatchNote = sprintf(
+                                    'No exact match for "%s". Answered about "%s" (fuzzy similarity %d%%). Tell the user which plot you used and ask them to confirm.',
+                                    $plot,
+                                    (string) $best->name,
+                                    (int) round($bestScore),
+                                );
                             }
                         }
                     }
@@ -275,9 +291,34 @@ trait AiFarmTools
     /** @param array<string,mixed> $args */
     private function windowFrom(array $args): array
     {
-        $from = ! empty($args['from']) ? $this->safeDate($args['from'], 'from') : null;
-        $to   = ! empty($args['to']) ? $this->safeDate($args['to'], 'to') : null;
-        return [$from, $to];
+        // NOTE: deliberately does NOT reuse safeDate(), which falls back to
+        // today's date when parsing fails. For a reporting window that
+        // fallback is dangerous: the user asks for June and silently gets a
+        // single day. Dropping the bound widens the window instead, and
+        // appliedFilters() reports the discrepancy back to the model.
+        return [
+            ! empty($args['from']) ? $this->boundOrNull($args['from'], 'from') : null,
+            ! empty($args['to']) ? $this->boundOrNull($args['to'], 'to') : null,
+        ];
+    }
+
+    private function boundOrNull(mixed $v, string $edge): ?string
+    {
+        $raw = trim((string) $v);
+        if ($raw === '') return null;
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+            try { return Carbon::parse($raw)->toDateString(); }
+            catch (Throwable) { return null; }
+        }
+
+        $parsed = $this->dates->parse($raw);
+        if ($parsed !== null) {
+            return $edge === 'to' ? $parsed['to'] : $parsed['from'];
+        }
+
+        try { return Carbon::parse($raw)->toDateString(); }
+        catch (Throwable) { return null; }
     }
 
     private function applyWindow(mixed $q, string $table, ?string $from, ?string $to): mixed
@@ -285,6 +326,63 @@ trait AiFarmTools
         if ($from !== null) $q->where($table.'.operation_date', '>=', $from);
         if ($to !== null)   $q->where($table.'.operation_date', '<=', $to);
         return $q;
+    }
+
+    /**
+     * Litre-denominated unit labels written into `unit_at_entry` by
+     * OperationPriceResolver::n(). The active water unit is a per-farm
+     * setting that can change mid-season, and the value is snapshotted on
+     * every row — so a plain SUM(water_quantity) silently adds litres to
+     * cubic metres and reports the result as m³.
+     */
+    private const LITRE_UNITS = ['l', 'lt', 'ltr', 'liter', 'liters', 'litre', 'litres'];
+
+    /** SQL expression normalising `water_quantity` to cubic metres. */
+    private static function m3Expr(string $col = 'water_quantity', string $unitCol = 'unit_at_entry'): string
+    {
+        $list = "'".implode("','", self::LITRE_UNITS)."'";
+
+        return "CASE WHEN LOWER(TRIM(COALESCE($unitCol, 'm3'))) IN ($list)
+                     THEN ($col) / 1000.0 ELSE ($col) END";
+    }
+
+    /** PHP-side twin of {@see m3Expr} for single rows. */
+    private static function toM3(float $qty, ?string $unit): float
+    {
+        return in_array(mb_strtolower(trim((string) ($unit ?? 'm3'))), self::LITRE_UNITS, true)
+            ? $qty / 1000.0
+            : $qty;
+    }
+
+    /**
+     * Echo back exactly what the query filtered on, so the assistant can
+     * state its scope instead of implying it read every record. Without
+     * this the model confidently claims exhaustiveness it cannot verify.
+     *
+     * @param  array<string,mixed>   $args
+     * @param  array<string,string>  $names  plot_id => resolved name
+     * @return array<string,mixed>
+     */
+    private function appliedFilters(array $args, ?string $from, ?string $to, array $names): array
+    {
+        $out = [
+            'requested_plot'  => $args['plot'] ?? ($args['crop'] ?? null),
+            'resolved_plots'  => array_values($names),
+            'date_from'       => $from,
+            'date_to'         => $to,
+            'bounds'          => 'inclusive on both ends (operation_date >= date_from AND <= date_to)',
+            'campaign_scope'  => 'none — every campaign is included. The Reports screen filters by campaign, so a figure shown there can legitimately differ.',
+        ];
+
+        if ($this->plotMatchNote !== null) {
+            $out['plot_match_warning'] = $this->plotMatchNote;
+        }
+
+        if (($args['from'] ?? null) !== null && $from === null) {
+            $out['date_warning'] = 'The requested start date could not be parsed and was ignored — the window is wider than the user asked for.';
+        }
+
+        return $out;
     }
 
     private static function ha(object $plot): float
@@ -335,8 +433,17 @@ trait AiFarmTools
         [$from, $to] = $this->windowFrom($args);
 
         $ids = array_map(static fn ($p) => $p->id, $plots);
+        $m3 = self::m3Expr();
         $q = DB::table('irrigation_operations')
-            ->selectRaw('plot_id, COALESCE(SUM(water_quantity),0) AS qty, COUNT(*) AS n, COALESCE(SUM(water_quantity * price_at_entry),0) AS cost')
+            ->selectRaw("plot_id,
+                COALESCE(SUM($m3),0) AS qty,
+                COUNT(*) AS n,
+                COALESCE(SUM(($m3) * price_at_entry),0) AS cost,
+                COUNT(*) FILTER (WHERE water_quantity IS NULL) AS missing_qty,
+                COUNT(*) FILTER (WHERE price_at_entry IS NULL) AS missing_price,
+                COUNT(DISTINCT LOWER(TRIM(COALESCE(unit_at_entry, 'm3')))) AS unit_variants,
+                MIN(operation_date) AS first_date,
+                MAX(operation_date) AS last_date")
             ->whereIn('plot_id', $ids)
             ->groupBy('plot_id');
         $this->applyWindow($q, 'irrigation_operations', $from, $to);
@@ -350,23 +457,43 @@ trait AiFarmTools
             $ha  = self::ha($p);
             $perHa = self::perHa($qty, $ha);
             if ($perHa !== null) { $sumPerHa += $perHa; $withArea++; }
-            $rows[] = [
+            $row = [
                 'plot'            => $names[(string) $p->id],
                 'surface_area_ha' => $ha,
                 'irrigations'     => (int) ($a->n ?? 0),
                 'total_m3'        => round($qty, 2),
                 'm3_per_ha'       => $perHa,
                 'cost_tnd'        => round((float) ($a->cost ?? 0), 2),
+                'first_date'      => $a->first_date ?? null,
+                'last_date'       => $a->last_date ?? null,
             ];
+
+            // Data-quality flags. The model MUST relay these instead of
+            // presenting a partial total as an exhaustive one.
+            $warnings = [];
+            if ((int) ($a->missing_qty ?? 0) > 0) {
+                $warnings[] = (int) $a->missing_qty.' irrigation(s) have no recorded volume and count as 0 m³.';
+            }
+            if ((int) ($a->missing_price ?? 0) > 0) {
+                $warnings[] = (int) $a->missing_price.' irrigation(s) have no price snapshot; cost is understated.';
+            }
+            if ((int) ($a->unit_variants ?? 0) > 1) {
+                $warnings[] = 'Mixed source units on this plot; volumes were converted to m³ before summing.';
+            }
+            if ($warnings !== []) $row['warnings'] = $warnings;
+
+            $rows[] = $row;
         }
 
         return [
-            'window'           => ['from' => $from, 'to' => $to],
+            'result_kind'      => 'aggregate',
+            'applied_filters'  => $this->appliedFilters($args, $from, $to, $names),
             'unit'             => 'm3/ha',
             'plots'            => array_slice($rows, 0, 40),
             'plot_count'       => count($rows),
             'average_m3_per_ha' => $withArea > 0 ? round($sumPerHa / $withArea, 2) : null,
             'excluded'         => array_values((array) ($args['exclude_plots'] ?? [])),
+            'reconcile_hint'   => 'These are summed totals, not a listing. If the user asks for the detail, disputes the number, or quotes a different figure, call irrigation_history with the SAME plot and window and show the individual rows.',
         ];
     }
 
@@ -582,26 +709,37 @@ trait AiFarmTools
         $this->applyWindow($q, 'irrigation_operations', $from, $to);
 
         $total = (clone $q)->count();
+        $m3 = self::m3Expr();
+        $windowTotal = (float) ((clone $q)->selectRaw("COALESCE(SUM($m3),0) AS t")->value('t') ?? 0);
         $order = strtolower((string) ($args['order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
-        $limit = max(1, min(40, (int) ($args['limit'] ?? 10)));
+        // A "détail du 15 au 30 juin" question must not silently drop rows,
+        // so an explicit window defaults to the full cap rather than 10.
+        $default = ($from !== null || $to !== null) ? 40 : 10;
+        $limit = max(1, min(40, (int) ($args['limit'] ?? $default)));
         $raw = $q->orderBy('operation_date', $order)->limit($limit)->get();
 
         $rows = [];
         foreach ($raw as $r) {
             $ha = $areas[(string) $r->plot_id] ?? 0.0;
+            $qtyM3 = self::toM3((float) $r->water_quantity, $r->unit_at_entry);
             $rows[] = [
                 'date'      => (string) $r->operation_date,
                 'plot'      => $names[(string) $r->plot_id] ?? null,
-                'quantity'  => round((float) $r->water_quantity, 2),
-                'unit'      => $r->unit_at_entry,
-                'per_ha'    => self::perHa((float) $r->water_quantity, $ha),
-                'cost_tnd'  => round((float) $r->water_quantity * (float) $r->price_at_entry, 2),
+                'quantity_m3'    => round($qtyM3, 2),
+                'recorded_value' => round((float) $r->water_quantity, 2),
+                'recorded_unit'  => $r->unit_at_entry,
+                'per_ha'         => self::perHa($qtyM3, $ha),
+                'cost_tnd'       => round($qtyM3 * (float) $r->price_at_entry, 2),
             ];
         }
 
         return [
-            'window'           => ['from' => $from, 'to' => $to],
+            'result_kind'      => 'listing',
+            'applied_filters'  => $this->appliedFilters($args, $from, $to, $names),
             'irrigation_count' => $total,
+            'returned_rows'    => count($rows),
+            'truncated'        => $total > count($rows),
+            'window_total_m3'  => round($windowTotal, 2),
             'order'            => $order,
             'rows'             => $rows,
         ];
@@ -670,7 +808,9 @@ trait AiFarmTools
         $want = (string) ($args['type'] ?? 'all');
 
         $costExpr = [
-            'irrigation'    => 'water_quantity * price_at_entry',
+            // Water volumes must be converted to the priced unit (m³) first,
+            // otherwise litre-denominated rows inflate the cost 1000×.
+            'irrigation'    => '('.self::m3Expr().') * price_at_entry',
             'fertilization' => 'quantity_applied * price_at_entry',
             'phytosanitary' => 'quantity_applied * price_at_entry',
             'harvest'       => 'num_workers * days_worked * daily_rate_at_entry',
