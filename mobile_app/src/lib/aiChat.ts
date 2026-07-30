@@ -26,6 +26,55 @@ export type AiChatStreamCallbacks = {
 
 export type AiChatResponse = { reply: string; conversationId: string | null };
 
+export type AiChatFeedbackPayload = {
+  messageId: string;
+  rating: 'up' | 'down';
+  conversationId?: string | null;
+  locale?: string;
+  question?: string;
+  answer: string;
+};
+
+function parseErrorMessage(json: unknown, fallback: string): string {
+  if (json && typeof json === 'object' && 'error' in json) {
+    const err = (json as Record<string, unknown>).error;
+    if (err && typeof err === 'object' && 'message' in err && typeof (err as Record<string, unknown>).message === 'string') {
+      return (err as Record<string, any>).message;
+    }
+  }
+  if (json && typeof json === 'object' && 'message' in json && typeof (json as Record<string, unknown>).message === 'string') {
+    return (json as Record<string, any>).message;
+  }
+  return fallback;
+}
+
+export async function submitAiChatFeedback(payload: AiChatFeedbackPayload): Promise<void> {
+  const token = getAuthToken();
+  const res = await fetch(`${BACKEND_URL}/api/ai/feedback`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      message_id: payload.messageId,
+      rating: payload.rating,
+      conversation_id: payload.conversationId ?? undefined,
+      locale: payload.locale,
+      question: payload.question,
+      answer: payload.answer,
+    }),
+  });
+
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw Object.assign(new Error(parseErrorMessage(json, 'Feedback failed')), {
+      status: res.status,
+    });
+  }
+}
+
 export function cleanAssistantText(raw: string): string {
   if (raw.trim() === '') return raw;
 

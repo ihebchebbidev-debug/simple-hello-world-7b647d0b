@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import OutboxStatusBar from '@/components/OutboxStatusBar';
 import AiChatSheet from '@/features/ai-chat/AiChatSheet';
+import { AiChatProvider } from '@/features/ai-chat/AiChatProvider';
 
 const MobileShell = () => {
   const { t } = useTranslation();
@@ -24,49 +25,51 @@ const MobileShell = () => {
 
   return (
     <ProtectedRoute>
-      <div className="flex flex-col min-h-screen bg-background text-foreground">
-        <OutboxStatusBar />
-        <button
-          type="button"
-          onClick={() => setAiOpen(true)}
-          aria-label={t('aiChat.open')}
-          title={t('aiChat.open')}
-          className="fixed top-3 right-3 z-40 inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--primary-glow))]/40 bg-[hsl(var(--surface-container))]/95 backdrop-blur px-3 py-1.5 text-[hsl(var(--primary-glow))] shadow-md active:scale-95 transition-transform"
-          style={{ top: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
-        >
-          <Sparkles className="h-4 w-4" strokeWidth={2} />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">AI</span>
-        </button>
-        <main className="flex-1"><Outlet /></main>
-        <nav
-          className="fixed bottom-0 inset-x-0 h-16 border-t border-border bg-[hsl(var(--surface-container))] flex"
-          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-        >
-          {tabs.map(({ to, label, Icon, badge, danger }) => (
-            <NavLink key={to} to={to}
-              className={({ isActive }) =>
-                cn('flex-1 flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors relative',
-                  isActive ? 'text-[hsl(var(--primary-glow))]' : 'text-muted-foreground')
-              }>
-              <Icon className="h-5 w-5" />
-              <span>{label}</span>
-              {badge > 0 && (
-                <span
-                  className={cn(
-                    'absolute top-2 right-1/4 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center',
-                    danger
-                      ? 'bg-[hsl(var(--accent-danger))] text-white'
-                      : 'bg-[hsl(var(--accent-warning))] text-black',
-                  )}
-                >
-                  {badge}
-                </span>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-        <AiChatSheet open={aiOpen} onClose={() => setAiOpen(false)} />
-      </div>
+      <AiChatProvider>
+        <div className="flex flex-col min-h-screen bg-background text-foreground">
+          <OutboxStatusBar />
+          <button
+            type="button"
+            onClick={() => setAiOpen(true)}
+            aria-label={t('aiChat.open')}
+            title={t('aiChat.open')}
+            className="fixed top-3 right-3 z-40 inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--primary-glow))]/40 bg-[hsl(var(--surface-container))]/95 backdrop-blur px-3 py-1.5 text-[hsl(var(--primary-glow))] shadow-md active:scale-95 transition-transform"
+            style={{ top: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
+          >
+            <Sparkles className="h-4 w-4" strokeWidth={2} />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">AI</span>
+          </button>
+          <main className="flex-1"><Outlet /></main>
+          <nav
+            className="fixed bottom-0 inset-x-0 h-16 border-t border-border bg-[hsl(var(--surface-container))] flex"
+            style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+          >
+            {tabs.map(({ to, label, Icon, badge, danger }) => (
+              <NavLink key={to} to={to}
+                className={({ isActive }) =>
+                  cn('flex-1 flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors relative',
+                    isActive ? 'text-[hsl(var(--primary-glow))]' : 'text-muted-foreground')
+                }>
+                <Icon className="h-5 w-5" />
+                <span>{label}</span>
+                {badge > 0 && (
+                  <span
+                    className={cn(
+                      'absolute top-2 right-1/4 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center',
+                      danger
+                        ? 'bg-[hsl(var(--accent-danger))] text-white'
+                        : 'bg-[hsl(var(--accent-warning))] text-black',
+                    )}
+                  >
+                    {badge}
+                  </span>
+                )}
+              </NavLink>
+            ))}
+          </nav>
+          <AiChatSheet open={aiOpen} onClose={() => setAiOpen(false)} />
+        </div>
+      </AiChatProvider>
     </ProtectedRoute>
   );
 };
