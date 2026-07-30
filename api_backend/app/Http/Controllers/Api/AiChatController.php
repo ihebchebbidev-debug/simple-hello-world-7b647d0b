@@ -87,8 +87,13 @@ final class AiChatController extends Controller
                 ? (string) $userId
                 : 'anon:'.($data['client_id'] ?? substr(sha1($request->ip().'|'.$request->userAgent()), 0, 24));
 
+            // The column is varchar(64); a UUID user id + a UUID message id would
+            // overflow it and fail the insert, so store a fixed-length digest.
+            $clientKey = 'k_'.hash('sha256', $subjectKey.'|'.$data['message_id']);
+
             AiFeedback::updateOrCreate(
-                ['user_id' => $userId, 'message_client_id' => $subjectKey.'|'.$data['message_id']],
+                ['user_id' => $userId, 'message_client_id' => substr($clientKey, 0, 64)],
+                [
                 [
                     'conversation_id' => $data['conversation_id'] ?? null,
                     'rating'          => $data['rating'],

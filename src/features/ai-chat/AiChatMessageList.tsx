@@ -9,7 +9,9 @@ import {
   FileBarChart2,
   Leaf,
   Lightbulb,
+  Loader2,
   RefreshCw,
+
   ThumbsUp,
   ThumbsDown,
   XCircle,
@@ -99,13 +101,48 @@ function FeedbackButtons({
   onRate,
 }: {
   message: AiChatMessage;
-  onRate: (rating: AiChatRating) => void;
+  onRate: (rating: AiChatRating) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const rated = message.rating;
+  const [pending, setPending] = useState<AiChatRating | null>(null);
+  const [result, setResult] = useState<{ rating: AiChatRating; ok: boolean } | null>(null);
+
+  const handle = async (rating: AiChatRating) => {
+    if (pending) return;
+    setPending(rating);
+    setResult(null);
+    try {
+      await onRate(rating);
+      setResult({ rating, ok: true });
+    } catch {
+      setResult({ rating, ok: false });
+    } finally {
+      setPending(null);
+      window.setTimeout(() => setResult(null), 2000);
+    }
+  };
 
   const base =
-    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[hsl(var(--surface-container-highest))] hover:text-foreground disabled:cursor-default';
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-[hsl(var(--surface-container-highest))] hover:text-foreground disabled:cursor-default disabled:opacity-70';
+
+  const renderIcon = (rating: AiChatRating, Icon: typeof ThumbsUp) => {
+    if (pending === rating) return <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />;
+    if (result?.rating === rating) {
+      return result.ok ? (
+        <Check className="h-3.5 w-3.5" aria-hidden />
+      ) : (
+        <XCircle className="h-3.5 w-3.5" aria-hidden />
+      );
+    }
+    return <Icon className="h-3.5 w-3.5" aria-hidden />;
+  };
+
+  const stateClass = (rating: AiChatRating, activeClass: string) => {
+    if (result?.rating === rating && !result.ok) return 'text-destructive';
+    if (result?.rating === rating && result.ok) return activeClass;
+    return rated === rating ? activeClass : '';
+  };
 
   return (
     <div className="flex items-center gap-0.5" role="group" aria-label={t('aiChat.feedback.label')}>
@@ -113,23 +150,37 @@ function FeedbackButtons({
         type="button"
         aria-label={t('aiChat.feedback.up')}
         aria-pressed={rated === 'up'}
-        onClick={() => onRate('up')}
-        className={`${base} ${rated === 'up' ? 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary-glow))]' : ''}`}
+        aria-busy={pending === 'up'}
+        disabled={!!pending}
+        onClick={() => void handle('up')}
+        className={`${base} ${stateClass('up', 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary-glow))]')} active:scale-90`}
       >
-        <ThumbsUp className="h-3.5 w-3.5" aria-hidden />
+        {renderIcon('up', ThumbsUp)}
       </button>
       <button
         type="button"
         aria-label={t('aiChat.feedback.down')}
         aria-pressed={rated === 'down'}
-        onClick={() => onRate('down')}
-        className={`${base} ${rated === 'down' ? 'bg-destructive/15 text-destructive' : ''}`}
+        aria-busy={pending === 'down'}
+        disabled={!!pending}
+        onClick={() => void handle('down')}
+        className={`${base} ${stateClass('down', 'bg-destructive/15 text-destructive')} active:scale-90`}
       >
-        <ThumbsDown className="h-3.5 w-3.5" aria-hidden />
+        {renderIcon('down', ThumbsDown)}
       </button>
+      <span className="sr-only" role="status">
+        {pending
+          ? t('aiChat.feedback.sending', { defaultValue: 'Sending feedback…' })
+          : result
+            ? result.ok
+              ? t('aiChat.feedback.thanks')
+              : t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' })
+            : ''}
+      </span>
     </div>
   );
 }
+
 
 function formatTime(ts: number, locale: string): string {
   try {
@@ -147,7 +198,7 @@ function MessageBubble({
 }: {
   message: AiChatMessage;
   streaming?: boolean;
-  onRate?: (rating: AiChatRating) => void;
+  onRate?: (rating: AiChatRating) => void | Promise<void>;
   onRegenerate?: () => void;
 }) {
   const { i18n, t } = useTranslation();
@@ -227,7 +278,7 @@ type Props = {
   messages: AiChatMessage[];
   isSending: boolean;
   onSuggestion: (text: string) => void;
-  onRate?: (messageId: string, rating: AiChatRating) => void;
+  onRate?: (messageId: string, rating: AiChatRating) => void | Promise<void>;
   onRegenerate?: () => void;
 };
 

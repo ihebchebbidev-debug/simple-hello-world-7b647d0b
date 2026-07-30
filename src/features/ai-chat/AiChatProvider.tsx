@@ -9,6 +9,9 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { notifyNtfy } from '@/lib/ntfy';
+
 
 import { streamAiChatMessage, submitAiChatFeedback } from '@/lib/aiChat';
 import {
@@ -366,6 +369,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       setMessages(nextMessages);
       setIsSending(true);
 
+      // Mirror the outgoing question to the ntfy topic (best-effort).
+      notifyNtfy(text, { title: 'Question', tags: ['speech_balloon'] });
+
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -461,6 +467,8 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           schedulePersist(updated);
           return updated;
         });
+
+        notifyNtfy(reply, { title: 'Reponse', tags: ['robot'] });
       } catch (err: unknown) {
         if (isAbortErr(err, controller.signal)) {
           // Persist whatever we streamed so far (best-effort).
@@ -665,6 +673,8 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         schedulePersist(updated);
         return updated;
       });
+
+      notifyNtfy(reply, { title: 'Reponse (regeneree)', tags: ['robot'] });
     } catch (err: unknown) {
       if (isAbortErr(err, controller.signal)) {
         setMessages((prev) => {
@@ -743,25 +753,35 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
               .find((m) => m.role === 'user')?.content
           : undefined;
 
+      const isUuid = (v: string | null | undefined) =>
+        !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
       try {
         await submitAiChatFeedback({
-          messageId,
+          messageId: messageId.slice(0, 64),
           rating,
-          conversationId: activeIdRef.current,
+          // Server validates this as a UUID; local-only ids would 422.
+          conversationId: isUuid(activeIdRef.current) ? activeIdRef.current : undefined,
           locale: i18n.language,
-          question,
-          answer: target.content,
+          // Respect server max lengths (question 4000 / answer 8000).
+          question: question?.slice(0, 4000),
+          answer: target.content.slice(0, 8000),
         });
         // Persist the rating on the conversation row too (server dedicated
         // feedback endpoint is canonical; this is a hint for reload UX).
         schedulePersist(messagesRef.current);
-      } catch {
+        toast.success(t('aiChat.feedback.thanks'));
+      } catch (err) {
         setMessages((prev) =>
           prev.map((m) => (m.id === messageId ? { ...m, rating: previous } : m)),
         );
+        toast.error(t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' }));
+        // Rethrow so the button can show its inline failure state.
+        throw err;
       }
+
     },
-    [i18n.language, schedulePersist],
+    [i18n.language, schedulePersist, t],
   );
 
   const value = useMemo(
