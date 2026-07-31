@@ -1,0 +1,1 @@
+import{U as o}from"./index-cWUah4RT.js";import{O as t}from"./OperationFormPage-Ce9XCHOY.js";import"./PageHeader-CHuOKtFG.js";import"./Skeleton-o5Ljv3p-.js";import"./useReferenceData-BChyRnFV.js";import"./wifi-off-p8T-dzJw.js";import"./icon-harvest-DDaKe9zU.js";const n=()=>o.jsx(t,{kind:"phytosanitary"});export{n as default};

@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import AiLauncherButton from '@/features/ai-chat/AiLauncherButton';
 
-interface Props { title: string; icon?: ReactNode; right?: ReactNode; onBack?: () => void; showBack?: boolean }
+interface Props { title: string; icon?: ReactNode; right?: ReactNode; onBack?: () => void; showBack?: boolean; showAi?: boolean }
 
-const PageHeader = ({ title, icon, right, onBack, showBack = true }: Props) => {
+const PageHeader = ({ title, icon, right, onBack, showBack = true, showAi = true }: Props) => {
   const navigate = useNavigate();
   return (
     <div className="flex items-center gap-3 px-4 pt-5 pb-4">
@@ -21,6 +22,7 @@ const PageHeader = ({ title, icon, right, onBack, showBack = true }: Props) => {
       {icon && <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-[hsl(var(--surface-container-high))]">{icon}</div>}
       <h1 className="text-lg font-semibold text-foreground flex-1 truncate">{title}</h1>
       {right}
+      {showAi && <AiLauncherButton />}
     </div>
   );
 };

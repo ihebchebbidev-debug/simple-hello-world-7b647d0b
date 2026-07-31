@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { useReferenceData } from '@/hooks/useReferenceData';
 import NetworkBadge from '@/components/NetworkBadge';
+import AiLauncherButton from '@/features/ai-chat/AiLauncherButton';
 import Skeleton from '@/components/Skeleton';
 import logoIcon from '@/assets/logo-icon.png';
 import iconIrrigation from '@/assets/icons/icon-irrigation.png';
@@ -46,6 +47,7 @@ const HomePage = () => {
             </div>
             <div className="flex items-center gap-2">
               <NetworkBadge online={online} />
+              <AiLauncherButton />
               <button onClick={() => navigate('/settings')} className="btn-ghost h-9 w-9 p-0 flex items-center justify-center">
                 <Settings className="h-5 w-5" />
               </button>

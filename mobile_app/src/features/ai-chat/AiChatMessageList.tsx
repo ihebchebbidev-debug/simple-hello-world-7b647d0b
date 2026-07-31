@@ -306,7 +306,7 @@ export default function AiChatMessageList({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-3 py-4 sm:px-4 [-webkit-overflow-scrolling:touch]"
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-3 py-4 sm:px-4 [-webkit-overflow-scrolling:touch]"
       >
         {messages.length === 0 && !isSending && (
           <div className="mx-auto flex max-w-sm flex-col items-center text-center animate-fade-in pt-4 sm:pt-10">

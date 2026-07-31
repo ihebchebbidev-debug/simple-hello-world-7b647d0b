@@ -28,6 +28,9 @@ const MAX_HISTORY_TURNS = 20;
 const PERSIST_DEBOUNCE_MS = 500;
 
 type AiChatContextValue = {
+  isOpen: boolean;
+  openChat: () => void;
+  closeChat: () => void;
   messages: AiChatMessage[];
   isSending: boolean;
   sendMessage: (text: string) => Promise<void>;
@@ -89,6 +92,10 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
   const [isSending, setIsSending] = useState(false);
   const [history, setHistory] = useState<AiConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+
+  const openChat = useCallback(() => setIsOpen(true), []);
+  const closeChat = useCallback(() => setIsOpen(false), []);
 
   const abortRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
@@ -634,6 +641,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
+      isOpen,
+      openChat,
+      closeChat,
       messages,
       isSending,
       sendMessage,
@@ -649,10 +659,14 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       selectConversation,
       deleteConversation,
     }),
-    [activeId, deleteConversation, history, historyAvailable, historyLoading, isSending, messages, rateMessage, refreshHistory, selectConversation, sendMessage, startNewConversation, stopStreaming, regenerateLastAnswer],
+    [isOpen, openChat, closeChat, activeId, deleteConversation, history, historyAvailable, historyLoading, isSending, messages, rateMessage, refreshHistory, selectConversation, sendMessage, startNewConversation, stopStreaming, regenerateLastAnswer],
   );
 
   return <AiChatContext.Provider value={value}>{children}</AiChatContext.Provider>;
+}
+
+export function useAiChatOptional(): AiChatContextValue | null {
+  return useContext(AiChatContext);
 }
 
 export function useAiChat(): AiChatContextValue {

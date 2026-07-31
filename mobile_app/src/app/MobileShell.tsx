@@ -1,18 +1,21 @@
-import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { Home, RefreshCw, Settings, Sparkles } from 'lucide-react';
+import { Home, RefreshCw, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { cn } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import OutboxStatusBar from '@/components/OutboxStatusBar';
 import AiChatSheet from '@/features/ai-chat/AiChatSheet';
-import { AiChatProvider } from '@/features/ai-chat/AiChatProvider';
+import { AiChatProvider, useAiChat } from '@/features/ai-chat/AiChatProvider';
+
+const ShellChat = () => {
+  const { isOpen, closeChat } = useAiChat();
+  return <AiChatSheet open={isOpen} onClose={closeChat} />;
+};
 
 const MobileShell = () => {
   const { t } = useTranslation();
   const { pending, syncing, failed } = useOfflineQueue();
-  const [aiOpen, setAiOpen] = useState(false);
   const pendingCount = pending.length + syncing.length;
   const failedCount = failed.length;
   const tabBadge = pendingCount + failedCount;
@@ -26,48 +29,61 @@ const MobileShell = () => {
   return (
     <ProtectedRoute>
       <AiChatProvider>
-        <div className="flex flex-col min-h-screen bg-background text-foreground">
+        <div className="flex min-h-[100dvh] flex-col bg-background text-foreground">
           <OutboxStatusBar />
-          <button
-            type="button"
-            onClick={() => setAiOpen(true)}
-            aria-label={t('aiChat.open')}
-            title={t('aiChat.open')}
-            className="fixed top-3 right-3 z-40 inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--primary-glow))]/40 bg-[hsl(var(--surface-container))]/95 backdrop-blur px-3 py-1.5 text-[hsl(var(--primary-glow))] shadow-md active:scale-95 transition-transform"
-            style={{ top: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
-          >
-            <Sparkles className="h-4 w-4" strokeWidth={2} />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">AI</span>
-          </button>
-          <main className="flex-1"><Outlet /></main>
+          <main className="flex-1">
+            <Outlet />
+          </main>
+
           <nav
-            className="fixed bottom-0 inset-x-0 h-16 border-t border-border bg-[hsl(var(--surface-container))] flex"
+            className="fixed inset-x-0 bottom-0 z-30 border-t border-border/70 bg-[hsl(var(--surface-container))]/95 backdrop-blur-md"
             style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+            aria-label={t('nav.home')}
           >
-            {tabs.map(({ to, label, Icon, badge, danger }) => (
-              <NavLink key={to} to={to}
-                className={({ isActive }) =>
-                  cn('flex-1 flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors relative',
-                    isActive ? 'text-[hsl(var(--primary-glow))]' : 'text-muted-foreground')
-                }>
-                <Icon className="h-5 w-5" />
-                <span>{label}</span>
-                {badge > 0 && (
-                  <span
-                    className={cn(
-                      'absolute top-2 right-1/4 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center',
-                      danger
-                        ? 'bg-[hsl(var(--accent-danger))] text-white'
-                        : 'bg-[hsl(var(--accent-warning))] text-black',
-                    )}
+            <ul className="mx-auto flex w-full max-w-md items-stretch px-2 pt-1.5 pb-1">
+              {tabs.map(({ to, label, Icon, badge, danger }) => (
+                <li key={to} className="flex-1">
+                  <NavLink
+                    to={to}
+                    className={({ isActive }) =>
+                      cn(
+                        'group relative flex min-h-[56px] touch-manipulation select-none flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-[11px] font-medium transition-colors active:scale-[0.97]',
+                        isActive ? 'text-[hsl(var(--primary-glow))]' : 'text-muted-foreground',
+                      )
+                    }
                   >
-                    {badge}
-                  </span>
-                )}
-              </NavLink>
-            ))}
+                    {({ isActive }) => (
+                      <>
+                        <span
+                          className={cn(
+                            'relative flex h-7 w-14 items-center justify-center rounded-full transition-colors',
+                            isActive && 'bg-[hsl(var(--primary)/0.16)]',
+                          )}
+                        >
+                          <Icon className="h-5 w-5" strokeWidth={isActive ? 2.4 : 2} aria-hidden />
+                          {badge > 0 && (
+                            <span
+                              className={cn(
+                                'absolute -right-0.5 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none',
+                                danger
+                                  ? 'bg-[hsl(var(--accent-danger))] text-white'
+                                  : 'bg-[hsl(var(--accent-warning))] text-black',
+                              )}
+                            >
+                              {badge > 99 ? '99+' : badge}
+                            </span>
+                          )}
+                        </span>
+                        <span className="max-w-full truncate leading-none">{label}</span>
+                      </>
+                    )}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
           </nav>
-          <AiChatSheet open={aiOpen} onClose={() => setAiOpen(false)} />
+
+          <ShellChat />
         </div>
       </AiChatProvider>
     </ProtectedRoute>
