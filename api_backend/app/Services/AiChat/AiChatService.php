@@ -12,6 +12,23 @@ use Illuminate\Support\Str;
 
 final class AiChatService
 {
+    /**
+     * Tool-result JSON pre-fetched for the current turn (see
+     * {@see prefetchEvidenceMessage}). Fed to the self-check so verified
+     * figures are never flagged as hallucinated.
+     *
+     * @var array<int, string>
+     */
+    private array $lastPrefetchEvidence = [];
+
+    /**
+     * Structured record of the tools pre-fetched for the current turn.
+     * Feeds the deterministic verification footer.
+     *
+     * @var array<int, array{name: string, args: array<string, mixed>, result: array<string, mixed>}>
+     */
+    private array $lastPrefetchCalls = [];
+
     public function __construct(
         private readonly AiContextBuilder $contextBuilder,
         private readonly OpenRouterClient $openRouter,
@@ -20,6 +37,8 @@ final class AiChatService
         private readonly TokenBudget $budget,
         private readonly AiAgentLoop $agent,
         private readonly AiToolRegistry $toolRegistry,
+        private readonly AiQuestionPlanner $planner = new AiQuestionPlanner(),
+        private readonly EvidenceFooter $footer = new EvidenceFooter(),
     ) {}
 
     /**
@@ -75,10 +94,15 @@ final class AiChatService
         }
         $this->recordUsage($subjectId, $payload);
 
-        $final = $this->selfCheck($reply, $messages, $locale, $payload);
+        $evidence = array_merge(
+            $agentEnabled ? $this->agent->lastEvidence() : [],
+            $this->lastPrefetchEvidence,
+        );
+        $final = $this->selfCheck($reply, $messages, $locale, $payload, $evidence);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
         }
+        $final['reply'] .= $this->evidenceFooter($agentEnabled, $locale, $final['reply']);
         $this->cachePut($earlyKey, $final['reply']);
 
         return [
@@ -153,10 +177,23 @@ final class AiChatService
 
         $this->recordUsage($subjectId, $payload);
 
-        $evidence = $agentEnabled ? $this->agent->lastEvidence() : [];
+        $evidence = array_merge(
+            $agentEnabled ? $this->agent->lastEvidence() : [],
+            $this->lastPrefetchEvidence,
+        );
         $final = $this->selfCheck($streamed, $messages, $locale, $payload, $evidence);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
+        }
+
+        $footer = $this->evidenceFooter($agentEnabled, $locale, $final['reply']);
+        if ($footer !== '') {
+            $final['reply'] .= $footer;
+            // Revised replies are re-sent whole through the `revise` event, so
+            // only the un-revised (already streamed) case needs the delta.
+            if (! $final['revised']) {
+                $onDelta($footer);
+            }
         }
         $this->cachePut($earlyKey, $final['reply']);
 
@@ -167,6 +204,34 @@ final class AiChatService
             'violations'      => $final['violations'],
             'cached'          => false,
         ];
+    }
+
+    /**
+     * Deterministic provenance block appended to every data-backed answer:
+     * the metric, the plot/scope and the exact date window each figure came
+     * from. Built from the tool calls that actually ran this turn, never from
+     * the model's own words, so the user can verify an answer at a glance.
+     */
+    private function evidenceFooter(bool $agentEnabled, string $locale, string $reply): string
+    {
+        try {
+            $calls = array_merge(
+                $agentEnabled ? $this->agent->lastCalls() : [],
+                $this->lastPrefetchCalls,
+            );
+            if ($calls === []) {
+                return '';
+            }
+            $block = $this->footer->build($calls, $locale);
+            if ($block === '' || str_contains($reply, '**Vérification**') || str_contains($reply, '**Verification**')) {
+                return '';
+            }
+
+            return $block;
+        } catch (\Throwable $e) {
+            Log::warning('ai.chat.evidence_footer_failed', ['message' => $e->getMessage()]);
+            return '';
+        }
     }
 
     /**
@@ -494,11 +559,110 @@ INSTR;
             $system = 'You are Flehty Assistant. Live data is temporarily unavailable; answer from general knowledge and ask the user for specifics if needed.';
         }
 
+        $prefetch = $this->prefetchEvidenceMessage($normalised, $locale);
+
         return array_merge(
             [['role' => 'system', 'content' => $system]],
+            $prefetch !== null ? [$prefetch] : [],
             $normalised,
+            [$this->languageGuardMessage($normalised, $locale)],
         );
     }
+
+    /**
+     * Last-position language pin. A rule buried in a long system prompt is
+     * routinely ignored by small models; the same rule as the final message
+     * — right before generation — is not. Target language is resolved with
+     * the very detector the self-check uses afterwards.
+     *
+     * @param  array<int, array{role: string, content: string}>  $normalised
+     * @return array{role: string, content: string}
+     */
+    private function languageGuardMessage(array $normalised, string $locale): array
+    {
+        $lang = $this->validator->targetLanguage($this->lastUserMessage($normalised), $locale);
+
+        $content = $lang === 'fr'
+            ? "RÈGLE ABSOLUE DE LANGUE : rédige TOUTE la réponse en français — titres, puces, libellés d'unités et commentaires compris. "
+                ."Aucun mot d'anglais, aucun mélange de langues. Les noms de parcelles et de produits restent tels quels. "
+                ."N'ajoute pas toi-même de bloc « Vérification » : il est généré automatiquement après ta réponse."
+            : "ABSOLUTE LANGUAGE RULE: write the ENTIRE answer in English — headings, bullets, unit labels and comments included. "
+                ."No language mixing. Keep plot and product names exactly as stored. "
+                ."Do not write your own \"Verification\" block: it is appended automatically after your answer.";
+
+        return ['role' => 'system', 'content' => $content];
+    }
+
+    /**
+     * Deterministic pre-fetch. Free-tier models frequently skip tool-calling
+     * (and the tool-less fallback path has no data at all), which is what
+     * produced "Cette information n'est pas dans l'instantané actuel" for
+     * plain lookups. {@see AiQuestionPlanner} maps the question to the tools
+     * that answer it, we run them here, and the JSON lands in the prompt
+     * BEFORE the model writes anything. The agent may still call more tools.
+     *
+     * @param  array<int, array{role: string, content: string}>  $normalised
+     * @return array{role: string, content: string}|null
+     */
+    private function prefetchEvidenceMessage(array $normalised, string $locale): ?array
+    {
+        $this->lastPrefetchEvidence = [];
+        $this->lastPrefetchCalls = [];
+
+        try {
+            $calls = $this->planner->plan($normalised);
+        } catch (\Throwable $e) {
+            \Log::warning('ai.prefetch.plan_failed', ['error' => $e->getMessage()]);
+            return null;
+        }
+        if ($calls === []) {
+            return null;
+        }
+
+        $blocks = [];
+        foreach ($calls as $call) {
+            try {
+                $result = $this->toolRegistry->call($call['name'], $call['args']);
+            } catch (\Throwable $e) {
+                \Log::warning('ai.prefetch.tool_failed', ['tool' => $call['name'], 'error' => $e->getMessage()]);
+                continue;
+            }
+
+            $json = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (! is_string($json)) {
+                continue;
+            }
+            // Same cap the agent loop applies to a tool result.
+            $max = (int) config('openrouter.agent.max_tool_result', 6000);
+            if ($max > 0 && strlen($json) > $max) {
+                $json = substr($json, 0, $max).'…(tronqué)';
+            }
+
+            $this->lastPrefetchEvidence[] = $json;
+            $this->lastPrefetchCalls[] = ['name' => $call['name'], 'args' => $call['args'], 'result' => $result];
+            $args = json_encode($call['args'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+            $blocks[] = $call['name'].'('.$args.') => '.$json;
+        }
+
+        if ($blocks === []) {
+            return null;
+        }
+
+        $french = str_starts_with(strtolower($locale), 'fr');
+        $header = $french
+            ? "DONNÉES RÉELLES DÉJÀ EXTRAITES DE LA BASE POUR CETTE QUESTION.\n"
+                ."Ce sont des chiffres vérifiés : réponds directement avec eux. N'écris JAMAIS que l'information "
+                ."n'est pas disponible tant qu'un bloc ci-dessous contient la donnée. Si un bloc est vide "
+                ."(0 ligne / 0 résultat), dis clairement qu'aucune opération n'est enregistrée sur cette période, "
+                ."et rappelle la parcelle et la période concernées."
+            : "REAL DATA ALREADY FETCHED FROM THE DATABASE FOR THIS QUESTION.\n"
+                ."These are verified figures: answer directly from them. NEVER say the information is unavailable "
+                ."while a block below contains it. If a block is empty (0 rows), state plainly that no operation is "
+                ."recorded for that period, naming the plot and window.";
+
+        return ['role' => 'system', 'content' => $header."\n\n".implode("\n\n", $blocks)];
+    }
+
 
     /**
      * Compact system prompt used in agent (tool-calling) mode. No pre-baked

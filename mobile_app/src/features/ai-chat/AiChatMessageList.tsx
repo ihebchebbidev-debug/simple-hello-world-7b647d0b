@@ -170,7 +170,7 @@ function AgentActivity({ message }: { message: AiChatMessage }) {
                     ? 'border-border/50 bg-[hsl(var(--surface-container-high))] text-muted-foreground'
                     : ok
                     ? 'border-[hsl(var(--primary)/0.3)] bg-[hsl(var(--primary)/0.08)] text-[hsl(var(--primary-glow))]'
-                    : 'border-destructive/40 bg-destructive/10 text-destructive'
+                    : 'border-border/60 bg-[hsl(var(--surface-container-high))] text-muted-foreground'
                 }`}
               >
                 <Icon className={`h-3 w-3 ${pending ? 'animate-spin' : ''}`} aria-hidden />
@@ -219,7 +219,7 @@ function MessageBubble({
             isUser
               ? 'rounded-2xl rounded-tr-sm bg-[hsl(var(--primary))] px-3.5 py-2.5 text-[14px] sm:text-[13px] text-primary-foreground whitespace-pre-wrap break-words shadow-sm'
               : isError
-              ? 'rounded-2xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive whitespace-pre-wrap break-words'
+              ? 'rounded-2xl border border-border/60 bg-[hsl(var(--surface-container-high))] px-3.5 py-2.5 text-[13px] text-muted-foreground whitespace-pre-wrap break-words'
               : 'text-foreground'
           }`}
         >

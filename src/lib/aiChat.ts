@@ -78,7 +78,56 @@ function parseErrorCode(payload: unknown): string | undefined {
   return typeof code === 'string' && code ? code : undefined;
 }
 
+/**
+ * Transient failures the user should never see: we retry them silently
+ * instead of painting a red bubble in the transcript.
+ */
+function isRetryableAiError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  const code = (err as { code?: string })?.code;
+  if (code && ['rate_limited', 'upstream_error', 'timeout', 'network', 'empty_reply', 'ai_error'].includes(code)) {
+    return true;
+  }
+  if (typeof status === 'number' && (status === 429 || status === 408 || status >= 500)) return true;
+  const msg = (err as Error)?.message ?? '';
+  return /empty assistant reply|failed to fetch|network|stream error/i.test(msg);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Public entry point: streams a reply and transparently retries transient
+ * upstream hiccups (up to 2 extra attempts) as long as nothing has been
+ * rendered yet, so the user sees a slightly slower answer rather than an error.
+ */
 export async function streamAiChatMessage(
+  body: AiChatRequest,
+  onDelta: (chunk: string) => void,
+  signal?: AbortSignal,
+  onRevise?: ((finalReply: string) => void) | AiChatStreamCallbacks,
+): Promise<AiChatResponse> {
+  const delays = [600, 1600];
+  for (let attempt = 0; ; attempt++) {
+    let rendered = false;
+    try {
+      return await streamAiChatOnce(
+        body,
+        (chunk) => {
+          rendered = true;
+          onDelta(chunk);
+        },
+        signal,
+        onRevise,
+      );
+    } catch (err) {
+      const aborted = signal?.aborted || (err as Error)?.name === 'AbortError';
+      if (aborted || rendered || attempt >= delays.length || !isRetryableAiError(err)) throw err;
+      await sleep(delays[attempt]);
+    }
+  }
+}
+
+async function streamAiChatOnce(
   body: AiChatRequest,
   onDelta: (chunk: string) => void,
   signal?: AbortSignal,

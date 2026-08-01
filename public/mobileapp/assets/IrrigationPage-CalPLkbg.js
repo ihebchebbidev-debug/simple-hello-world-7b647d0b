@@ -1,0 +1,1 @@
+import{U as o}from"./index-DTx-CTil.js";import{O as r}from"./OperationFormPage-dnKmgIsL.js";import"./PageHeader-B4gW9m2S.js";import"./Skeleton-CBnit4V5.js";import"./useReferenceData-DLBvUjzC.js";import"./wifi-off-DsvUBUrX.js";import"./icon-harvest-DDaKe9zU.js";const n=()=>o.jsx(r,{kind:"irrigation"});export{n as default};

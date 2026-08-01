@@ -1,1 +1,0 @@
-import{M as r}from"./index-CVQZYP6b.js";const o=({className:s="",style:e,...a})=>r.jsx("div",{className:`animate-pulse rounded-md bg-[hsl(var(--surface-bright)/0.5)] ${s}`,style:e,...a});export{o as S};

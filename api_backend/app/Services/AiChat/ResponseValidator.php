@@ -93,6 +93,20 @@ final class ResponseValidator
     }
 
     /**
+     * Language the reply must be written in for this user message.
+     * Public so the prompt builder can pin the same target the validator
+     * will later enforce — one source of truth, no drift.
+     */
+    public function targetLanguage(string $userMessage, string $locale): string
+    {
+        $lang = $this->detectLang($userMessage, $locale);
+
+        return $lang === 'unknown'
+            ? (str_starts_with(strtolower($locale), 'fr') ? 'fr' : 'en')
+            : $lang;
+    }
+
+    /**
      * Numbers stated in the reply that appear in no tool result.
      *
      * Only meaningful magnitudes are checked: small integers are dates,

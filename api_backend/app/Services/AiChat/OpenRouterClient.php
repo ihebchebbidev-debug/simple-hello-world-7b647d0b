@@ -274,9 +274,9 @@ final class OpenRouterClient
             $body['provider'] = ['sort' => $sort, 'allow_fallbacks' => true];
         }
 
-        $connectTimeout = (int) config('openrouter.connect_timeout', 15);
-        $reqTimeout     = (int) config('openrouter.request_timeout', 60);
-        $streamIdle     = (int) config('openrouter.stream_idle_timeout', 90);
+        $connectTimeout = (int) config('openrouter.connect_timeout', 30);
+        $reqTimeout     = (int) config('openrouter.request_timeout', 0);
+        $streamIdle     = (int) config('openrouter.stream_idle_timeout', 300);
 
         $pending = Http::withHeaders([
             'Authorization' => 'Bearer '.$apiKey,
@@ -285,9 +285,11 @@ final class OpenRouterClient
             'Content-Type'  => 'application/json',
             'Accept'        => $stream ? 'text/event-stream' : 'application/json',
         ])->connectTimeout($connectTimeout)
-          // For streams, `timeout` is Guzzle's total wall-clock cap — must be large
-          // enough to let a long answer finish. Per-chunk idle is enforced via read_timeout.
-          ->timeout($stream ? max($reqTimeout * 5, 300) : $reqTimeout);
+          // No wall-clock cap by default (0 = unlimited in Guzzle): the model is
+          // allowed to think for as long as it needs. Liveness is still enforced
+          // per-chunk via `read_timeout` on streams.
+          ->timeout(max(0, $reqTimeout));
+
 
         if ($stream) {
             // Guzzle: enable streaming + per-chunk read timeout so a stalled

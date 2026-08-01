@@ -394,6 +394,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           ai_error: 'aiChat.errors.generic',
         };
 
+        // Never surface raw server/technical text to the user — always a
+        // calm, localized sentence.
+        void serverMessage;
         const message =
           (code && codeKeyMap[code] ? t(codeKeyMap[code]) : null) ||
           (status === 404 || status === 501
@@ -402,8 +405,6 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
             ? t('aiChat.errors.rateLimited')
             : status === 504
             ? t('aiChat.errors.timeout')
-            : serverMessage && serverMessage !== 'Request failed'
-            ? serverMessage
             : t('aiChat.errors.generic'));
 
         setMessages((prev) => {

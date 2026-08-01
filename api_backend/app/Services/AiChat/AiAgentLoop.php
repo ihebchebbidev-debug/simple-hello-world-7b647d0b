@@ -32,6 +32,14 @@ final class AiAgentLoop
      */
     private array $evidence = [];
 
+    /**
+     * Structured record of every data-tool call from the last run(), used to
+     * build the deterministic verification footer (metric, plot, period).
+     *
+     * @var array<int, array{name: string, args: array<string, mixed>, result: array<string, mixed>}>
+     */
+    private array $calls = [];
+
     public function __construct(
         private readonly OpenRouterClient $openRouter,
         private readonly AiToolRegistry $tools,
@@ -43,6 +51,12 @@ final class AiAgentLoop
         return $this->evidence;
     }
 
+    /** @return array<int, array{name: string, args: array<string, mixed>, result: array<string, mixed>}> */
+    public function lastCalls(): array
+    {
+        return $this->calls;
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $messages       Full transcript (system + user/assistant turns)
      * @param  callable(string):void             $onDelta        Final answer streaming callback
@@ -52,6 +66,7 @@ final class AiAgentLoop
     public function run(array $messages, callable $onDelta, ?callable $onEvent = null): string
     {
         $this->evidence = [];
+        $this->calls = [];
         $maxIters   = max(1, (int) config('openrouter.agent.max_iterations', 4));
         $maxResBytes = max(256, (int) config('openrouter.agent.max_tool_result', 2048));
         $toolDefs   = $this->tools->definitions();
@@ -126,6 +141,7 @@ final class AiAgentLoop
                         $roundOk++;
                         $usedTools[] = $name;
                         $this->evidence[] = $encoded;
+                        $this->calls[] = ['name' => $name, 'args' => $args, 'result' => $result];
                     }
                 }
 

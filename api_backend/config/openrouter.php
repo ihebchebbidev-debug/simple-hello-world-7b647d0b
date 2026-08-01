@@ -110,10 +110,13 @@ return [
     'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'http://localhost')),
     'title'   => env('OPENROUTER_TITLE', 'Flehty Assistant'),
 
-    // Timeouts (seconds).
-    'connect_timeout'   => (int) env('OPENROUTER_CONNECT_TIMEOUT', 15),
-    'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 45),  // non-stream hard cap (< proxy 60s idle timeout)
-    'stream_idle_timeout' => (int) env('OPENROUTER_STREAM_IDLE_TIMEOUT', 90), // per-chunk idle
+    // Timeouts (seconds). 0 = no cap (let the model think as long as it needs).
+    // Only the connect phase and the per-chunk idle guard stay bounded, so a
+    // dead socket still fails fast while a slow-but-alive answer never gets cut.
+    'connect_timeout'   => (int) env('OPENROUTER_CONNECT_TIMEOUT', 30),
+    'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 0),  // 0 = unlimited wall clock
+    'stream_idle_timeout' => (int) env('OPENROUTER_STREAM_IDLE_TIMEOUT', 300), // per-chunk idle only
+
 
     // Retry / backoff.
     'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 1),

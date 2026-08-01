@@ -496,6 +496,8 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           ai_error: 'aiChat.errors.generic',
         };
 
+        // Never surface raw server/technical text — always a calm, localized line.
+        void serverMessage;
         const message =
           code && codeKeyMap[code]
             ? t(codeKeyMap[code])
@@ -505,9 +507,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
                 ? t('aiChat.errors.rateLimited')
                 : status === 504
                   ? t('aiChat.errors.timeout')
-                  : serverMessage && serverMessage !== 'Request failed'
-                    ? serverMessage
-                    : t('aiChat.errors.generic');
+                  : t('aiChat.errors.generic');
 
         setMessages((prev) => {
           const assistant = prev.find((m) => m.id === assistantId);
@@ -701,6 +701,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         ai_error: 'aiChat.errors.generic',
       };
 
+      void serverMessage;
       const message =
         code && codeKeyMap[code]
           ? t(codeKeyMap[code])
@@ -710,9 +711,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
               ? t('aiChat.errors.rateLimited')
               : status === 504
                 ? t('aiChat.errors.timeout')
-                : serverMessage && serverMessage !== 'Request failed'
-                  ? serverMessage
-                  : t('aiChat.errors.generic');
+                : t('aiChat.errors.generic');
 
       setMessages((prev) => {
         const next = prev.map((m) =>
@@ -775,7 +774,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         setMessages((prev) =>
           prev.map((m) => (m.id === messageId ? { ...m, rating: previous } : m)),
         );
-        toast.error(t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' }));
+        toast(t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' }));
         // Rethrow so the button can show its inline failure state.
         throw err;
       }

@@ -160,7 +160,11 @@ final class AiChatController extends Controller
         }
 
         try {
+            // Let the model think as long as it needs — no execution cap.
+            @set_time_limit(0);
+            @ini_set('max_execution_time', '0');
             $result = $this->aiChat()->reply($data['messages'], $locale, $conversationId, $subjectId);
+
 
             return ApiResponse::ok([
                 'reply'           => $result['reply'],
@@ -191,8 +195,15 @@ final class AiChatController extends Controller
     private function streamResponse(array $messages, string $locale, ?string $conversationId, int|string|null $subjectId = null): StreamedResponse
     {
         return response()->stream(function () use ($messages, $locale, $conversationId, $subjectId): void {
+            // No PHP execution cap: the agent loop may legitimately run for
+            // several minutes on complex questions. Heartbeat pings below keep
+            // the connection alive; the client aborts when the user stops.
+            @set_time_limit(0);
+            @ini_set('max_execution_time', '0');
+            @ini_set('default_socket_timeout', '0');
             @ini_set('output_buffering', 'off');
             @ini_set('zlib.output_compression', '0');
+
 
             while (ob_get_level() > 0) {
                 @ob_end_flush();

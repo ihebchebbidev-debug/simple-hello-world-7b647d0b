@@ -1,0 +1,1 @@
+import{U as o}from"./index-DEjtrOdu.js";import{O as t}from"./OperationFormPage-Bywh04wN.js";import"./PageHeader-52nCI2je.js";import"./Skeleton-BMrJqY9a.js";import"./useReferenceData-CwP4I7tw.js";import"./wifi-off-EASjylHK.js";import"./icon-harvest-DDaKe9zU.js";const n=()=>o.jsx(t,{kind:"fertilization"});export{n as default};
