@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AiFeedback;
 use App\Services\AiChat\AiChatService;
+use App\Support\AiTranscriptLogger;
 use App\Support\Http\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -156,8 +157,10 @@ final class AiChatController extends Controller
         $subjectId = $request->user()?->id;
 
         if ($request->boolean('stream')) {
-            return $this->streamResponse($data['messages'], $locale, $conversationId, $subjectId);
+            return $this->streamResponse($request, $data['messages'], $locale, $conversationId, $subjectId);
         }
+
+        $startedAt = microtime(true);
 
         try {
             // Let the model think as long as it needs — no execution cap.
@@ -165,6 +168,10 @@ final class AiChatController extends Controller
             @ini_set('max_execution_time', '0');
             $result = $this->aiChat()->reply($data['messages'], $locale, $conversationId, $subjectId);
 
+            AiTranscriptLogger::record(
+                $request, $data['messages'], $locale, $result['conversation_id'] ?? $conversationId,
+                false, 'ok', (string) $result['reply'], null, (int) ((microtime(true) - $startedAt) * 1000),
+            );
 
             return ApiResponse::ok([
                 'reply'           => $result['reply'],
@@ -177,6 +184,10 @@ final class AiChatController extends Controller
         } catch (RuntimeException $e) {
             $info = self::classifyError($e->getMessage());
             Log::warning('ai.chat.failed', ['code' => $info['code'], 'message' => $e->getMessage()]);
+            AiTranscriptLogger::record(
+                $request, $data['messages'], $locale, $conversationId,
+                false, 'error', $info['message'], $info['code'], (int) ((microtime(true) - $startedAt) * 1000),
+            );
             return ApiResponse::error($info['code'], $info['message'], $info['status']);
         } catch (Throwable $e) {
             Log::error('ai.chat.error', [
@@ -185,16 +196,22 @@ final class AiChatController extends Controller
                 'file'      => $e->getFile(),
                 'line'      => $e->getLine(),
             ]);
+            AiTranscriptLogger::record(
+                $request, $data['messages'], $locale, $conversationId,
+                false, 'error', $e->getMessage(), 'ai_error', (int) ((microtime(true) - $startedAt) * 1000),
+            );
             return ApiResponse::error('ai_error', 'Could not generate a reply.', 500);
         }
+
     }
 
     /**
      * @param  array<int, array{role: string, content: string}>  $messages
      */
-    private function streamResponse(array $messages, string $locale, ?string $conversationId, int|string|null $subjectId = null): StreamedResponse
+    private function streamResponse(Request $request, array $messages, string $locale, ?string $conversationId, int|string|null $subjectId = null): StreamedResponse
     {
-        return response()->stream(function () use ($messages, $locale, $conversationId, $subjectId): void {
+        return response()->stream(function () use ($request, $messages, $locale, $conversationId, $subjectId): void {
+            $startedAt = microtime(true);
             // No PHP execution cap: the agent loop may legitimately run for
             // several minutes on complex questions. Heartbeat pings below keep
             // the connection alive; the client aborts when the user stops.
@@ -255,18 +272,29 @@ final class AiChatController extends Controller
                     ]);
                 }
 
+                $finalReply = self::sanitizeAssistantText((string) $result['reply']);
+
                 $emit([
                     'type'            => 'done',
-                    'reply'           => self::sanitizeAssistantText((string) $result['reply']),
+                    'reply'           => $finalReply,
                     'conversation_id' => $result['conversation_id'],
                     'revised'         => (bool) ($result['revised'] ?? false),
                     'cached'          => (bool) ($result['cached'] ?? false),
                     'degraded'        => (bool) ($result['degraded'] ?? false),
                 ]);
+
+                AiTranscriptLogger::record(
+                    $request, $messages, $locale, $result['conversation_id'] ?? $conversationId,
+                    true, 'ok', $finalReply, null, (int) ((microtime(true) - $startedAt) * 1000),
+                );
             } catch (RuntimeException $e) {
                 $info = self::classifyError($e->getMessage());
                 Log::warning('ai.chat.stream_failed', ['code' => $info['code'], 'message' => $e->getMessage()]);
                 $emit(['type' => 'error', 'code' => $info['code'], 'message' => $info['message']]);
+                AiTranscriptLogger::record(
+                    $request, $messages, $locale, $conversationId,
+                    true, 'error', $info['message'], $info['code'], (int) ((microtime(true) - $startedAt) * 1000),
+                );
             } catch (Throwable $e) {
                 Log::error('ai.chat.stream_error', [
                     'exception' => $e::class,
@@ -275,7 +303,12 @@ final class AiChatController extends Controller
                     'line'      => $e->getLine(),
                 ]);
                 $emit(['type' => 'error', 'code' => 'ai_error', 'message' => 'Could not generate a reply.']);
+                AiTranscriptLogger::record(
+                    $request, $messages, $locale, $conversationId,
+                    true, 'error', $e->getMessage(), 'ai_error', (int) ((microtime(true) - $startedAt) * 1000),
+                );
             }
+
         }, 200, [
             'Content-Type'       => 'application/x-ndjson; charset=utf-8',
             'Cache-Control'      => 'no-cache, no-store, no-transform',

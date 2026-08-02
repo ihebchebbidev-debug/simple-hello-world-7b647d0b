@@ -120,19 +120,40 @@ final class AiAgentLoop
             $roundOk = 0;
             $roundData = 0;
 
+            // Parse the whole round first, then execute it in one batch so the
+            // registry can deduplicate identical lookups (and run them
+            // concurrently when enabled) instead of one blocking call at a time.
+            $parsed = [];
             foreach ($toolCalls as $call) {
-                $name = (string) ($call['function']['name'] ?? '');
-                $rawArgs = (string) ($call['function']['arguments'] ?? '{}');
-                $args = json_decode($rawArgs, true) ?: [];
-                $id   = (string) ($call['id'] ?? uniqid('call_', true));
+                $parsed[] = [
+                    'name' => (string) ($call['function']['name'] ?? ''),
+                    'args' => json_decode((string) ($call['function']['arguments'] ?? '{}'), true) ?: [],
+                    'id'   => (string) ($call['id'] ?? uniqid('call_', true)),
+                ];
+            }
 
-                if ($name === 'plan' && $onEvent !== null) {
-                    $onEvent(['type' => 'plan', 'steps' => (array) ($args['steps'] ?? [])]);
-                } elseif ($onEvent !== null) {
-                    $onEvent(['type' => 'tool_start', 'name' => $name, 'args' => $args]);
+            foreach ($parsed as $p) {
+                if ($onEvent === null) {
+                    continue;
                 }
+                if ($p['name'] === 'plan') {
+                    $onEvent(['type' => 'plan', 'steps' => (array) ($p['args']['steps'] ?? [])]);
+                } else {
+                    $onEvent(['type' => 'tool_start', 'name' => $p['name'], 'args' => $p['args']]);
+                }
+            }
 
-                $result = $this->tools->call($name, $args);
+            $results = $this->tools->callMany(array_map(
+                static fn (array $p): array => ['name' => $p['name'], 'args' => $p['args']],
+                $parsed,
+            ));
+
+            foreach ($parsed as $i => $p) {
+                $name = $p['name'];
+                $args = $p['args'];
+                $id   = $p['id'];
+
+                $result = $results[$i] ?? ['ok' => false, 'error' => 'tool_failed', 'name' => $name];
                 $encoded = $this->encodeResult($result, $maxResBytes);
 
                 if ($name !== 'plan') {
@@ -161,6 +182,7 @@ final class AiAgentLoop
                     'content'     => $encoded,
                 ];
             }
+
 
             // Every data tool failed this round: nudge one explicit repair pass
             // (usually a wrong plot name — the payload carries available_plots).

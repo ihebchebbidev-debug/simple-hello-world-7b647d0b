@@ -113,6 +113,16 @@ final class AiToolRegistry
 
 
     /**
+     * Per-request memo of tool results, keyed by name+args. The agent loop and
+     * the deterministic pre-fetch routinely ask for the very same lookup twice
+     * in one turn (prefetch → model re-requests it, or a repair round repeats a
+     * call): the second one is then free.
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    private array $memo = [];
+
+    /**
      * Dispatch a tool call by name. Never throws — errors become part of the
      * result payload so the model can react in the next round.
      *
@@ -120,6 +130,139 @@ final class AiToolRegistry
      * @return array<string, mixed>
      */
     public function call(string $name, array $args): array
+    {
+        // `plan` is a UI event, not a lookup: never memoised.
+        if ($name === 'plan') {
+            return $this->dispatch($name, $args);
+        }
+
+        $key = $this->memoKey($name, $args);
+        if (isset($this->memo[$key])) {
+            return $this->memo[$key];
+        }
+
+        return $this->memo[$key] = $this->dispatch($name, $args);
+    }
+
+    /**
+     * Run a whole round of tool calls.
+     *
+     * Identical calls collapse to one execution, and — when
+     * `openrouter.agent.parallel_tools` is on and the runtime supports it —
+     * the remaining distinct lookups run concurrently instead of one after
+     * the other. Results come back in the order the calls were given.
+     *
+     * @param  array<int, array{name: string, args: array<string, mixed>}>  $calls
+     * @return array<int, array<string, mixed>>
+     */
+    public function callMany(array $calls): array
+    {
+        if ($calls === []) {
+            return [];
+        }
+
+        // 1. Collapse duplicates and anything already memoised this request.
+        $pending = [];                 // memoKey => ['name' => .., 'args' => ..]
+        $keyByIndex = [];
+        foreach ($calls as $i => $call) {
+            $name = (string) $call['name'];
+            $args = (array) ($call['args'] ?? []);
+            if ($name === 'plan') {
+                $keyByIndex[$i] = null;
+                continue;
+            }
+            $key = $this->memoKey($name, $args);
+            $keyByIndex[$i] = $key;
+            if (! isset($this->memo[$key]) && ! isset($pending[$key])) {
+                $pending[$key] = ['name' => $name, 'args' => $args];
+            }
+        }
+
+        // 2. Execute the distinct, not-yet-known lookups.
+        if (count($pending) > 1 && $this->parallelEnabled()) {
+            foreach ($this->runConcurrently($pending) as $key => $result) {
+                $this->memo[$key] = $result;
+            }
+        }
+        foreach ($pending as $key => $call) {
+            if (! isset($this->memo[$key])) {
+                $this->memo[$key] = $this->dispatch($call['name'], $call['args']);
+            }
+        }
+
+        // 3. Re-expand to the caller's original order.
+        $out = [];
+        foreach ($calls as $i => $call) {
+            $key = $keyByIndex[$i];
+            $out[$i] = $key === null
+                ? $this->dispatch((string) $call['name'], (array) ($call['args'] ?? []))
+                : $this->memo[$key];
+        }
+
+        return $out;
+    }
+
+    /**
+     * True when concurrent tool execution is both enabled and available.
+     *
+     * Off by default: Laravel's concurrency drivers fork a process per task,
+     * which on a small container can cost more than the queries themselves.
+     * Flip `AI_PARALLEL_TOOLS=true` once the tools are known to be IO-bound
+     * enough to pay for the fork.
+     */
+    private function parallelEnabled(): bool
+    {
+        return (bool) config('openrouter.agent.parallel_tools', false)
+            && class_exists(\Illuminate\Support\Facades\Concurrency::class);
+    }
+
+    /**
+     * @param  array<string, array{name: string, args: array<string, mixed>}>  $pending
+     * @return array<string, array<string, mixed>>
+     */
+    private function runConcurrently(array $pending): array
+    {
+        $keys = array_keys($pending);
+        $tasks = [];
+        foreach ($pending as $call) {
+            $name = $call['name'];
+            $args = $call['args'];
+            // Closures must stay serialisable: resolve a fresh registry inside
+            // the child rather than capturing $this.
+            $tasks[] = static fn (): array => app(self::class)->call($name, $args);
+        }
+
+        try {
+            $results = \Illuminate\Support\Facades\Concurrency::run($tasks);
+        } catch (Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('ai.tools.parallel_failed', [
+                'error' => mb_substr($e->getMessage(), 0, 200),
+            ]);
+            return [];   // caller falls back to sequential execution
+        }
+
+        $out = [];
+        foreach (array_values($results) as $i => $result) {
+            if (isset($keys[$i]) && is_array($result)) {
+                $out[$keys[$i]] = $result;
+            }
+        }
+
+        return $out;
+    }
+
+    /** @param array<string, mixed> $args */
+    private function memoKey(string $name, array $args): string
+    {
+        ksort($args);
+        return $name.'|'.(json_encode($args, JSON_UNESCAPED_UNICODE) ?: '{}');
+    }
+
+    /**
+     * @param  array<string, mixed>  $args
+     * @return array<string, mixed>
+     */
+    private function dispatch(string $name, array $args): array
     {
         try {
             $data = match ($name) {
@@ -151,6 +294,7 @@ final class AiToolRegistry
             ];
         }
     }
+
 
     // ─── Tools ──────────────────────────────────────────────────────────
 

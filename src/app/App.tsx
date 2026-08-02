@@ -37,6 +37,7 @@ const HelpPage             = lazy(() => import('@/features/help/HelpPage'));
 const NotFoundPage         = lazy(() => import('@/features/system/NotFoundPage'));
 const MobileAppRedirect    = lazy(() => import('@/features/mobileapp/MobileAppRedirect'));
 const DeveloperPage        = lazy(() => import('@/features/developer/DeveloperPage'));
+const ChatTranscriptPage   = lazy(() => import('@/features/ai-chat/ChatTranscriptPage'));
 
 // Tuned defaults so every page doesn't refetch the same reference data
 // on every focus / mount. Mutations still invalidate explicitly.
@@ -102,6 +103,7 @@ const App = () => {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/developer" element={<DeveloperPage />} />
+            <Route path="/chat" element={<ChatTranscriptPage />} />
             <Route path="/mobileapp" element={<MobileAppRedirect />} />
             <Route path="/mobileapp/*" element={<MobileAppRedirect />} />
             <Route path="/" element={<RequireAuth><AppLayout /></RequireAuth>}>

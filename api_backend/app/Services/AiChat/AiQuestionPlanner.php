@@ -424,19 +424,16 @@ final class AiQuestionPlanner
 
     private function extractNutrient(string $q): string
     {
-        $azote = $this->has($q, ['azote', 'nitrogen', ' n ']);
-        $p = $this->has($q, ['phosphore', 'phosphorus']);
-        $k = $this->has($q, ['potasse', 'potassium']);
-        if ($azote && ! $p && ! $k) {
-            return 'n';
-        }
-        if ($p && ! $azote && ! $k) {
-            return 'p';
-        }
-        if ($k && ! $azote && ! $p) {
-            return 'k';
-        }
-        return 'all';
+        $found = [];
+        if ($this->has($q, ['azote', 'nitrogen', ' n '])) $found[] = 'n';
+        if ($this->has($q, ['phosphore', 'phosphorus'])) $found[] = 'p';
+        if ($this->has($q, ['potasse', 'potassium'])) $found[] = 'k';
+        if ($this->has($q, ['magnesium', 'magnesie', ' mg '])) $found[] = 'mg';
+        if ($this->has($q, ['calcium', ' ca '])) $found[] = 'ca';
+        if ($this->has($q, ['soufre', 'sulfur', 'sulphur'])) $found[] = 's';
+
+        return count($found) === 1 ? $found[0] : 'all';
+
     }
 
     private function extractCostType(string $q): string

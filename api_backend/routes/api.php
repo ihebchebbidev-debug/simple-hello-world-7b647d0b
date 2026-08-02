@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AiChatController;
 use App\Http\Controllers\Api\AiConversationController;
+use App\Http\Controllers\Api\AiTranscriptController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BackupSnapshotController;
 use App\Http\Controllers\Api\CampaignController;
@@ -240,6 +241,12 @@ $registerGroup(['dashboard', 'v1/dashboard'], ['auth:sanctum', 'role:technician,
 $registerGroup(['ai', 'v1/ai'], ['throttle:30,1'], function (): void {
     Route::post('chat', [AiChatController::class, 'chat']);
     Route::post('feedback', [AiChatController::class, 'feedback'])->withoutMiddleware('throttle:30,1')->middleware('throttle:120,1');
+    // Full verbatim transcript feed (read-only, public — powers the hidden /chat page).
+    Route::get('transcripts', [AiTranscriptController::class, 'index'])
+        ->withoutMiddleware('throttle:30,1')
+        ->middleware('throttle:120,1');
+
+
 });
 
 // ─── AI conversation history (per authenticated user) ────────────────────────

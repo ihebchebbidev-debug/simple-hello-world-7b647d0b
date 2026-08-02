@@ -59,11 +59,12 @@ trait AiFarmTools
                 'to'            => $to,
             ]),
 
-            $this->fn('nutrient_per_ha', 'Fertilization nutrient balance: kg of N, P, K applied and units/ha (kg/ha) per plot over a window. Note: magnesium (Mg) is NOT tracked in the catalog. Use for "combien d\'unités/ha de N P K a reçu la parcelle X".', [
+            $this->fn('nutrient_per_ha', 'Fertilization nutrient balance: kg of N, P, K, Mg, Ca, S applied and units/ha (kg/ha) per plot over a window. Use for "combien d\'unités/ha d\'azote / de magnésium a reçu la parcelle X".', [
                 'plot'          => $plot,
                 'crop'          => $crop,
                 'exclude_plots' => $exclude,
-                'nutrient'      => ['type' => 'string', 'enum' => ['n', 'p', 'k', 'all'], 'description' => 'Restrict to one nutrient; default all.'],
+                'nutrient'      => ['type' => 'string', 'enum' => ['n', 'p', 'k', 'mg', 'ca', 's', 'all'], 'description' => 'Restrict to one nutrient; default all.'],
+
                 'from'          => $from,
                 'to'            => $to,
             ]),
@@ -433,6 +434,35 @@ trait AiFarmTools
         return ['plots' => $out, 'count' => count($out)];
     }
 
+    /**
+     * Unit-price SQL expression, IDENTICAL to the one the Reports screen uses
+     * (ReportController::productionCost). Without the price_history fallback
+     * the assistant reports a *lower* cost than the report for any operation
+     * whose price snapshot is missing or zero.
+     *
+     * @param  string|null  $entityFk  FK column carrying the priced entity
+     *                                 (fertilizer_id / pesticide_id); null for
+     *                                 farm-global prices (water, labor).
+     */
+    private static function priceExpr(string $entityType, string $fallbackColumn, ?string $entityFk = null): string
+    {
+        $scope = $entityFk !== null ? "AND ph.entity_id = op.$entityFk" : '';
+
+        return "(
+            COALESCE(
+                NULLIF(op.$fallbackColumn, 0),
+                (SELECT ph.price_per_unit FROM price_history ph
+                  WHERE ph.entity_type = '$entityType' $scope
+                    AND ph.effective_from <= op.operation_date
+                  ORDER BY ph.effective_from DESC, ph.id DESC LIMIT 1),
+                (SELECT ph.price_per_unit FROM price_history ph
+                  WHERE ph.entity_type = '$entityType' $scope
+                  ORDER BY ph.effective_from ASC, ph.id ASC LIMIT 1),
+                0
+            )
+        )";
+    }
+
     /** @param array<string,mixed> $args */
     private function toolWaterPerHa(array $args): array
     {
@@ -442,34 +472,35 @@ trait AiFarmTools
 
         $ids = array_map(static fn ($p) => $p->id, $plots);
 
-        // Fast, stable path: pre-aggregated daily rollup. Units are normalised
-        // at build time, so repeating the same question cannot yield a
-        // different total. Falls back to the raw scan when the rollup is
-        // unavailable or would have to serve a stale figure.
+        // Volumes come from the pre-aggregated daily rollup when it is fresh
+        // (units normalised at build time → a repeated question can never
+        // yield a different total). Money NEVER does: costs are always
+        // recomputed with the same price expression as the Reports screen, on
+        // the RAW recorded quantity, because `price_at_entry` is denominated
+        // in the recorded unit (a litre price × m³ volume is 1000× too small).
         $source = 'daily_rollup';
         $agg = $this->rollup()->aggregate('irrigation', array_map('strval', $ids), $from, $to);
         if ($agg === null) {
             $source = 'live_scan';
-            $m3 = self::m3Expr();
-            $q = DB::table('irrigation_operations')
-                ->selectRaw("plot_id,
+            $m3 = self::m3Expr('op.water_quantity', 'op.unit_at_entry');
+            $q = DB::table('irrigation_operations as op')
+                ->selectRaw("op.plot_id AS plot_id,
                     COALESCE(SUM($m3),0) AS qty,
                     COUNT(*) AS ops,
-                    COALESCE(SUM(($m3) * price_at_entry),0) AS cost,
-                    COUNT(*) FILTER (WHERE water_quantity IS NULL) AS missing_qty,
-                    COUNT(*) FILTER (WHERE price_at_entry IS NULL) AS missing_price,
-                    COUNT(DISTINCT LOWER(TRIM(COALESCE(unit_at_entry, 'm3')))) AS unit_variants,
-                    MIN(operation_date) AS first_date,
-                    MAX(operation_date) AS last_date")
-                ->whereIn('plot_id', $ids)
-                ->groupBy('plot_id');
-            $this->applyWindow($q, 'irrigation_operations', $from, $to);
+                    COUNT(*) FILTER (WHERE op.water_quantity IS NULL) AS missing_qty,
+                    COUNT(*) FILTER (WHERE op.price_at_entry IS NULL) AS missing_price,
+                    COUNT(DISTINCT LOWER(TRIM(COALESCE(op.unit_at_entry, 'm3')))) AS unit_variants,
+                    MIN(op.operation_date) AS first_date,
+                    MAX(op.operation_date) AS last_date")
+                ->whereIn('op.plot_id', $ids)
+                ->groupBy('op.plot_id');
+            $this->applyWindow($q, 'op', $from, $to);
             $agg = [];
             foreach ($q->get() as $r) {
                 $agg[(string) $r->plot_id] = [
                     'ops'           => (int) $r->ops,
                     'qty'           => (float) $r->qty,
-                    'cost'          => (float) $r->cost,
+                    'cost'          => 0.0,
                     'missing_qty'   => (int) $r->missing_qty,
                     'missing_price' => (int) $r->missing_price,
                     'unit_variants' => (int) $r->unit_variants,
@@ -479,14 +510,22 @@ trait AiFarmTools
             }
         }
 
+        foreach ($this->irrigationCostByPlot($ids, $from, $to) as $pid => $cost) {
+            $agg[$pid] ??= [];
+            $agg[$pid]['cost'] = $cost;
+        }
+
         $rows = [];
         $sumPerHa = 0.0; $withArea = 0;
+        $totalM3 = 0.0; $totalHa = 0.0; $totalCost = 0.0;
         foreach ($plots as $p) {
             $a = $agg[(string) $p->id] ?? [];
             $qty = (float) ($a['qty'] ?? 0);
             $ha  = self::ha($p);
             $perHa = self::perHa($qty, $ha);
-            if ($perHa !== null) { $sumPerHa += $perHa; $withArea++; }
+            if ($perHa !== null) { $sumPerHa += $perHa; $withArea++; $totalHa += $ha; }
+            $totalM3 += $qty;
+            $totalCost += (float) ($a['cost'] ?? 0);
             $row = [
                 'plot'            => $names[(string) $p->id],
                 'surface_area_ha' => $ha,
@@ -504,9 +543,6 @@ trait AiFarmTools
             if ((int) ($a['missing_qty'] ?? 0) > 0) {
                 $warnings[] = (int) $a['missing_qty'].' irrigation(s) have no recorded volume and count as 0 m³.';
             }
-            if ((int) ($a['missing_price'] ?? 0) > 0) {
-                $warnings[] = (int) $a['missing_price'].' irrigation(s) have no price snapshot; cost is understated.';
-            }
             if ((int) ($a['unit_variants'] ?? 0) > 1) {
                 $warnings[] = 'Mixed source units on this plot; volumes were converted to m³ before summing.';
             }
@@ -522,11 +558,51 @@ trait AiFarmTools
             'unit'             => 'm3/ha',
             'plots'            => array_slice($rows, 0, 40),
             'plot_count'       => count($rows),
+            'total_m3'         => round($totalM3, 2),
+            'total_cost_tnd'   => round($totalCost, 2),
+            // Two different, both-legitimate "averages". Quote the weighted one
+            // for a farm/crop figure; the unweighted one only if the user asks
+            // for "la moyenne des parcelles".
+            'weighted_m3_per_ha' => self::perHa($totalM3, $totalHa),
             'average_m3_per_ha' => $withArea > 0 ? round($sumPerHa / $withArea, 2) : null,
+            'average_note'     => 'weighted_m3_per_ha = total m³ / total ha (matches the Reports screen). average_m3_per_ha = unweighted mean of the per-plot m³/ha.',
+            'cost_basis'       => 'price_at_entry, falling back to the price_history row effective at the operation date — identical to the Reports/Production-cost screen.',
             'excluded'         => array_values((array) ($args['exclude_plots'] ?? [])),
             'reconcile_hint'   => 'These are summed totals, not a listing. If the user asks for the detail, disputes the number, or quotes a different figure, call irrigation_history with the SAME plot and window and show the individual rows.',
         ];
     }
+
+    /**
+     * Irrigation cost per plot, computed exactly like the Reports screen:
+     * RAW recorded quantity × resolved unit price. Never the m³-normalised
+     * quantity — the price is denominated in the unit that was recorded.
+     *
+     * @param  array<int, mixed>  $ids
+     * @return array<string, float>
+     */
+    private function irrigationCostByPlot(array $ids, ?string $from, ?string $to): array
+    {
+        if ($ids === [] || ! Schema::hasTable('irrigation_operations')) {
+            return [];
+        }
+        $expr = self::priceExpr('water', 'price_at_entry');
+        $q = DB::table('irrigation_operations as op')
+            ->selectRaw("op.plot_id AS plot_id, COALESCE(SUM(op.water_quantity * $expr),0) AS cost")
+            ->whereIn('op.plot_id', $ids)
+            ->groupBy('op.plot_id');
+        $this->applyWindow($q, 'op', $from, $to);
+
+        $out = [];
+        foreach ($q->get() as $r) {
+            $out[(string) $r->plot_id] = (float) $r->cost;
+        }
+
+        return $out;
+    }
+
+
+    /** Nutrients the app snapshots on every fertilization row. */
+    private const NUTRIENTS = ['n', 'p', 'k', 'mg', 'ca', 's'];
 
     /** @param array<string,mixed> $args */
     private function toolNutrientPerHa(array $args): array
@@ -535,20 +611,27 @@ trait AiFarmTools
         if ($err) return $err;
         [$from, $to] = $this->windowFrom($args);
 
+        // Older databases may predate the Mg/Ca/S snapshot columns — select
+        // only what exists so the tool degrades instead of throwing.
+        $tracked = array_values(array_filter(
+            self::NUTRIENTS,
+            static fn (string $nut): bool => Schema::hasColumn('fertilization_operations', $nut.'_at_entry'),
+        ));
+
         $ids = array_map(static fn ($p) => $p->id, $plots);
+        $select = ['plot_id', 'COALESCE(SUM(quantity_applied),0) AS qty', 'COUNT(*) AS n'];
+        foreach ($tracked as $nut) {
+            $select[] = "COALESCE(SUM(quantity_applied * {$nut}_at_entry / 100.0),0) AS {$nut}_kg";
+        }
+
         $q = DB::table('fertilization_operations')
-            ->selectRaw('plot_id,
-                COALESCE(SUM(quantity_applied * n_at_entry / 100.0),0) AS n_kg,
-                COALESCE(SUM(quantity_applied * p_at_entry / 100.0),0) AS p_kg,
-                COALESCE(SUM(quantity_applied * k_at_entry / 100.0),0) AS k_kg,
-                COALESCE(SUM(quantity_applied),0) AS qty,
-                COUNT(*) AS n')
+            ->selectRaw(implode(",\n                ", $select))
             ->whereIn('plot_id', $ids)
             ->groupBy('plot_id');
         $this->applyWindow($q, 'fertilization_operations', $from, $to);
         $agg = collect($q->get())->keyBy('plot_id');
 
-        $wanted = (string) ($args['nutrient'] ?? 'all');
+        $wanted = mb_strtolower((string) ($args['nutrient'] ?? 'all'));
         $rows = [];
         foreach ($plots as $p) {
             $a = $agg->get((string) $p->id);
@@ -559,23 +642,26 @@ trait AiFarmTools
                 'applications'    => (int) ($a->n ?? 0),
                 'total_product_kg' => round((float) ($a->qty ?? 0), 2),
             ];
-            foreach (['n', 'p', 'k'] as $nut) {
+            foreach ($tracked as $nut) {
                 if ($wanted !== 'all' && $wanted !== $nut) continue;
                 $kg = (float) ($a->{$nut.'_kg'} ?? 0);
-                $row[strtoupper($nut).'_kg']        = round($kg, 2);
+                $row[strtoupper($nut).'_kg']       = round($kg, 2);
                 $row[strtoupper($nut).'_units_ha'] = self::perHa($kg, $ha);
             }
             $rows[] = $row;
         }
 
         return [
-            'window'   => ['from' => $from, 'to' => $to],
-            'unit'     => 'kg/ha (fertilising units per hectare)',
-            'nutrient' => $wanted,
-            'plots'    => array_slice($rows, 0, 40),
-            'note'     => 'Magnesium (Mg) is not tracked: the fertilizer catalog only stores N, P and K percentages.',
+            'window'    => ['from' => $from, 'to' => $to],
+            'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
+            'unit'      => 'kg/ha (fertilising units per hectare)',
+            'nutrient'  => $wanted,
+            'tracked_nutrients' => array_map('strtoupper', $tracked),
+            'plots'     => array_slice($rows, 0, 40),
+            'formula'   => 'units = SUM(quantity_applied × nutrient_%_at_entry / 100) — the same formula as the Fertilization report.',
         ];
     }
+
 
     /** @param array<string,mixed> $args */
     private function toolTreatments(array $args): array
@@ -760,7 +846,10 @@ trait AiFarmTools
                 'recorded_value' => round((float) $r->water_quantity, 2),
                 'recorded_unit'  => $r->unit_at_entry,
                 'per_ha'         => self::perHa($qtyM3, $ha),
-                'cost_tnd'       => round($qtyM3 * (float) $r->price_at_entry, 2),
+                // Price is denominated in the RECORDED unit, so the cost uses
+                // the raw value — not the m³-normalised one.
+                'cost_tnd'       => round((float) $r->water_quantity * (float) $r->price_at_entry, 2),
+
             ];
         }
 
@@ -805,20 +894,32 @@ trait AiFarmTools
             ->whereIn('plot_id', $ids);
         $this->applyWindow($q, 'harvest_operations', $from, $to);
 
+        // Window-wide aggregates FIRST. Summing only the listed rows made the
+        // totals silently wrong as soon as the listing hit `limit`.
+        $totals = (clone $q)->selectRaw(
+            'COUNT(*) AS n,
+             COALESCE(SUM(quantity_harvested),0) AS kg,
+             COALESCE(SUM(num_workers * days_worked * daily_rate_at_entry),0) AS cost,
+             MIN(operation_date) AS first_date,
+             MAX(operation_date) AS last_date',
+        )->first();
+
+        $count = (int) ($totals->n ?? 0);
+        $sumKg = (float) ($totals->kg ?? 0);
+        $cost  = (float) ($totals->cost ?? 0);
+        $first = $totals?->first_date ? (string) $totals->first_date : null;
+        $last  = $totals?->last_date ? (string) $totals->last_date : null;
+
         $limit = max(1, min(40, (int) ($args['limit'] ?? 20)));
         $raw = $q->orderBy('operation_date')->limit($limit)->get();
 
-        $rows = []; $sumKg = 0.0; $cost = 0.0; $first = null; $last = null;
+        $rows = [];
         foreach ($raw as $r) {
             $ha = $areas[(string) $r->plot_id] ?? 0.0;
             $kg = (float) $r->quantity_harvested;
             $c  = (float) $r->num_workers * (float) $r->days_worked * (float) $r->daily_rate_at_entry;
-            $sumKg += $kg; $cost += $c;
-            $d = (string) $r->operation_date;
-            $first = $first === null ? $d : min($first, $d);
-            $last  = $last === null ? $d : max($last, $d);
             $rows[] = [
-                'date'      => $d,
+                'date'      => (string) $r->operation_date,
                 'plot'      => $names[(string) $r->plot_id] ?? null,
                 'kg'        => round($kg, 2),
                 'kg_per_ha' => self::perHa($kg, $ha),
@@ -830,15 +931,21 @@ trait AiFarmTools
 
         return [
             'window'         => ['from' => $from, 'to' => $to],
-            'harvest_count'  => count($rows),
+            'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
+            'harvest_count'  => $count,
+            'returned_rows'  => count($rows),
+            'truncated'      => $count > count($rows),
             'first_harvest'  => $first,
             'last_harvest'   => $last,
             'total_kg'       => round($sumKg, 2),
             'kg_per_ha'      => self::perHa($sumKg, $totalHa),
             'labour_cost_tnd' => round($cost, 2),
+            'cost_per_kg_tnd' => $sumKg > 0 ? round($cost / $sumKg, 3) : null,
+            'totals_note'    => 'Totals cover the WHOLE window even when `rows` is truncated.',
             'rows'           => $rows,
         ];
     }
+
 
     /** @param array<string,mixed> $args */
     private function toolCostPerHa(array $args): array
@@ -850,13 +957,15 @@ trait AiFarmTools
         $ids  = array_map(static fn ($p) => $p->id, $plots);
         $want = (string) ($args['type'] ?? 'all');
 
+        // Same expressions as ReportController::productionCost — including the
+        // price_history fallback — so the assistant and the Production-cost
+        // report can never disagree. Water uses the RAW recorded quantity
+        // because price_at_entry is denominated in the recorded unit.
         $costExpr = [
-            // Water volumes must be converted to the priced unit (m³) first,
-            // otherwise litre-denominated rows inflate the cost 1000×.
-            'irrigation'    => '('.self::m3Expr().') * price_at_entry',
-            'fertilization' => 'quantity_applied * price_at_entry',
-            'phytosanitary' => 'quantity_applied * price_at_entry',
-            'harvest'       => 'num_workers * days_worked * daily_rate_at_entry',
+            'irrigation'    => 'op.water_quantity * '.self::priceExpr('water', 'price_at_entry'),
+            'fertilization' => 'op.quantity_applied * '.self::priceExpr('fertilizer', 'price_at_entry', 'fertilizer_id'),
+            'phytosanitary' => 'op.quantity_applied * '.self::priceExpr('pesticide', 'price_at_entry', 'pesticide_id'),
+            'harvest'       => 'op.num_workers * op.days_worked * '.self::priceExpr('labor', 'daily_rate_at_entry'),
         ];
 
         $byPlot = [];
@@ -864,15 +973,16 @@ trait AiFarmTools
             if ($want !== 'all' && $want !== $type) continue;
             $table = self::OP_TABLE[$type];
             if (! Schema::hasTable($table)) continue;
-            $q = DB::table($table)
-                ->selectRaw("plot_id, COALESCE(SUM($expr),0) AS cost")
-                ->whereIn('plot_id', $ids)
-                ->groupBy('plot_id');
-            $this->applyWindow($q, $table, $from, $to);
+            $q = DB::table($table.' as op')
+                ->selectRaw("op.plot_id AS plot_id, COALESCE(SUM($expr),0) AS cost")
+                ->whereIn('op.plot_id', $ids)
+                ->groupBy('op.plot_id');
+            $this->applyWindow($q, 'op', $from, $to);
             foreach ($q->get() as $r) {
                 $byPlot[(string) $r->plot_id][$type] = round((float) $r->cost, 2);
             }
         }
+
 
         $rows = []; $grand = 0.0; $grandHa = 0.0;
         foreach ($plots as $p) {
@@ -891,6 +1001,7 @@ trait AiFarmTools
 
         return [
             'window'   => ['from' => $from, 'to' => $to],
+            'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
             'scope'    => $want,
             'currency' => 'TND',
             'plots'    => array_slice($rows, 0, 40),
@@ -898,7 +1009,16 @@ trait AiFarmTools
                 'total_tnd'       => round($grand, 2),
                 'cost_per_ha_tnd' => self::perHa($grand, $grandHa),
             ],
+            'formulas' => [
+                'irrigation'    => 'SUM(water_quantity × unit price)',
+                'fertilization' => 'SUM(quantity_applied × unit price)',
+                'phytosanitary' => 'SUM(quantity_applied × unit price)',
+                'harvest'       => 'SUM(num_workers × days_worked × daily rate)',
+                'cost_per_ha'   => 'total ÷ surface_area_ha',
+            ],
+            'cost_basis' => 'price_at_entry, falling back to the price_history row effective at the operation date — identical to the Production-cost report.',
         ];
+
     }
 
     /** @param array<string,mixed> $args */

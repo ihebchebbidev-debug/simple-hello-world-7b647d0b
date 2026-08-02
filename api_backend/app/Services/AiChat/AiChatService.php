@@ -73,7 +73,15 @@ final class AiChatService
         $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
-        if ($agentEnabled) {
+        // Fast path: the deterministic pre-fetch already answered the question,
+        // so the planning round would only re-ask for data we hold. Go straight
+        // to the answer call. {@see prefetchIsSufficient}
+        $usedAgent = $agentEnabled && ! $this->prefetchIsSufficient($messages);
+        if ($agentEnabled && ! $usedAgent) {
+            Log::info('ai.chat.fast_path', ['tools' => count($this->lastPrefetchCalls)]);
+        }
+
+        if ($usedAgent) {
             try {
                 $buf = '';
                 $reply = $this->agent->run($payload, static function (string $d) use (&$buf) { $buf .= $d; });
@@ -89,20 +97,23 @@ final class AiChatService
                 $payload = $this->buildOpenRouterMessages($messages, $locale, false);
                 $reply = $this->openRouter->chat($payload, 'answer');
             }
+        } elseif ($agentEnabled) {
+            $reply = $this->openRouter->chat($this->finalAnswerPayload($payload), 'answer');
         } else {
             $reply = $this->openRouter->chat($payload, 'answer');
         }
         $this->recordUsage($subjectId, $payload);
 
         $evidence = array_merge(
-            $agentEnabled ? $this->agent->lastEvidence() : [],
+            $usedAgent ? $this->agent->lastEvidence() : [],
             $this->lastPrefetchEvidence,
         );
+
         $final = $this->selfCheck($reply, $messages, $locale, $payload, $evidence);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
         }
-        $final['reply'] .= $this->evidenceFooter($agentEnabled, $locale, $final['reply']);
+        $final['reply'] .= $this->evidenceFooter($usedAgent, $locale, $final['reply']);
         $this->cachePut($earlyKey, $final['reply']);
 
         return [
@@ -155,7 +166,11 @@ final class AiChatService
             $onDelta($chunk);
         };
 
-        if ($agentEnabled) {
+        // Fast path — see reply(). Saves one full non-streamed planning
+        // round-trip, so the first token reaches the client immediately.
+        $usedAgent = $agentEnabled && ! $this->prefetchIsSufficient($messages);
+
+        if ($usedAgent) {
             try {
                 $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
             } catch (\Throwable $e) {
@@ -171,6 +186,22 @@ final class AiChatService
                     $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
                 }
             }
+        } elseif ($agentEnabled) {
+            Log::info('ai.chat.fast_path', ['tools' => count($this->lastPrefetchCalls)]);
+            $this->emitPrefetchEvents($onEvent);
+            try {
+                $streamed = $this->openRouter->chatStream($this->finalAnswerPayload($payload), $trackedDelta, 'answer');
+            } catch (\Throwable $e) {
+                Log::warning('ai.chat.fast_path_failed', ['message' => $e->getMessage()]);
+                if (trim($emitted) !== '') {
+                    $streamed = trim($emitted);
+                } else {
+                    // Nothing rendered yet: fall back to the full agent loop so
+                    // the user still gets a complete answer, never an error.
+                    $usedAgent = true;
+                    $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
+                }
+            }
         } else {
             $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
         }
@@ -178,7 +209,7 @@ final class AiChatService
         $this->recordUsage($subjectId, $payload);
 
         $evidence = array_merge(
-            $agentEnabled ? $this->agent->lastEvidence() : [],
+            $usedAgent ? $this->agent->lastEvidence() : [],
             $this->lastPrefetchEvidence,
         );
         $final = $this->selfCheck($streamed, $messages, $locale, $payload, $evidence);
@@ -186,7 +217,8 @@ final class AiChatService
             $this->recordUsage($subjectId, $payload);
         }
 
-        $footer = $this->evidenceFooter($agentEnabled, $locale, $final['reply']);
+        $footer = $this->evidenceFooter($usedAgent, $locale, $final['reply']);
+
         if ($footer !== '') {
             $final['reply'] .= $footer;
             // Revised replies are re-sent whole through the `revise` event, so
@@ -663,6 +695,110 @@ INSTR;
         return ['role' => 'system', 'content' => $header."\n\n".implode("\n\n", $blocks)];
     }
 
+    /**
+     * True when the deterministic pre-fetch already holds everything the answer
+     * needs, so the model's planning round would just re-request data we have.
+     *
+     * Deliberately conservative — the agent loop stays in charge of anything
+     * that smells like several lookups, a comparison, a ranking or an
+     * open-ended analysis. A false negative only costs the usual latency; a
+     * false positive would produce a half-answered question.
+     */
+    private function prefetchIsSufficient(array $messages): bool
+    {
+        if (! (bool) config('openrouter.agent.fast_path', true)) {
+            return false;
+        }
+        if ($this->lastPrefetchCalls === [] || count($this->lastPrefetchCalls) > 2) {
+            return false;
+        }
+
+        // Every pre-fetched tool must have actually resolved. A `plot_not_found`
+        // needs the agent's repair round.
+        foreach ($this->lastPrefetchCalls as $call) {
+            if (($call['result']['ok'] ?? false) !== true) {
+                return false;
+            }
+        }
+
+        $question = $this->lastUserMessage($messages);
+        if ($question === '' || $this->isDispute($question)) {
+            return false;
+        }
+        if (mb_strlen($question) > 320 || substr_count($question, '?') > 1) {
+            return false;
+        }
+
+        // Multi-lookup / analytical phrasing → keep the agent loop.
+        $q = ' '.mb_strtolower(strtr($question, [
+            'à' => 'a', 'â' => 'a', 'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+            'î' => 'i', 'ï' => 'i', 'ô' => 'o', 'ö' => 'o', 'ù' => 'u', 'û' => 'u', 'ç' => 'c',
+        ])).' ';
+        foreach ([
+            'compar', 'versus', ' vs ', 'evolution', 'tendance', 'trend', 'progress',
+            'pourquoi', 'why', 'analyse', 'analys', 'explique', 'explain', 'recommand', 'recommend',
+            'classe', 'classement', 'ranking', 'top ', 'meilleur', 'pire', 'worst', 'best',
+            'toutes les parcelles', 'chaque parcelle', 'all plots', 'every plot',
+            'par parcelle', 'per plot', 'repartition', 'breakdown', 'resume general', 'bilan complet',
+        ] as $needle) {
+            if (str_contains($q, $needle)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The pre-fetched payload plus the same "write the final answer now" pin the
+     * agent loop uses before its streaming round, so the fast path produces an
+     * answer of identical shape and discipline.
+     *
+     * @param  array<int, array<string, mixed>>  $payload
+     * @return array<int, array<string, mixed>>
+     */
+    private function finalAnswerPayload(array $payload): array
+    {
+        $payload[] = [
+            'role'    => 'user',
+            'content' => '[internal] The data you need is already in the system message above. '
+                .'Do not call any tools. Write the final answer for the user now, following the voice, '
+                .'precision and formatting rules from the system prompt. Every figure you state must appear '
+                .'literally in that data — never add, average or extrapolate. State the scope you actually '
+                .'have (plot + period). If a block is empty, say plainly that nothing is recorded for that '
+                .'plot and period. If any result carries `_truncated`, `warnings`, `plot_match_warning` or '
+                .'`date_warning`, mention it in one short line before the numbers.',
+        ];
+
+        return $payload;
+    }
+
+    /**
+     * Replay the pre-fetched lookups as tool events so the fast path shows the
+     * same "consulting the data" activity in the UI as the agent loop.
+     */
+    private function emitPrefetchEvents(?callable $onEvent): void
+    {
+        if ($onEvent === null) {
+            return;
+        }
+        foreach ($this->lastPrefetchCalls as $call) {
+            $onEvent(['type' => 'tool_start', 'name' => $call['name'], 'args' => $call['args']]);
+            $onEvent([
+                'type'    => 'tool_end',
+                'name'    => $call['name'],
+                'ok'      => true,
+                'preview' => mb_substr(
+                    json_encode($call['result'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '',
+                    0,
+                    240,
+                ),
+            ]);
+        }
+    }
+
+
+
 
     /**
      * Compact system prompt used in agent (tool-calling) mode. No pre-baked
@@ -695,11 +831,14 @@ Reasoning protocol:
 7. Call the smallest set of tools you need, then write the final answer.
 8. "détail" / "détails" / "la liste" / "le relevé" of operations = the user wants the individual rows, NOT a summary. Call the matching `*_history` tool. An aggregate tool alone can NEVER answer a "détail" question.
 9. If the user disputes a figure you gave ("je sais que c'est 448", "ce n'est pas ça"), do NOT restate or defend the number. Re-query with the listing tool for the same scope, show the rows, and compare. If the totals still differ, say which filters yours used (`applied_filters`) and name the likely cause — different campaign, a wider/narrower window, or rows recorded in another unit.
+10. NEVER add up the rows of a listing yourself. When `truncated` is true the rows are a sample: quote `window_total_m3` / `total_kg` / `harvest_count` / `daily_totals`, which always cover the full window.
+11. For a farm- or crop-wide "par hectare" figure quote `weighted_m3_per_ha` (total ÷ total ha). Use `average_m3_per_ha` only when the user explicitly asks for the mean across plots, and say which one you used.
+
 
 ## Tool routing cheat-sheet
 - water per hectare, TOTAL volume, number of irrigations (one plot, a date, a range, a whole crop, with exclusions) → `water_per_ha` (`plot`, `crop`, `exclude_plots`, `from`, `to`) — aggregate only
 - "le détail des irrigations du X au Y" → `irrigation_history` (`plot`, `from`, `to`), optionally together with `water_per_ha` for the totals
-- N / P / K units per hectare → `nutrient_per_ha` (Mg is NOT tracked — say so explicitly if asked, do not substitute another nutrient)
+- N / P / K / Mg / Ca / S units per hectare → `nutrient_per_ha` (`nutrient: "mg"` for magnesium). Report only the nutrients listed in `tracked_nutrients`; if one is absent, say it is not recorded instead of substituting another.
 - treatments: count, dates, chronology, last one, product used, composition, dose/ha, volume/ha → `treatments` (`pest: "mildiou"`, `product`, `order: "asc"` for chronological, `limit: 2` for the last two)
 - fertilization log, "combien de fois le produit X", last fertilization date → `fertilization_history` (`product`, `limit: 1` + default desc order for the latest)
 - irrigation events / last N irrigation dates → `irrigation_history` (`limit: 3`)

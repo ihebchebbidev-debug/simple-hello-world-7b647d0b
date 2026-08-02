@@ -135,7 +135,19 @@ return [
         'enabled'         => (bool) env('OPENROUTER_AGENT_ENABLED', true),
         'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 5),
         'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 6000),
+
+        // Skip the (non-streamed) planning round when the deterministic
+        // pre-fetch already holds the answer — saves one full LLM round-trip
+        // on simple single-metric questions. Set false to always plan.
+        'fast_path'       => (bool) env('AI_FAST_PATH', true),
+
+        // Run a round's distinct tool calls concurrently. Off by default:
+        // Laravel's concurrency drivers fork a process per task, which on a
+        // small container can cost more than the queries themselves.
+        // Deduplication of identical calls is always on, flag or not.
+        'parallel_tools'  => (bool) env('AI_PARALLEL_TOOLS', false),
     ],
+
 
     // Prompt cache — hash(system+messages+model) → cached reply.
     'cache' => [
