@@ -143,7 +143,7 @@ final class AiQuestionPlannerTest extends TestCase
         $args = $this->argsFor($calls, 'product_usage');
         $this->assertNotNull($args);
         $this->assertSame('P4', $args['plot']);
-        $this->assertSame('amin', $args['query']);
+        $this->assertSame('acides amines', $args['query']);
     }
 
     public function test_dispute_about_naturamin_stays_on_product_usage(): void
@@ -157,5 +157,47 @@ final class AiQuestionPlannerTest extends TestCase
         $this->assertSame(['product_usage'], $this->names($calls));
         $this->assertSame('P4', $this->argsFor($calls, 'product_usage')['plot']);
         $this->assertSame('Naturamin', $this->argsFor($calls, 'product_usage')['query']);
+    }
+
+    public function test_named_campaign_scopes_the_metric_tool(): void
+    {
+        $calls = $this->plan('Quelle est la consommation d\'eau de la parcelle P2 sur la campagne 2024-2025 ?');
+
+        $args = $this->argsFor($calls, 'water_per_ha');
+        $this->assertNotNull($args);
+        $this->assertSame('2024-2025', $args['campaign']);
+        $this->assertSame('P2', $args['plot']);
+    }
+
+    public function test_current_season_resolves_to_the_active_campaign(): void
+    {
+        $args = $this->argsFor($this->plan('Coût de la parcelle P1 cette saison ?'), 'cost_per_ha');
+
+        $this->assertNotNull($args);
+        $this->assertSame('active', $args['campaign'] ?? null);
+    }
+
+    public function test_season_over_season_question_routes_to_campaign_compare(): void
+    {
+        $calls = $this->plan('Avons-nous consommé plus d\'eau sur la campagne 2024-2025 par rapport à la précédente ?');
+
+        $args = $this->argsFor($calls, 'campaign_compare');
+        $this->assertNotNull($args);
+        $this->assertSame('2024-2025', $args['campaign_a']);
+        $this->assertSame('water_m3', $args['metric']);
+    }
+
+    public function test_data_quality_question_routes_to_the_audit_tool(): void
+    {
+        $calls = $this->plan('Les données de la parcelle P2 sont-elles fiables ? je pense qu\'il manque des saisies');
+
+        $args = $this->argsFor($calls, 'data_quality');
+        $this->assertNotNull($args);
+        $this->assertSame('P2', $args['plot']);
+    }
+
+    public function test_sync_question_routes_to_sync_status(): void
+    {
+        $this->assertNotNull($this->argsFor($this->plan('Y a-t-il des données non synchronisées depuis l\'application mobile ?'), 'sync_status'));
     }
 }

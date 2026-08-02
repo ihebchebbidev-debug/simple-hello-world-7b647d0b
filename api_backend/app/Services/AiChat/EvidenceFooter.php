@@ -33,7 +33,10 @@ final class EvidenceFooter
         'get_operations'        => ['fr' => 'Opérations (détail)',        'en' => 'Operations (detail)'],
         'aggregate_operations'  => ['fr' => 'Agrégation d’opérations',    'en' => 'Aggregated operations'],
         'compare_periods'       => ['fr' => 'Comparaison de périodes',    'en' => 'Period comparison'],
+        'campaign_compare'      => ['fr' => 'Comparaison de campagnes',   'en' => 'Campaign comparison'],
         'recent_operations'     => ['fr' => 'Opérations récentes',        'en' => 'Recent operations'],
+        'data_quality'          => ['fr' => 'Audit qualité des données',  'en' => 'Data quality audit'],
+        'sync_status'           => ['fr' => 'État de synchronisation',    'en' => 'Sync status'],
     ];
 
     /**

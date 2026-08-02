@@ -44,6 +44,7 @@ trait AiFarmTools
         $exclude = ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Plot names or UUIDs to exclude (e.g. ["P1"]).'];
         $from    = ['type' => 'string', 'description' => 'Start date YYYY-MM-DD or a natural phrase ("juillet 2026", "aujourd\'hui").'];
         $to      = ['type' => 'string', 'description' => 'End date YYYY-MM-DD or natural phrase. Omit both for all-time / "jusqu\'à ce jour".'];
+        $campaign = ['type' => 'string', 'description' => 'Campaign / season name, id, or "active"/"en cours". When given and from/to are omitted, the window becomes the campaign window (start_date to end_date). Use for "campagne 2024-2025", "cette saison".'];
 
         return [
             $this->fn('plot_info', 'Identity card of one or more plots: id, name, surface_area_ha, crop_type, variety, active campaign, and the last operation date of each type. Use for "quelle est la surface de la parcelle X".', [
@@ -57,6 +58,7 @@ trait AiFarmTools
                 'exclude_plots' => $exclude,
                 'from'          => $from,
                 'to'            => $to,
+                'campaign'            => $campaign,
             ]),
 
             $this->fn('nutrient_per_ha', 'Fertilization nutrient balance: kg of N, P, K, Mg, Ca, S applied and units/ha (kg/ha) per plot over a window. Use for "combien d\'unités/ha d\'azote / de magnésium a reçu la parcelle X".', [
@@ -67,6 +69,7 @@ trait AiFarmTools
 
                 'from'          => $from,
                 'to'            => $to,
+                'campaign'            => $campaign,
             ]),
 
             $this->fn('treatments', 'Phytosanitary treatment log with product name, chemical composition, dose, water volume, volume/ha and cost. Filter by target pest (mildiou, oïdium, cicadelle…) and/or product. Use for treatment counts, dates, chronology, last treatment, product compositions and volume/ha.', [
@@ -76,6 +79,7 @@ trait AiFarmTools
                 'product'    => ['type' => 'string', 'description' => 'Pesticide name substring.'],
                 'from'       => $from,
                 'to'         => $to,
+                'campaign'         => $campaign,
                 'order'      => ['type' => 'string', 'enum' => ['asc', 'desc'], 'description' => 'asc = chronological, desc = most recent first (default).'],
                 'limit'      => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
             ]),
@@ -86,6 +90,7 @@ trait AiFarmTools
                 'product' => ['type' => 'string', 'description' => 'Fertilizer name substring.'],
                 'from'    => $from,
                 'to'      => $to,
+                'campaign'      => $campaign,
                 'order'   => ['type' => 'string', 'enum' => ['asc', 'desc']],
                 'limit'   => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
             ]),
@@ -96,6 +101,7 @@ trait AiFarmTools
                 'query'   => ['type' => 'string', 'description' => 'Product name or distinctive family substring, e.g. "Naturamin" or "amin".'],
                 'from'    => $from,
                 'to'      => $to,
+                'campaign'      => $campaign,
                 'order'   => ['type' => 'string', 'enum' => ['asc', 'desc']],
                 'limit'   => ['type' => 'integer', 'minimum' => 1, 'maximum' => 80],
             ], ['query']),
@@ -105,6 +111,7 @@ trait AiFarmTools
                 'crop'  => $crop,
                 'from'  => $from,
                 'to'    => $to,
+                'campaign'    => $campaign,
                 'order' => ['type' => 'string', 'enum' => ['asc', 'desc']],
                 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
             ]),
@@ -114,6 +121,7 @@ trait AiFarmTools
                 'crop'  => $crop,
                 'from'  => $from,
                 'to'    => $to,
+                'campaign'    => $campaign,
                 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
             ]),
 
@@ -123,12 +131,35 @@ trait AiFarmTools
                 'type' => ['type' => 'string', 'enum' => ['irrigation', 'fertilization', 'phytosanitary', 'harvest', 'all']],
                 'from' => $from,
                 'to'   => $to,
+                'campaign'   => $campaign,
             ]),
 
             $this->fn('product_info', 'Look up a fertilizer or pesticide by name: unit, composition (N-P-K % for fertilizers, chemical_composition for pesticides) and current + historical price per unit. Use for "quel est le prix de X" and "quelle est la composition de Y".', [
                 'query' => ['type' => 'string', 'description' => 'Product name, 2+ chars.'],
                 'kind'  => ['type' => 'string', 'enum' => ['fertilizer', 'pesticide', 'any']],
             ], ['query']),
+
+            $this->fn('campaign_compare', 'Compare one metric between two campaigns / seasons ("2024-2025" vs "2025-2026"), optionally restricted to a plot or a crop. Returns both campaign windows, their totals, their per-hectare values and the delta + percent change. Use for any season-over-season question ("a-t-on consommé plus d\'eau que la saison dernière ?").', [
+                'campaign_a' => ['type' => 'string', 'description' => 'First campaign name or id, or "active" for the current season.'],
+                'campaign_b' => ['type' => 'string', 'description' => 'Second campaign name or id. Omit to auto-pick the campaign immediately preceding campaign_a.'],
+                'metric'     => ['type' => 'string', 'enum' => ['water_m3', 'fertilizer_qty', 'treatments_count', 'harvest_kg', 'cost_tnd'], 'description' => 'Default cost_tnd.'],
+                'plot'       => $plot,
+                'crop'       => $crop,
+            ], ['campaign_a']),
+
+            $this->fn('data_quality', 'Audit the RECORDS THEMSELVES rather than the agronomy: operations whose cost resolves to 0 (missing price snapshot AND no price_history row), operations with a null/zero quantity, plots with no surface_area_ha (which makes every per-hectare figure impossible), operations not attached to any campaign, mixed water units, future-dated rows and likely duplicates. Call this whenever a figure looks too low/too round, when a per-ha value is null, or when the user asks "les donnees sont-elles completes / fiables ?". Also call it BEFORE blaming the data in an answer.', [
+                'plot'   => $plot,
+                'crop'   => $crop,
+                'from'   => $from,
+                'to'     => $to,
+                'campaign' => $campaign,
+                'checks' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['missing_price', 'missing_quantity', 'missing_surface', 'missing_campaign', 'unit_mismatch', 'future_dated', 'duplicates']], 'description' => 'Restrict to some checks; default all.'],
+            ]),
+
+            $this->fn('sync_status', 'Mobile-app synchronisation health from the `postings` queue: counts by status (pending / failed / synced), the oldest pending submission, failure samples with their error message, and per-operation-type pending counts. Use for "y a-t-il des donnees non synchronisees ?" and, crucially, to WARN the user that a total may be incomplete when pending or failed postings exist.', [
+                'status' => ['type' => 'string', 'enum' => ['pending', 'failed', 'synced', 'all'], 'description' => 'Default all.'],
+                'limit'  => ['type' => 'integer', 'minimum' => 1, 'maximum' => 20],
+            ]),
         ];
     }
 
@@ -149,6 +180,9 @@ trait AiFarmTools
             'harvest_history'       => $this->toolHarvestHistory($args),
             'cost_per_ha'           => $this->toolCostPerHa($args),
             'product_info'          => $this->toolProductInfo($args),
+            'campaign_compare'      => $this->toolCampaignCompare($args),
+            'data_quality'          => $this->toolDataQuality($args),
+            'sync_status'           => $this->toolSyncStatus($args),
             default                 => null,
         };
     }
@@ -316,10 +350,71 @@ trait AiFarmTools
         // fallback is dangerous: the user asks for June and silently gets a
         // single day. Dropping the bound widens the window instead, and
         // appliedFilters() reports the discrepancy back to the model.
-        return [
+        $window = [
             ! empty($args['from']) ? $this->boundOrNull($args['from'], 'from') : null,
             ! empty($args['to']) ? $this->boundOrNull($args['to'], 'to') : null,
         ];
+
+        // A campaign is a named season window. Explicit from/to always win —
+        // the user asked for a narrower slice inside that season.
+        $this->campaignNote = null;
+        if (! empty($args['campaign'])) {
+            $c = $this->resolveCampaign((string) $args['campaign']);
+            if ($c === null) {
+                $this->campaignNote = 'Campaign "'.$args['campaign'].'" was not found; the window was NOT restricted to a campaign. Call list_campaigns to get the real names.';
+            } else {
+                $this->campaignNote = 'Scoped to campaign "'.$c->name.'" ('.$c->start_date.' → '.$c->end_date.').';
+                $window[0] ??= $c->start_date;
+                $window[1] ??= $c->end_date;
+            }
+        }
+
+        return $window;
+    }
+
+    /** Set by windowFrom(); surfaced through appliedFilters(). */
+    private ?string $campaignNote = null;
+
+    /**
+     * Resolve a campaign label ("2024-2025", "active", "en cours", a uuid)
+     * to its row. Matching mirrors resolvePlots(): exact id, exact name,
+     * normalised equality, then substring.
+     */
+    private function resolveCampaign(string $label): ?object
+    {
+        if (! Schema::hasTable('campaigns')) return null;
+        $raw = trim($label);
+        if ($raw === '') return null;
+
+        $base = fn () => DB::table('campaigns')->select('id', 'name', 'start_date', 'end_date', 'is_active');
+
+        if (in_array(mb_strtolower($raw), ['active', 'current', 'en cours', 'actuelle', 'cette saison', 'this season'], true)) {
+            return $base()->where('is_active', true)->orderByDesc('start_date')->first();
+        }
+
+        $hit = $base()->where('id', $raw)->first() ?? $base()->where('name', $raw)->first();
+        if ($hit) return $hit;
+
+        $all  = $base()->orderByDesc('start_date')->limit(60)->get();
+        $norm = self::normLabel($raw);
+        foreach ($all as $c) {
+            if (self::normLabel((string) $c->name) === $norm) return $c;
+        }
+        foreach ($all as $c) {
+            if ($norm !== '' && str_contains(self::normLabel((string) $c->name), $norm)) return $c;
+        }
+
+        return null;
+    }
+
+    /** The campaign whose window ends just before $c starts. */
+    private function previousCampaign(object $c): ?object
+    {
+        return DB::table('campaigns')
+            ->select('id', 'name', 'start_date', 'end_date', 'is_active')
+            ->where('start_date', '<', $c->start_date)
+            ->orderByDesc('start_date')
+            ->first();
     }
 
     private function boundOrNull(mixed $v, string $edge): ?string
@@ -391,7 +486,8 @@ trait AiFarmTools
             'date_from'       => $from,
             'date_to'         => $to,
             'bounds'          => 'inclusive on both ends (operation_date >= date_from AND <= date_to)',
-            'campaign_scope'  => 'none — every campaign is included. The Reports screen filters by campaign, so a figure shown there can legitimately differ.',
+            'campaign_scope'  => $this->campaignNote
+                ?? 'none — every campaign is included. The Reports screen filters by campaign, so a figure shown there can legitimately differ.',
         ];
 
         if ($this->plotMatchNote !== null) {
@@ -1227,6 +1323,452 @@ trait AiFarmTools
             return ['error' => 'product_not_found', 'query' => $query];
         }
         return ['query' => $query, 'products' => $out, 'count' => count($out)];
+    }
+
+    /**
+     * Season-over-season comparison of one metric between two campaigns.
+     *
+     * @param  array<string,mixed>  $args
+     * @return array<string,mixed>
+     */
+    private function toolCampaignCompare(array $args): array
+    {
+        if (! Schema::hasTable('campaigns')) {
+            return ['error' => 'campaigns_unavailable'];
+        }
+
+        $a = $this->resolveCampaign((string) ($args['campaign_a'] ?? ''));
+        if ($a === null) {
+            return [
+                'error'              => 'campaign_not_found',
+                'asked'              => $args['campaign_a'] ?? null,
+                'available_campaigns' => DB::table('campaigns')->orderByDesc('start_date')->limit(20)->pluck('name')->all(),
+            ];
+        }
+
+        $b = ! empty($args['campaign_b'])
+            ? $this->resolveCampaign((string) $args['campaign_b'])
+            : $this->previousCampaign($a);
+
+        if ($b === null) {
+            return [
+                'error'              => 'comparison_campaign_not_found',
+                'campaign_a'         => $a->name,
+                'asked'              => $args['campaign_b'] ?? '(previous campaign)',
+                'available_campaigns' => DB::table('campaigns')->orderByDesc('start_date')->limit(20)->pluck('name')->all(),
+            ];
+        }
+
+        // Plot scope is optional here: no plot/crop means the whole farm.
+        $plots = ($args['plot'] ?? $args['crop'] ?? null) !== null ? $this->resolvePlots($args) : [];
+        $ids   = array_map(static fn ($p) => (string) $p->id, $plots);
+        $ha    = array_sum(array_map(static fn ($p) => self::ha($p), $plots));
+
+        $metric = (string) ($args['metric'] ?? 'cost_tnd');
+
+        $sideA = $this->campaignMetric($metric, $a, $ids);
+        $sideB = $this->campaignMetric($metric, $b, $ids);
+
+        $delta   = round($sideA - $sideB, 2);
+        $percent = $sideB > 0 ? round(($delta / $sideB) * 100, 1) : null;
+
+        $shape = static fn (object $c, float $v) => [
+            'campaign'  => $c->name,
+            'window'    => ['from' => (string) $c->start_date, 'to' => (string) $c->end_date],
+            'value'     => round($v, 2),
+            'per_ha'    => $ha > 0 ? round($v / $ha, 2) : null,
+        ];
+
+        return [
+            'metric'          => $metric,
+            'unit'            => self::METRIC_UNIT[$metric] ?? '',
+            'a'               => $shape($a, $sideA),
+            'b'               => $shape($b, $sideB),
+            'delta'           => $delta,
+            'percent_change'  => $percent,
+            'direction'       => $delta > 0 ? 'higher in A' : ($delta < 0 ? 'lower in A' : 'equal'),
+            'plot_scope'      => $ids === [] ? 'whole farm (all plots)' : array_map(static fn ($p) => $p->name, $plots),
+            'surface_area_ha' => $ha > 0 ? round($ha, 2) : null,
+            'note'            => 'Campaign windows come from campaigns.start_date/end_date and are inclusive. Operations are matched on operation_date inside that window.',
+        ];
+    }
+
+    private const METRIC_UNIT = [
+        'water_m3'         => 'm3',
+        'fertilizer_qty'   => 'recorded fertilizer unit (kg/L as entered)',
+        'treatments_count' => 'applications',
+        'harvest_kg'       => 'kg',
+        'cost_tnd'         => 'TND',
+    ];
+
+    /** @param array<int,string> $plotIds */
+    private function campaignMetric(string $metric, object $c, array $plotIds): float
+    {
+        $from = (string) $c->start_date;
+        $to   = (string) $c->end_date;
+
+        $scoped = function (string $table, mixed $q) use ($plotIds, $from, $to) {
+            if ($plotIds !== []) $q->whereIn($table.'.plot_id', $plotIds);
+            $this->applyWindow($q, $table, $from, $to);
+            return $q;
+        };
+
+        switch ($metric) {
+            case 'water_m3':
+                if (! Schema::hasTable('irrigation_operations')) return 0.0;
+                $q = DB::table('irrigation_operations as op')
+                    ->selectRaw('COALESCE(SUM('.self::m3Expr('op.water_quantity', 'op.unit_at_entry').'),0) AS v');
+                return (float) $scoped('op', $q)->value('v');
+
+            case 'fertilizer_qty':
+                if (! Schema::hasTable('fertilization_operations')) return 0.0;
+                $q = DB::table('fertilization_operations as op')
+                    ->selectRaw('COALESCE(SUM(op.quantity_applied),0) AS v');
+                return (float) $scoped('op', $q)->value('v');
+
+            case 'treatments_count':
+                if (! Schema::hasTable('phytosanitary_operations')) return 0.0;
+                $q = DB::table('phytosanitary_operations as op')->selectRaw('COUNT(*) AS v');
+                return (float) $scoped('op', $q)->value('v');
+
+            case 'harvest_kg':
+                if (! Schema::hasTable('harvest_operations')) return 0.0;
+                $q = DB::table('harvest_operations as op')
+                    ->selectRaw('COALESCE(SUM(op.quantity_harvested),0) AS v');
+                return (float) $scoped('op', $q)->value('v');
+
+            case 'cost_tnd':
+            default:
+                $exprs = [
+                    'irrigation_operations'    => 'op.water_quantity * '.self::priceExpr('water', 'price_at_entry'),
+                    'fertilization_operations' => 'op.quantity_applied * '.self::priceExpr('fertilizer', 'price_at_entry', 'fertilizer_id'),
+                    'phytosanitary_operations' => 'op.quantity_applied * '.self::priceExpr('pesticide', 'price_at_entry', 'pesticide_id'),
+                    'harvest_operations'       => 'op.num_workers * op.days_worked * '.self::priceExpr('labor', 'daily_rate_at_entry'),
+                ];
+                $total = 0.0;
+                foreach ($exprs as $table => $expr) {
+                    if (! Schema::hasTable($table)) continue;
+                    $q = DB::table($table.' as op')->selectRaw("COALESCE(SUM($expr),0) AS v");
+                    $total += (float) $scoped('op', $q)->value('v');
+                }
+                return $total;
+        }
+    }
+
+    // ─── Step 2: data quality & sync audit ──────────────────────────────
+
+    /**
+     * Columns carrying the priced quantity + its price snapshot, per
+     * operation type. A row is "unpriced" when the snapshot is null/0 AND
+     * price_history has nothing for that entity — those rows silently drop
+     * out of every cost figure, which is the single most common reason the
+     * assistant under-reports a cost versus the Reports screen.
+     *
+     * @var array<string, array{0:string,1:string,2:string,3:string|null}>
+     *      type => [qty column, price column, price entity_type, entity FK]
+     */
+    private const QUALITY_PRICE = [
+        'irrigation'    => ['water_quantity', 'price_at_entry', 'water', null],
+        'fertilization' => ['quantity_applied', 'price_at_entry', 'fertilizer', 'fertilizer_id'],
+        'phytosanitary' => ['quantity_applied', 'price_at_entry', 'pesticide', 'pesticide_id'],
+        'harvest'       => ['quantity_harvested', 'daily_rate_at_entry', 'labor', null],
+    ];
+
+    /**
+     * Record-level audit of the operations in scope.
+     *
+     * @param  array<string,mixed>  $args
+     * @return array<string,mixed>
+     */
+    private function toolDataQuality(array $args): array
+    {
+        [$from, $to] = $this->windowFrom($args);
+
+        // Plot scope is optional here: "are my data complete?" is usually a
+        // farm-wide question, so an unmatched label must not abort the audit.
+        $plotIds = null;
+        $names   = [];
+        if (! empty($args['plot']) || ! empty($args['crop'])) {
+            $plots = $this->resolvePlots($args);
+            foreach ($plots as $p) {
+                $names[(string) $p->id] = (string) $p->name;
+            }
+            $plotIds = array_keys($names);
+            if ($plotIds === []) {
+                return [
+                    'error'           => 'plot_not_found',
+                    'asked'           => $args['plot'] ?? ($args['crop'] ?? null),
+                    'available_plots' => Schema::hasTable('plots')
+                        ? DB::table('plots')->orderBy('name')->limit(40)->pluck('name')->all()
+                        : [],
+                ];
+            }
+        }
+
+        $requested = array_values(array_filter(
+            (array) ($args['checks'] ?? []),
+            static fn ($c) => is_string($c) && $c !== '',
+        ));
+        $wants = static fn (string $check): bool => $requested === [] || in_array($check, $requested, true);
+
+        $scope = function (string $table) use ($plotIds, $from, $to) {
+            $q = DB::table($table.' as op');
+            if ($plotIds !== null) $q->whereIn('op.plot_id', $plotIds);
+            if ($from !== null)    $q->where('op.operation_date', '>=', $from);
+            if ($to !== null)      $q->where('op.operation_date', '<=', $to);
+            return $q;
+        };
+
+        $issues   = [];
+        $checked  = [];
+        $totalOps = 0;
+
+        foreach (self::QUALITY_PRICE as $type => [$qtyCol, $priceCol, $entityType, $entityFk]) {
+            $table = self::OP_TABLE[$type];
+            if (! Schema::hasTable($table)) continue;
+
+            $checked[] = $type;
+            $totalOps += (int) $scope($table)->count();
+
+            // Unpriced rows: the same COALESCE chain the cost tools use, so a
+            // row flagged here is exactly a row contributing 0 TND.
+            if ($wants('missing_price') && Schema::hasColumn($table, $priceCol)) {
+                $expr = self::priceExpr($entityType, $priceCol, $entityFk);
+                $rows = $scope($table)
+                    ->whereRaw("COALESCE($expr, 0) = 0")
+                    ->selectRaw('op.id, op.plot_id, op.operation_date')
+                    ->orderByDesc('op.operation_date')
+                    ->limit(5)
+                    ->get()
+                    ->all();
+                $count = (int) $scope($table)->whereRaw("COALESCE($expr, 0) = 0")->count();
+                if ($count > 0) {
+                    $issues[] = [
+                        'check'   => 'missing_price',
+                        'type'    => $type,
+                        'count'   => $count,
+                        'impact'  => 'These operations are costed at 0 TND: every cost / cost per ha figure for this type is UNDER-estimated.',
+                        'fix'     => 'Add a price in Configuration → '.$entityType.' (price history) covering their operation_date.',
+                        'samples' => $this->qualitySamples($rows, $names),
+                    ];
+                }
+            }
+
+            if ($wants('missing_quantity') && Schema::hasColumn($table, $qtyCol)) {
+                $count = (int) $scope($table)->whereRaw("COALESCE(op.$qtyCol, 0) = 0")->count();
+                if ($count > 0) {
+                    $rows = $scope($table)
+                        ->whereRaw("COALESCE(op.$qtyCol, 0) = 0")
+                        ->selectRaw('op.id, op.plot_id, op.operation_date')
+                        ->orderByDesc('op.operation_date')->limit(5)->get()->all();
+                    $issues[] = [
+                        'check'   => 'missing_quantity',
+                        'type'    => $type,
+                        'count'   => $count,
+                        'column'  => $qtyCol,
+                        'impact'  => 'Recorded operations with no quantity: the count is right but the volume/quantity total is too low.',
+                        'samples' => $this->qualitySamples($rows, $names),
+                    ];
+                }
+            }
+
+            if ($wants('missing_campaign') && Schema::hasColumn($table, 'campaign_id')) {
+                $count = (int) $scope($table)->whereNull('op.campaign_id')->count();
+                if ($count > 0) {
+                    $issues[] = [
+                        'check'  => 'missing_campaign',
+                        'type'   => $type,
+                        'count'  => $count,
+                        'impact' => 'These rows belong to no campaign. They appear in date-based answers but vanish from any campaign-filtered report — a frequent source of "the AI and the report disagree".',
+                    ];
+                }
+            }
+
+            if ($wants('future_dated')) {
+                $today = now()->toDateString();
+                $count = (int) $scope($table)->where('op.operation_date', '>', $today)->count();
+                if ($count > 0) {
+                    $issues[] = [
+                        'check'  => 'future_dated',
+                        'type'   => $type,
+                        'count'  => $count,
+                        'impact' => 'Operations dated after '.$today.' — likely a typo in the year or month; they inflate all-time totals and are excluded from "until today" windows.',
+                    ];
+                }
+            }
+
+            if ($wants('duplicates') && Schema::hasColumn($table, $qtyCol)) {
+                $dupCol = $entityFk !== null && Schema::hasColumn($table, $entityFk) ? "op.$entityFk" : "'-'";
+                $dups = $scope($table)
+                    ->selectRaw("op.plot_id, op.operation_date, $dupCol as entity, op.$qtyCol as qty, COUNT(*) as n")
+                    ->groupByRaw("op.plot_id, op.operation_date, $dupCol, op.$qtyCol")
+                    ->havingRaw('COUNT(*) > 1')
+                    ->orderByDesc('n')
+                    ->limit(5)
+                    ->get()
+                    ->all();
+                if ($dups !== []) {
+                    $issues[] = [
+                        'check'   => 'duplicates',
+                        'type'    => $type,
+                        'count'   => count($dups),
+                        'impact'  => 'Same plot + same date + same product + same quantity recorded more than once — possibly a double sync from the mobile app. Totals may be over-stated.',
+                        'samples' => array_map(fn ($d) => [
+                            'plot'       => $names[(string) $d->plot_id] ?? $d->plot_id,
+                            'date'       => (string) $d->operation_date,
+                            'quantity'   => (float) $d->qty,
+                            'occurrences' => (int) $d->n,
+                        ], $dups),
+                    ];
+                }
+            }
+        }
+
+        // Plots with no surface: every per-hectare answer for them is null.
+        if ($wants('missing_surface') && Schema::hasTable('plots')) {
+            $q = DB::table('plots')->whereRaw('COALESCE(surface_area_ha, 0) <= 0');
+            if ($plotIds !== null) $q->whereIn('id', $plotIds);
+            $bad = $q->orderBy('name')->limit(10)->pluck('name')->all();
+            if ($bad !== []) {
+                $issues[] = [
+                    'check'  => 'missing_surface',
+                    'count'  => count($bad),
+                    'plots'  => $bad,
+                    'impact' => 'No surface area: m3/ha, kg/ha and coût/ha are returned as null for these plots and they are excluded from per-hectare averages.',
+                    'fix'    => 'Set surface_area_ha on the plot form.',
+                ];
+            }
+        }
+
+        // Mixed water units inside one window make a raw SUM meaningless.
+        if ($wants('unit_mismatch')
+            && Schema::hasTable('irrigation_operations')
+            && Schema::hasColumn('irrigation_operations', 'unit_at_entry')) {
+            $units = $scope('irrigation_operations')
+                ->selectRaw("LOWER(TRIM(COALESCE(op.unit_at_entry, 'm3'))) as u, COUNT(*) as n")
+                ->groupByRaw("LOWER(TRIM(COALESCE(op.unit_at_entry, 'm3')))")
+                ->get()
+                ->all();
+            if (count($units) > 1) {
+                $issues[] = [
+                    'check'  => 'unit_mismatch',
+                    'type'   => 'irrigation',
+                    'units'  => array_map(static fn ($u) => ['unit' => (string) $u->u, 'operations' => (int) $u->n], $units),
+                    'impact' => 'Irrigation volumes were recorded in more than one unit. Our tools convert litres to m3 automatically, so the assistant figures are correct — but a raw export or a hand-made sum would be wrong.',
+                ];
+            }
+        }
+
+        return [
+            'window'            => ['from' => $from, 'to' => $to],
+            'scope'             => $plotIds === null ? 'whole farm' : array_values($names),
+            'operations_in_scope' => $totalOps,
+            'types_checked'     => $checked,
+            'checks_run'        => $requested === [] ? 'all' : $requested,
+            'issues'            => $issues,
+            'issue_count'       => count($issues),
+            'verdict'           => $issues === []
+                ? 'No data-quality problem detected in this scope — the figures can be quoted as-is.'
+                : 'Problems found. Quote the figures, then state which of them are affected and how (under- or over-estimated).',
+            'applied_filters'   => $this->appliedFilters($args, $from, $to, $names),
+        ];
+    }
+
+    /**
+     * @param  array<int, object>    $rows
+     * @param  array<string, string> $names
+     * @return array<int, array<string, mixed>>
+     */
+    private function qualitySamples(array $rows, array $names): array
+    {
+        return array_map(static fn ($r) => [
+            'id'   => (string) $r->id,
+            'plot' => $names[(string) $r->plot_id] ?? (string) $r->plot_id,
+            'date' => (string) $r->operation_date,
+        ], $rows);
+    }
+
+    /**
+     * Mobile sync queue health. Pending or failed postings mean the database
+     * is behind what the technicians actually recorded, so any total quoted
+     * from it is provisional.
+     *
+     * @param  array<string,mixed>  $args
+     * @return array<string,mixed>
+     */
+    private function toolSyncStatus(array $args): array
+    {
+        if (! Schema::hasTable('postings')) {
+            return [
+                'available' => false,
+                'note'      => 'No mobile sync queue in this database — every recorded operation is already stored server-side.',
+            ];
+        }
+
+        $limit  = max(1, min(20, (int) ($args['limit'] ?? 5)));
+        $filter = (string) ($args['status'] ?? 'all');
+
+        $byStatus = DB::table('postings')
+            ->selectRaw('status, COUNT(*) as n')
+            ->groupBy('status')
+            ->get();
+
+        $counts = [];
+        foreach ($byStatus as $r) {
+            $counts[(string) $r->status] = (int) $r->n;
+        }
+
+        $pending = ($counts['pending'] ?? 0) + ($counts['processing'] ?? 0);
+        $failed  = $counts['failed'] ?? 0;
+
+        $byType = DB::table('postings')
+            ->when($filter !== 'all', fn ($q) => $q->where('status', $filter))
+            ->selectRaw('operation_type, status, COUNT(*) as n')
+            ->groupBy('operation_type', 'status')
+            ->get()
+            ->map(static fn ($r) => [
+                'operation_type' => (string) $r->operation_type,
+                'status'         => (string) $r->status,
+                'count'          => (int) $r->n,
+            ])->all();
+
+        $oldestPending = DB::table('postings')
+            ->whereIn('status', ['pending', 'processing'])
+            ->min('submitted_at');
+
+        $lastSynced = Schema::hasColumn('postings', 'synced_at')
+            ? DB::table('postings')->max('synced_at')
+            : null;
+
+        $failures = $failed > 0
+            ? DB::table('postings')
+                ->where('status', 'failed')
+                ->select('id', 'operation_type', 'error_message', 'retry_count', 'submitted_at')
+                ->orderByDesc('submitted_at')
+                ->limit($limit)
+                ->get()
+                ->map(static fn ($r) => [
+                    'id'             => (string) $r->id,
+                    'operation_type' => (string) $r->operation_type,
+                    'error'          => $r->error_message !== null ? mb_substr((string) $r->error_message, 0, 200) : null,
+                    'retries'        => (int) $r->retry_count,
+                    'submitted_at'   => (string) $r->submitted_at,
+                ])->all()
+            : [];
+
+        return [
+            'available'        => true,
+            'counts_by_status' => $counts,
+            'pending'          => $pending,
+            'failed'           => $failed,
+            'by_operation_type' => $byType,
+            'oldest_pending_submitted_at' => $oldestPending !== null ? (string) $oldestPending : null,
+            'last_synced_at'   => $lastSynced !== null ? (string) $lastSynced : null,
+            'failure_samples'  => $failures,
+            'data_completeness' => ($pending + $failed) === 0
+                ? 'Queue empty — the database reflects everything submitted from the mobile app.'
+                : 'Warning: '.$pending.' pending and '.$failed.' failed submission(s). Any total quoted now may be incomplete; say so in the answer.',
+        ];
     }
 
     /** @return array<int, array<string, mixed>> */

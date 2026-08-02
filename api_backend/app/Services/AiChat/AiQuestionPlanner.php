@@ -69,6 +69,17 @@ final class AiQuestionPlanner
             static fn ($v) => $v !== null,
         );
 
+        // ── Campaign / season scoping ──
+        // A campaign is a named window ("campagne 2024-2025"). When the user
+        // names one, every metric tool must be restricted to it, otherwise the
+        // assistant answers all-time figures that contradict the Reports screen.
+        $campaign = $this->extractCampaign($question, $q);
+        if ($campaign !== null) {
+            // Tools give explicit from/to precedence, so passing both is safe and
+            // lets the answer name the campaign it actually scoped to.
+            $window['campaign'] = $campaign;
+        }
+
         $calls = [];
         $add = static function (string $name, array $args) use (&$calls): void {
             foreach ($calls as $existing) {
@@ -82,6 +93,14 @@ final class AiQuestionPlanner
         // ── Catalog lookups (price / composition). Plot-free by nature. ──
         if ($product = $this->extractCatalogProduct($question, $q)) {
             $add('product_info', ['query' => $product, 'kind' => 'any']);
+        }
+
+        // ── Season-over-season comparison ──
+        if ($campaign !== null && $this->wantsComparison($q)) {
+            $add('campaign_compare', array_merge($scope, [
+                'campaign_a' => $campaign,
+                'metric'     => $this->extractCompareMetric($q),
+            ]));
         }
 
         // ── Water / irrigation ──
@@ -154,6 +173,31 @@ final class AiQuestionPlanner
             ]));
         }
 
+        // ── Data quality / completeness audit ──
+        // "Est-ce fiable ?", "il manque des données", "pourquoi 0 ?" are meta
+        // questions about the RECORDS, not about the agronomy: answering them
+        // with a metric tool produces the very figure the user is doubting.
+        $wantsQuality = $this->has($q, [
+            'fiable', 'fiabilite', 'coherent', 'coherence', 'incoherence', 'incoherent',
+            'donnees manquantes', 'donnee manquante', 'il manque', 'manquant', 'manquantes',
+            'incomplet', 'incomplete', 'completude', 'qualite des donnees', 'anomalie', 'anomalies',
+            'doublon', 'doublons', 'duplicate', 'duplicates', 'erreur de saisie', 'saisie',
+            'data quality', 'missing data', 'audit',
+        ]);
+        if ($wantsQuality) {
+            $add('data_quality', array_merge($scope, $window));
+        }
+
+        // ── Mobile sync backlog ──
+        $wantsSync = $this->has($q, [
+            'synchronisation', 'synchronisations', 'synchronise', 'synchronisees', 'synchro',
+            'non synchronise', 'sync', 'en attente', 'file d attente', 'postings', 'envoi mobile',
+            'application mobile', 'pending', 'echec de synchronisation',
+        ]);
+        if ($wantsSync) {
+            $add('sync_status', ['status' => 'all']);
+        }
+
         // ── Plot identity (surface, culture, cépage) ──
         if ($this->has($q, ['surface', 'superficie', 'hectare', 'combien de ha', 'area', 'cepage', 'variete', 'variety', 'culture'])) {
             $add('plot_info', $scope);
@@ -169,6 +213,53 @@ final class AiQuestionPlanner
     }
 
     // ─── Question extraction ────────────────────────────────────────────
+
+    /**
+     * Pull a campaign / season label out of the question:
+     *   "campagne 2024-2025", "saison 2024/2025", "cette saison",
+     *   "la campagne en cours". Returns a label the tools resolve themselves.
+     */
+    private function extractCampaign(string $question, string $q): ?string
+    {
+        if (preg_match('/\b(?:campagne|saison|season|campaign)\s*[:\-]?\s*(\d{4}\s*[\/\-]\s*\d{2,4})/iu', $question, $m) === 1) {
+            return preg_replace('/\s+/', '', $m[1]);
+        }
+        if (preg_match('/\b(\d{4}\s*[\/\-]\s*\d{2,4})\b/u', $question, $m) === 1
+            && $this->has($q, ['campagne', 'saison', 'season', 'campaign'])) {
+            return preg_replace('/\s+/', '', $m[1]);
+        }
+        if ($this->has($q, ['cette saison', 'saison en cours', 'campagne en cours', 'campagne actuelle', 'this season', 'current campaign'])) {
+            return 'active';
+        }
+        if (preg_match('/\b(?:campagne|saison|season|campaign)\s+(?:de\s+)?([\p{L}\d][\p{L}\d\-\/ ]{1,24})/iu', $question, $m) === 1) {
+            $label = trim($m[1]);
+            if ($label !== '' && ! $this->has($this->normalise($label), ['derniere', 'precedente', 'last', 'previous'])) {
+                return $label;
+            }
+        }
+        return null;
+    }
+
+    /** True when the question asks to compare two periods/seasons. */
+    private function wantsComparison(string $q): bool
+    {
+        return $this->has($q, [
+            'compare', 'comparer', 'comparaison', 'par rapport', 'versus', ' vs ',
+            'saison derniere', 'campagne derniere', 'saison precedente', 'campagne precedente',
+            'annee derniere', 'plus que', 'moins que', 'evolution', 'difference',
+        ]);
+    }
+
+    /** Map the question wording to a campaign_compare metric. */
+    private function extractCompareMetric(string $q): string
+    {
+        if ($this->has($q, ['eau', 'irrigation', 'arrosage', 'water', 'm3', 'm³'])) return 'water_m3';
+        if ($this->has($q, ['recolte', 'rendement', 'harvest', 'yield', 'vendange'])) return 'harvest_kg';
+        if ($this->has($q, ['traitement', 'traitements', 'phytosanitaire', 'treatment'])) return 'treatments_count';
+        if ($this->has($q, ['engrais', 'fertilisation', 'fertilisant', 'fertilization'])) return 'fertilizer_qty';
+
+        return 'cost_tnd';
+    }
 
     /** @param array<int, array{role?: string, content?: string}> $messages */
     private function lastUserQuestion(array $messages): string
