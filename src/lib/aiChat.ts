@@ -51,6 +51,10 @@ export function cleanAssistantText(raw: string): string {
   if (raw.trim() === '') return raw;
 
   const cleaned = raw
+    .replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/gi, '')
+    .replace(/<function(?:=[^>]*)?>[\s\S]*?(?:<\/function>|$)/gi, '')
+    .replace(/<parameter(?:=[^>]*)?>[\s\S]*?(?:<\/parameter>|$)/gi, '')
+    .replace(/<thought>[\s\S]*?(?:<\/thought>|$)/gi, '')
     // Remove stray tool/artifact tokens like `tick :search_catalog`,
     // `tool_call_id: call_123`, or other agent internals from the model stream.
     .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*(?:\{[^}]*\}|\[[^\]]*\]|[^\r\n]*)\s*$/gim, '')

@@ -161,10 +161,11 @@ final class AiChatService
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
         $emitted = '';
-        $trackedDelta = static function (string $chunk) use ($onDelta, &$emitted): void {
+        $sanitizer = new ReplySanitizer();
+        $trackedDelta = $sanitizer->createStreamFilter(static function (string $chunk) use ($onDelta, &$emitted): void {
             $emitted .= $chunk;
             $onDelta($chunk);
-        };
+        });
 
         // Fast path — see reply(). Saves one full non-streamed planning
         // round-trip, so the first token reaches the client immediately.
@@ -173,6 +174,7 @@ final class AiChatService
         if ($usedAgent) {
             try {
                 $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
+                $trackedDelta->flush();
             } catch (\Throwable $e) {
                 Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
                 if (trim($emitted) !== '') {
@@ -184,6 +186,8 @@ final class AiChatService
                     // tool-less call, or the model invents data in the wrong language.
                     $payload = $this->buildOpenRouterMessages($messages, $locale, false);
                     $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
+                    $trackedDelta->flush();
+                    $streamed = $sanitizer->sanitize($streamed);
                 }
             }
         } elseif ($agentEnabled) {
@@ -191,6 +195,8 @@ final class AiChatService
             $this->emitPrefetchEvents($onEvent);
             try {
                 $streamed = $this->openRouter->chatStream($this->finalAnswerPayload($payload), $trackedDelta, 'answer');
+                $trackedDelta->flush();
+                $streamed = $sanitizer->sanitize($streamed);
             } catch (\Throwable $e) {
                 Log::warning('ai.chat.fast_path_failed', ['message' => $e->getMessage()]);
                 if (trim($emitted) !== '') {
@@ -200,10 +206,13 @@ final class AiChatService
                     // the user still gets a complete answer, never an error.
                     $usedAgent = true;
                     $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
+                    $trackedDelta->flush();
                 }
             }
         } else {
             $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
+            $trackedDelta->flush();
+            $streamed = $sanitizer->sanitize($streamed);
         }
 
         $this->recordUsage($subjectId, $payload);
@@ -278,12 +287,15 @@ final class AiChatService
      */
     private function selfCheck(string $reply, array $messages, string $locale, array $payload, array $evidence = []): array
     {
-        $length   = mb_strlen($reply);
+        $sanitizer = new ReplySanitizer();
+        $sanitizedReply = $sanitizer->sanitize($reply);
+        
+        $length   = mb_strlen($sanitizedReply);
         $lastUser = $this->lastUserMessage($messages);
 
-        $check = $this->validator->check($reply, $lastUser, $locale, $evidence);
+        $check = $this->validator->check($sanitizedReply, $lastUser, $locale, $evidence);
         if ($check['ok']) {
-            return ['reply' => $reply, 'revised' => false, 'violations' => []];
+            return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => []];
         }
 
         // Gate: short greetings / one-liners rarely justify a full repair call.
@@ -311,12 +323,12 @@ final class AiChatService
                     Log::warning('ai.chat.unsupported_numbers', [
                         'violation' => $v,
                         'question'  => mb_substr($lastUser, 0, 200),
-                        'reply'     => mb_substr($reply, 0, 500),
+                        'reply'     => mb_substr($sanitizedReply, 0, 500),
                     ]);
                 }
             }
 
-            return ['reply' => $reply, 'revised' => false, 'violations' => $check['violations']];
+            return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
         }
 
         Log::info('ai.chat.self_check_failed', [
@@ -343,7 +355,7 @@ Return ONLY the corrected answer, no meta commentary, no "here is the revised an
 
 Previous draft:
 ---
-{$reply}
+{$sanitizedReply}
 ---
 INSTR;
 
@@ -359,13 +371,28 @@ INSTR;
             ]);
             $revised = trim($this->openRouter->chat($repairPayload, 'repair'));
             if ($revised === '') {
-                return ['reply' => $reply, 'revised' => false, 'violations' => $check['violations']];
+                return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
             }
 
-            return ['reply' => $revised, 'revised' => true, 'violations' => $check['violations']];
+            $revisedSanitized = $sanitizer->sanitize($revised);
+            $reCheck = $this->validator->check($revisedSanitized, $lastUser, $locale, $evidence);
+            
+            $hardViolationsReCheck = array_filter(
+                $reCheck['violations'],
+                static fn (string $v) => str_starts_with($v, 'language_mismatch')
+                    || $v === 'contains_html'
+                    || $v === 'unbalanced_code_fence'
+                    || $v === 'claims_exhaustiveness'
+            );
+
+            if ($sanitizer->leaksReasoning($revisedSanitized) || !empty($hardViolationsReCheck)) {
+                return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
+            }
+
+            return ['reply' => $revisedSanitized, 'revised' => true, 'violations' => $check['violations']];
         } catch (\Throwable $e) {
             Log::warning('ai.chat.self_check_repair_failed', ['message' => $e->getMessage()]);
-            return ['reply' => $reply, 'revised' => false, 'violations' => $check['violations']];
+            return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
         }
     }
 

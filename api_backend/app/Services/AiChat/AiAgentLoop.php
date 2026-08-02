@@ -203,13 +203,32 @@ final class AiAgentLoop
         ];
 
         $emitted = '';
-        $tracking = static function (string $delta) use ($onDelta, &$emitted): void {
+        $sanitizer = new ReplySanitizer();
+        $tracking = $sanitizer->createStreamFilter(static function (string $delta) use ($onDelta, &$emitted): void {
             $emitted .= $delta;
             $onDelta($delta);
-        };
+        });
 
         try {
-            return $this->openRouter->chatStream($transcript, $tracking, 'answer');
+            $rawReply = $this->openRouter->chatStream($transcript, $tracking, 'answer');
+            $tracking->flush();
+            $cleanReply = $sanitizer->sanitize($rawReply);
+            
+            if ($sanitizer->isOnlyInternals($rawReply, $cleanReply)) {
+                $transcript[] = [
+                    'role'    => 'assistant',
+                    'content' => $rawReply,
+                ];
+                $transcript[] = [
+                    'role'    => 'user',
+                    'content' => '[internal] Tools are closed. Answer the question in plain prose based on the data already provided.',
+                ];
+                $rawReply2 = $this->openRouter->chatStream($transcript, $tracking, 'answer');
+                $tracking->flush();
+                return $sanitizer->sanitize($rawReply2);
+            }
+            
+            return $cleanReply;
         } catch (Throwable $e) {
             Log::warning('ai.agent.final_stream_failed', ['message' => $e->getMessage()]);
 
@@ -221,8 +240,17 @@ final class AiAgentLoop
 
             // Fall back to non-streaming so the user still gets something useful.
             $fallback = $this->openRouter->chat($transcript, 'answer');
-            $onDelta($fallback);
-            return $fallback;
+            $cleanFallback = $sanitizer->sanitize($fallback);
+            
+            if ($sanitizer->isOnlyInternals($fallback, $cleanFallback)) {
+                $transcript[] = ['role' => 'assistant', 'content' => $fallback];
+                $transcript[] = ['role' => 'user', 'content' => '[internal] Tools are closed. Answer the question in plain prose based on the data already provided.'];
+                $fallback = $this->openRouter->chat($transcript, 'answer');
+                $cleanFallback = $sanitizer->sanitize($fallback);
+            }
+            
+            $onDelta($cleanFallback);
+            return $cleanFallback;
         }
 
     }

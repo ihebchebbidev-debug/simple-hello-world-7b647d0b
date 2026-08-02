@@ -79,6 +79,10 @@ export function cleanAssistantText(raw: string): string {
   if (raw.trim() === '') return raw;
 
   const cleaned = raw
+    .replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/gi, '')
+    .replace(/<function(?:=[^>]*)?>[\s\S]*?(?:<\/function>|$)/gi, '')
+    .replace(/<parameter(?:=[^>]*)?>[\s\S]*?(?:<\/parameter>|$)/gi, '')
+    .replace(/<thought>[\s\S]*?(?:<\/thought>|$)/gi, '')
     .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*(?:\{[^}]*\}|\[[^\]]*\]|[^\r\n]*)\s*$/gim, '')
     .replace(/\b(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\b/gi, '')
     .replace(/\n{3,}/g, '\n\n')
