@@ -98,13 +98,29 @@ final class AiQuestionPlanner
 
         // ── Fertilization / nutrients ──
         $wantsNutrient = $this->has($q, ['unite', 'unites', 'azote', 'nitrogen', 'npk', 'n p k', 'phosphore', 'potasse', 'potassium', 'magnesium', ' mg ']);
-        $wantsFertilization = $this->has($q, ['fertilisation', 'fertilization', 'engrais', 'fertilisant', 'acides amines', 'amino']);
+        $wantsAminoAcids = $this->has($q, [
+            'acides amines', 'acide amine', 'amino', 'aminoacide', 'aa libres',
+            'naturamin', 'biostimulant', 'biostimulants', 'hydrolysat', 'peptide',
+        ]);
+        $wantsFertilization = $this->has($q, ['fertilisation', 'fertilization', 'engrais', 'fertilisant']);
         if ($wantsNutrient) {
             $add('nutrient_per_ha', array_merge($scope, $window, [
                 'nutrient' => $this->extractNutrient($q),
             ]));
         }
-        if ($wantsFertilization) {
+        // "Acides aminés" describes a product family/ingredient, not an
+        // operation type. Naturamin may be catalogued as either a fertilizer
+        // or a phytosanitary product, so querying fertilizations alone can
+        // truthfully return zero while applications exist in the other log.
+        if ($wantsAminoAcids) {
+            // Scope-agnostic: with no plot named the tool covers every plot,
+            // and returns a per-plot breakdown either way.
+            $add('product_usage', array_merge($scope, $window, [
+                'query' => $this->extractNamedProduct($question) ?? 'acides amines',
+                'order' => $this->wantsLatest($q) ? 'desc' : 'asc',
+                'limit' => $this->extractCount($q) ?? 40,
+            ]));
+        } elseif ($wantsFertilization) {
             $add('fertilization_history', array_merge($scope, $window, array_filter([
                 'product' => $this->extractFertilizerProduct($question, $q),
                 'order'   => $this->wantsLatest($q) ? 'desc' : 'asc',
@@ -492,9 +508,21 @@ final class AiQuestionPlanner
 
     private function extractFertilizerProduct(string $question, string $q): ?string
     {
-        if ($this->has($q, ['acides amines', 'acide amine', 'amino'])) {
-            return 'amin';
+        return $this->extractQuotedProduct($question);
+    }
+
+    /** "le produit Naturamin contient…" → Naturamin. */
+    private function extractNamedProduct(string $question): ?string
+    {
+        if (preg_match(
+            '/\bproduit\s+[«"“\']?([\p{L}\p{N}][\p{L}\p{N}\-\.]{1,60})[»"”\']?/iu',
+            $question,
+            $m,
+        ) === 1) {
+            $name = trim($m[1]);
+            return mb_strlen($name) >= 2 ? $name : null;
         }
+
         return $this->extractQuotedProduct($question);
     }
 

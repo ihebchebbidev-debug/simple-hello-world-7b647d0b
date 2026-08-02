@@ -749,7 +749,7 @@ INSTR;
         }
 
         $question = $this->lastUserMessage($messages);
-        if ($question === '' || $this->isDispute($question)) {
+        if ($question === '') {
             return false;
         }
         if (mb_strlen($question) > 320 || substr_count($question, '?') > 1) {
@@ -862,12 +862,21 @@ Reasoning protocol:
 11. For a farm- or crop-wide "par hectare" figure quote `weighted_m3_per_ha` (total ÷ total ha). Use `average_m3_per_ha` only when the user explicitly asks for the mean across plots, and say which one you used.
 
 
+## Agronomic glossary (what the data actually holds)
+- The farm log has FOUR operation tables only: irrigation, fertilization (links to the `fertilizers` catalog), phytosanitary (links to the `pesticides` catalog, which carries `chemical_composition`), and harvest. Nothing else is recorded.
+- "Acides aminés" (amino acids, AA libres, hydrolysats de protéines, peptides) are NOT an operation type and NOT a nutrient like N/P/K: they are an ingredient family of biostimulants. A commercial product such as Naturamin, Aminovert or Terra-Sorb can be catalogued EITHER as a fertilizer OR as a phytosanitary/foliar product depending on how the farm registered it.
+- Consequence: a zero from `fertilization_history` NEVER proves the family was not used. For any ingredient-family or "avons-nous utilisé X" question, use `product_usage`, which matches product names AND compositions across both catalogs and returns `matched_products`, `usage_count` and `usage_by_plot`.
+- `product_usage` works at any scope: with `plot` for one parcelle, with `crop`, or with no scope at all for the whole farm — always report `usage_by_plot` when the user asks about several or all parcelles.
+- If `usage_count` is 0, say the family is absent from BOTH catalogs for that scope and name the products that WERE applied (fertilization_history / treatments) rather than asserting it was never used.
+- When the user contests a zero and names a product ("Naturamin contient des acides aminés"), re-run `product_usage` with `query` = that product name on the SAME plot and window before answering.
+
 ## Tool routing cheat-sheet
 - water per hectare, TOTAL volume, number of irrigations (one plot, a date, a range, a whole crop, with exclusions) → `water_per_ha` (`plot`, `crop`, `exclude_plots`, `from`, `to`) — aggregate only
 - "le détail des irrigations du X au Y" → `irrigation_history` (`plot`, `from`, `to`), optionally together with `water_per_ha` for the totals
 - N / P / K / Mg / Ca / S units per hectare → `nutrient_per_ha` (`nutrient: "mg"` for magnesium). Report only the nutrients listed in `tracked_nutrients`; if one is absent, say it is not recorded instead of substituting another.
 - treatments: count, dates, chronology, last one, product used, composition, dose/ha, volume/ha → `treatments` (`pest: "mildiou"`, `product`, `order: "asc"` for chronological, `limit: 2` for the last two)
 - fertilization log, "combien de fois le produit X", last fertilization date → `fertilization_history` (`product`, `limit: 1` + default desc order for the latest)
+- generic product/family usage when the operation type is not explicit (notably amino acids / Naturamin) → `product_usage`; it checks both fertilization and phytosanitary logs
 - irrigation events / last N irrigation dates → `irrigation_history` (`limit: 3`)
 - harvest window (first/last harvest date), yield, kg/ha → `harvest_history`
 - cost/ha, total or for treatments only → `cost_per_ha` (`type: "phytosanitary"` for treatment cost)

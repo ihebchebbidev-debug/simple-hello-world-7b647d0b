@@ -23,6 +23,7 @@ final class EvidenceFooter
         'irrigation_history'    => ['fr' => 'Irrigations (détail)',       'en' => 'Irrigations (detail)'],
         'nutrient_per_ha'       => ['fr' => 'Fertilisation (unités/ha)',  'en' => 'Fertilization (units/ha)'],
         'fertilization_history' => ['fr' => 'Fertilisations (détail)',    'en' => 'Fertilizations (detail)'],
+        'product_usage'         => ['fr' => 'Utilisations du produit',     'en' => 'Product usage'],
         'treatments'            => ['fr' => 'Traitements phytosanitaires','en' => 'Phytosanitary treatments'],
         'harvest_history'       => ['fr' => 'Récolte (kg, kg/ha)',        'en' => 'Harvest (kg, kg/ha)'],
         'cost_per_ha'           => ['fr' => 'Coûts (TND, TND/ha)',        'en' => 'Costs (TND, TND/ha)'],

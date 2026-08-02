@@ -90,6 +90,16 @@ trait AiFarmTools
                 'limit'   => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
             ]),
 
+            $this->fn('product_usage', 'Cross-catalog product usage log. Resolves a product or ingredient-family query against fertilizer names and pesticide names/compositions, then counts matching fertilization and phytosanitary applications. Use for generic "combien de fois avons-nous utilisé X", especially biostimulants such as amino acids whose operation type is not explicit.', [
+                'plot'    => $plot,
+                'crop'    => $crop,
+                'query'   => ['type' => 'string', 'description' => 'Product name or distinctive family substring, e.g. "Naturamin" or "amin".'],
+                'from'    => $from,
+                'to'      => $to,
+                'order'   => ['type' => 'string', 'enum' => ['asc', 'desc']],
+                'limit'   => ['type' => 'integer', 'minimum' => 1, 'maximum' => 80],
+            ], ['query']),
+
             $this->fn('irrigation_history', 'Individual irrigation events, one row each: date, m³, m³/ha, cost. Use for "les dates des 3 dernières irrigations" and for ANY request for "le détail"/"la liste" of irrigations over a period. Rows are capped by `limit`; always compare `returned_rows` with `irrigation_count` and tell the user when the list is truncated.', [
                 'plot'  => $plot,
                 'crop'  => $crop,
@@ -134,6 +144,7 @@ trait AiFarmTools
             'nutrient_per_ha'       => $this->toolNutrientPerHa($args),
             'treatments'            => $this->toolTreatments($args),
             'fertilization_history' => $this->toolFertilizationHistory($args),
+            'product_usage'         => $this->toolProductUsage($args),
             'irrigation_history'    => $this->toolIrrigationHistory($args),
             'harvest_history'       => $this->toolHarvestHistory($args),
             'cost_per_ha'           => $this->toolCostPerHa($args),
@@ -807,6 +818,157 @@ trait AiFarmTools
             'order'             => $order,
             'rows'              => $rows,
         ];
+    }
+
+    /** @param array<string,mixed> $args */
+    private function toolProductUsage(array $args): array
+    {
+        [$plots, $names, $err] = $this->plotScope($args);
+        if ($err) return $err;
+
+        $needle = trim(mb_strtolower((string) ($args['query'] ?? '')));
+        if (mb_strlen($needle) < 2) return ['error' => 'query_too_short'];
+
+        // A query can name a product ("Naturamin") OR an ingredient family
+        // ("acides aminés"). Families are expanded into every spelling and
+        // commercial marker we may encounter in the two catalogs, so the
+        // answer is identical whichever plot — or the whole farm — is asked
+        // about.
+        $terms = self::expandProductQuery($needle);
+
+        [$from, $to] = $this->windowFrom($args);
+        $plotIds = array_map(static fn ($p) => $p->id, $plots);
+        $rows = [];
+        $anyLike = static function ($where, array $columns) use ($terms): void {
+            foreach ($columns as $col) {
+                foreach ($terms as $term) {
+                    $where->orWhereRaw("LOWER(COALESCE($col, '')) LIKE ?", ['%'.$term.'%']);
+                }
+            }
+        };
+
+        if (Schema::hasTable('fertilizers') && Schema::hasTable('fertilization_operations')) {
+            $cols = ['product.name'];
+            foreach (['chemical_composition', 'composition', 'description', 'notes'] as $extra) {
+                if (Schema::hasColumn('fertilizers', $extra)) {
+                    $cols[] = 'product.'.$extra;
+                }
+            }
+            $q = DB::table('fertilization_operations as op')
+                ->join('fertilizers as product', 'product.id', '=', 'op.fertilizer_id')
+                ->whereIn('op.plot_id', $plotIds)
+                ->where(fn ($w) => $anyLike($w, $cols))
+                ->select('op.operation_date', 'op.plot_id', 'op.quantity_applied', 'product.name as product');
+            $this->applyWindow($q, 'op', $from, $to);
+            foreach ($q->get() as $row) {
+                $rows[] = [
+                    'date' => (string) $row->operation_date,
+                    'plot' => $names[(string) $row->plot_id] ?? null,
+                    'product' => $row->product,
+                    'operation_type' => 'fertilization',
+                    'quantity' => round((float) $row->quantity_applied, 3),
+                ];
+            }
+        }
+
+        if (Schema::hasTable('pesticides') && Schema::hasTable('phytosanitary_operations')) {
+            $cols = ['product.name'];
+            foreach (['chemical_composition', 'description', 'notes'] as $extra) {
+                if (Schema::hasColumn('pesticides', $extra)) {
+                    $cols[] = 'product.'.$extra;
+                }
+            }
+            $q = DB::table('phytosanitary_operations as op')
+                ->join('pesticides as product', 'product.id', '=', 'op.pesticide_id')
+                ->whereIn('op.plot_id', $plotIds)
+                ->where(fn ($w) => $anyLike($w, $cols))
+                ->select('op.operation_date', 'op.plot_id', 'op.quantity_applied', 'product.name as product');
+            $this->applyWindow($q, 'op', $from, $to);
+            foreach ($q->get() as $row) {
+                $rows[] = [
+                    'date' => (string) $row->operation_date,
+                    'plot' => $names[(string) $row->plot_id] ?? null,
+                    'product' => $row->product,
+                    'operation_type' => 'phytosanitary',
+                    'quantity' => round((float) $row->quantity_applied, 3),
+                ];
+            }
+        }
+
+        $order = strtolower((string) ($args['order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
+        usort($rows, static fn (array $a, array $b): int => $order === 'asc'
+            ? strcmp($a['date'], $b['date'])
+            : strcmp($b['date'], $a['date']));
+        $total = count($rows);
+        $limit = max(1, min(80, (int) ($args['limit'] ?? 40)));
+
+        $products = array_values(array_unique(array_map(
+            static fn (array $row): string => (string) $row['product'],
+            $rows,
+        )));
+
+        // Per-plot breakdown so "sur quelles parcelles / combien de fois
+        // partout" is answerable from a single call.
+        $byPlot = [];
+        foreach ($rows as $row) {
+            $key = (string) ($row['plot'] ?? '—');
+            $byPlot[$key] = ($byPlot[$key] ?? 0) + 1;
+        }
+        arsort($byPlot);
+
+        return [
+            'window' => ['from' => $from, 'to' => $to],
+            'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
+            'query' => $needle,
+            'search_terms' => $terms,
+            'matched_products' => $products,
+            'usage_count' => $total,
+            'usage_by_plot' => $byPlot,
+            'plots_in_scope' => count($plotIds),
+            'rows' => array_slice($rows, 0, $limit),
+            'returned_rows' => min($total, $limit),
+            'truncated' => $total > $limit,
+        ];
+    }
+
+    /**
+     * Expand an ingredient-family query into every spelling stored in the
+     * catalogs. Unknown queries are returned as-is (single substring).
+     *
+     * @return array<int, string>
+     */
+    private static function expandProductQuery(string $needle): array
+    {
+        $families = [
+            'amino' => [
+                'amin', 'acide amine', 'acides amines', 'amino acid', 'aminoacid',
+                'aminoacide', 'aa libre', 'peptide', 'hydrolysat', 'protein',
+            ],
+            'biostimulant' => ['biostimul', 'stimul', 'algue', 'extrait'],
+        ];
+
+        $flat = self::deaccent($needle);
+        foreach ($families as $terms) {
+            foreach ($terms as $term) {
+                if (str_contains($flat, $term) || str_contains($term, $flat)) {
+                    return array_values(array_unique(array_merge([$flat], $terms)));
+                }
+            }
+        }
+
+        return [$flat];
+    }
+
+    private static function deaccent(string $s): string
+    {
+        return mb_strtolower(strtr($s, [
+            'à'=>'a','â'=>'a','ä'=>'a','á'=>'a','ã'=>'a','å'=>'a',
+            'é'=>'e','è'=>'e','ê'=>'e','ë'=>'e',
+            'î'=>'i','ï'=>'i','í'=>'i',
+            'ô'=>'o','ö'=>'o','ó'=>'o','õ'=>'o',
+            'ù'=>'u','û'=>'u','ü'=>'u','ú'=>'u',
+            'ç'=>'c','ñ'=>'n',
+        ]));
     }
 
     /** @param array<string,mixed> $args */

@@ -134,4 +134,28 @@ final class AiQuestionPlannerTest extends TestCase
         $this->assertNotNull($args);
         $this->assertSame('P7', $args['plot']);
     }
+
+    public function test_amino_acid_usage_checks_both_operation_catalogs(): void
+    {
+        $calls = $this->plan('Combien de fois nous avons utilisé les acides aminés sur la parcelle P4');
+
+        $this->assertSame(['product_usage'], $this->names($calls));
+        $args = $this->argsFor($calls, 'product_usage');
+        $this->assertNotNull($args);
+        $this->assertSame('P4', $args['plot']);
+        $this->assertSame('amin', $args['query']);
+    }
+
+    public function test_dispute_about_naturamin_stays_on_product_usage(): void
+    {
+        $calls = (new AiQuestionPlanner())->plan([
+            ['role' => 'user', 'content' => 'Combien de fois avons-nous utilisé les acides aminés sur la parcelle P4 ?'],
+            ['role' => 'assistant', 'content' => '0 fois.'],
+            ['role' => 'user', 'content' => 'Faux, le produit Naturamin contient des acides aminés et il a été utilisé.'],
+        ]);
+
+        $this->assertSame(['product_usage'], $this->names($calls));
+        $this->assertSame('P4', $this->argsFor($calls, 'product_usage')['plot']);
+        $this->assertSame('Naturamin', $this->argsFor($calls, 'product_usage')['query']);
+    }
 }
