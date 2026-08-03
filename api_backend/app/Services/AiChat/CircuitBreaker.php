@@ -46,8 +46,19 @@ final class CircuitBreaker
         $this->increment(self::SUCC_KEY);
     }
 
-    public function recordFailure(): void
+    /**
+     * Only *hard* upstream failures (connection refused, 5xx, auth/quota) count
+     * towards tripping. Soft hiccups — an empty completion, a truncated stream,
+     * a single 429 that the retry loop absorbs — must never open the breaker:
+     * they are already handled by retries + model fallback, and counting them
+     * made a normal agent run (6+ upstream calls) trip the breaker on its own,
+     * which surfaced to users as "the assistant is taking a short pause".
+     */
+    public function recordFailure(bool $hard = false): void
     {
+        if (! $hard) {
+            return;
+        }
         $this->increment(self::FAIL_KEY);
         $this->evaluate();
     }

@@ -76,15 +76,23 @@ final class OpenRouterClient
      */
     public function chatRaw(array $messages, ?array $tools = null, string $purpose = 'planner'): array
     {
-        $this->assertBreakerClosed();
-
+        $maxRetries = $this->retryBudget();
         $models     = $this->models($purpose);
-        $maxRetries = max(0, (int) config('openrouter.max_retries', 2));
         $lastError  = null;
         $this->lastStatus = 0;
 
+        // Several recovery passes over the whole model chain: a transient outage
+        // on every model at once is almost always over by the next pass, and a
+        // second pass is far cheaper than surfacing an error to the user.
+        $passes = $this->recoveryPasses();
+
+        for ($pass = 0; $pass < $passes; $pass++) {
+            if ($pass > 0) {
+                $this->sleepBackoff($pass, null);
+            }
         foreach ($models as $model) {
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+
                 $key = $this->keys->next($purpose);
                 $payload = ['messages' => $messages, 'stream' => false, 'model' => $model];
                 if ($tools !== null && $tools !== []) {
@@ -94,7 +102,7 @@ final class OpenRouterClient
                 try {
                     $response = $this->request($key, $payload);
                 } catch (ConnectionException $e) {
-                    $this->breaker->recordFailure();
+                    $this->breaker->recordFailure(hard: true);
                     $lastError = $e->getMessage();
                     $this->lastStatus = 0;
                     $this->sleepBackoff($attempt, null);
@@ -145,7 +153,7 @@ final class OpenRouterClient
                 $status = $response->status();
                 $this->lastStatus = $status;
                 $this->keys->markFailed($key, $status);
-                $this->breaker->recordFailure();
+                $this->breaker->recordFailure(hard: $status >= 500 || $status === 401 || $status === 402 || $status === 403);
                 $lastError = 'HTTP '.$status.' '.mb_substr($response->body(), 0, 400);
 
                 if ($this->isRetryable($status) && $attempt < $maxRetries) {
@@ -154,6 +162,18 @@ final class OpenRouterClient
                 }
                 // Non-retryable → try next model (breaks out of retry loop).
                 break;
+            }
+        }
+        } // recovery passes
+
+        // Last resort: some providers reject the tool payload (or truncate on it)
+        // while answering the exact same messages fine without tools. Better a
+        // tool-less answer than an error page.
+        if ($tools !== null && $tools !== []) {
+            try {
+                return $this->chatRaw($messages, null, $purpose);
+            } catch (\Throwable) {
+                // fall through to the original error below
             }
         }
 
@@ -167,18 +187,23 @@ final class OpenRouterClient
         throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
     }
 
+
     /** @param array<int, array<string, string>> $messages */
     public function chatStream(array $messages, callable $onDelta, string $purpose = 'answer'): string
     {
-        $this->assertBreakerClosed();
-
+        $maxRetries = $this->retryBudget();
         $models     = $this->models($purpose);
-        $maxRetries = max(0, (int) config('openrouter.max_retries', 2));
         $lastError  = null;
         $this->lastStatus = 0;
+        $passes = $this->recoveryPasses();
 
+        for ($pass = 0; $pass < $passes; $pass++) {
+            if ($pass > 0) {
+                $this->sleepBackoff($pass, null);
+            }
         foreach ($models as $model) {
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+
                 $key = $this->keys->next($purpose);
                 try {
                     $response = $this->request(
@@ -187,7 +212,7 @@ final class OpenRouterClient
                         stream: true,
                     );
                 } catch (ConnectionException $e) {
-                    $this->breaker->recordFailure();
+                    $this->breaker->recordFailure(hard: true);
                     $lastError = $e->getMessage();
                     $this->lastStatus = 0;
                     $this->sleepBackoff($attempt, null);
@@ -198,7 +223,7 @@ final class OpenRouterClient
                     $status = $response->status();
                     $this->lastStatus = $status;
                     $this->keys->markFailed($key, $status);
-                    $this->breaker->recordFailure();
+                    $this->breaker->recordFailure(hard: $status >= 500 || $status === 401 || $status === 402 || $status === 403);
                     $lastError = 'HTTP '.$status;
 
                     if ($this->isRetryable($status) && $attempt < $maxRetries) {
@@ -210,22 +235,29 @@ final class OpenRouterClient
 
                 // Stream: no retry once bytes start flowing.
                 $emittedBytes = 0;
-                $countingDelta = static function (string $chunk) use ($onDelta, &$emittedBytes): void {
+                $emitted = '';
+                $countingDelta = static function (string $chunk) use ($onDelta, &$emittedBytes, &$emitted): void {
                     $emittedBytes += strlen($chunk);
+                    $emitted .= $chunk;
                     $onDelta($chunk);
                 };
                 try {
                     $full = $this->consumeStream($response, $countingDelta);
                 } catch (\Throwable $e) {
                     // Nothing reached the client yet → safe to retry cleanly.
-                    if ($emittedBytes === 0 && $attempt < $maxRetries) {
+                    if ($emittedBytes === 0) {
                         $this->breaker->recordFailure();
                         $lastError = 'stream interrupted: '.$e->getMessage();
                         $this->sleepBackoff($attempt, null);
                         continue;
                     }
+                    // Text already reached the user: keep it instead of turning a
+                    // usable partial answer into an error.
                     $this->breaker->recordFailure();
-                    throw new RuntimeException('network: OpenRouter stream interrupted: '.$e->getMessage(), 0, $e);
+                    Log::warning('ai.openrouter.stream_truncated_kept', [
+                        'model' => $model, 'purpose' => $purpose, 'error' => $e->getMessage(),
+                    ]);
+                    return trim($emitted);
                 }
 
                 if (trim($full) === '') {
@@ -248,6 +280,22 @@ final class OpenRouterClient
                 return trim($full);
             }
         }
+        } // recovery passes
+
+        // Last resort: the streaming transport itself can be broken (proxy,
+        // provider SSE bug) while the plain JSON call answers fine. Emit the
+        // whole answer as a single delta so the user still gets a real reply.
+        try {
+            $msg = $this->chatRaw($messages, null, $purpose);
+            $content = trim((string) ($msg['content'] ?? ''));
+            if ($content !== '') {
+                Log::warning('ai.openrouter.stream_fallback_nonstream', ['purpose' => $purpose]);
+                $onDelta($content);
+                return $content;
+            }
+        } catch (\Throwable) {
+            // fall through to the original error below
+        }
 
         $code = ($this->lastStatus === 0 && is_string($lastError) && str_contains($lastError, 'empty stream'))
             ? 'empty_reply'
@@ -255,6 +303,7 @@ final class OpenRouterClient
 
         throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
     }
+
 
     /** @param array<string, mixed> $payload */
     private function request(string $apiKey, array $payload, bool $stream = false): Response
@@ -406,14 +455,29 @@ final class OpenRouterClient
         return $models;
     }
 
-    private function assertBreakerClosed(): void
+    /**
+     * Attempts per model. Always at least enough to rotate through every
+     * configured key, so one quarantined/rate-limited key can never fail a
+     * request while a healthy key sits unused. The breaker is advisory: while
+     * open we still make a real attempt, just with a smaller budget.
+     */
+    private function retryBudget(): int
     {
+        $configured = max(0, (int) config('openrouter.max_retries', 2));
         if ($this->breaker->shouldTrip()) {
-            throw new RuntimeException('circuit_open: OpenRouter breaker is open (temporary outage protection).');
+            return 1;
         }
+        return max($configured, max(0, $this->keys->size() - 1));
+    }
+
+    /** Full passes over the model chain before giving up. */
+    private function recoveryPasses(): int
+    {
+        return max(1, (int) config('openrouter.recovery_passes', 2));
     }
 
     private function isRetryable(int $status): bool
+
     {
         return $status === 408 || $status === 425 || $status === 429 || $status >= 500;
     }

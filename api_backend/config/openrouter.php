@@ -119,10 +119,15 @@ return [
 
 
     // Retry / backoff.
-    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 1),
+    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 2),
     'retry_base_ms'     => (int) env('OPENROUTER_RETRY_BASE_MS', 400),
     'retry_max_ms'      => (int) env('OPENROUTER_RETRY_MAX_MS', 4000),
-    'quarantine_seconds' => (int) env('OPENROUTER_QUARANTINE_SECONDS', 300),
+    // Full passes over the whole model fallback chain before giving up.
+    'recovery_passes'   => (int) env('OPENROUTER_RECOVERY_PASSES', 2),
+    // Shorter quarantine: a rate-limited key recovers in seconds, not minutes,
+    // and keeping it benched shrinks the usable key pool during a burst.
+    'quarantine_seconds' => (int) env('OPENROUTER_QUARANTINE_SECONDS', 60),
+
 
     // Fast mode: disable the agent tool loop to reduce round-trips.
     'fast_mode' => (bool) env('OPENROUTER_FAST_MODE', false),
@@ -162,9 +167,9 @@ return [
     // Circuit breaker — trips when upstream error rate > threshold in `window` seconds.
     'breaker' => [
         'window'      => (int) env('OPENROUTER_BREAKER_WINDOW', 60),
-        'min_samples' => (int) env('OPENROUTER_BREAKER_MIN_SAMPLES', 6),
-        'threshold'   => (float) env('OPENROUTER_BREAKER_THRESHOLD', 0.5),
-        'cool_down'   => (int) env('OPENROUTER_BREAKER_COOLDOWN', 30),
+        'min_samples' => (int) env('OPENROUTER_BREAKER_MIN_SAMPLES', 15),
+        'threshold'   => (float) env('OPENROUTER_BREAKER_THRESHOLD', 0.85),
+        'cool_down'   => (int) env('OPENROUTER_BREAKER_COOLDOWN', 15),
     ],
 
     // Per-user daily token budget (tenant-ready — swap user_id for tenant_id later).
