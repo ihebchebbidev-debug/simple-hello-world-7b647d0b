@@ -521,6 +521,7 @@ trait AiFarmTools
         if ($err) return $err;
 
         $out = [];
+        $totalPlots = count($plots);
         foreach (array_slice($plots, 0, 20) as $p) {
             $last = [];
             foreach (self::OP_TABLE as $type => $table) {
@@ -538,7 +539,14 @@ trait AiFarmTools
                 'last_operation'  => $last,
             ];
         }
-        return ['plots' => $out, 'count' => count($out)];
+        return [
+            'plots'          => $out,
+            'count'          => $totalPlots,
+            'total_matching' => $totalPlots,
+            'returned_rows'  => count($out),
+            'truncated'      => $totalPlots > count($out),
+            'count_note'     => 'total_matching is the TRUE number of matching plots; plots may be truncated. Never count the rows yourself.',
+        ];
     }
 
     /**
@@ -1322,7 +1330,14 @@ trait AiFarmTools
         if ($out === []) {
             return ['error' => 'product_not_found', 'query' => $query];
         }
-        return ['query' => $query, 'products' => $out, 'count' => count($out)];
+        return [
+            'query'         => $query,
+            'products'      => $out,
+            'count'         => count($out),
+            'returned_rows' => count($out),
+            'truncated'     => count($out) >= 10,
+            'count_note'    => 'products is capped at 5 per kind; if truncated is true, more products match than are listed.',
+        ];
     }
 
     /**

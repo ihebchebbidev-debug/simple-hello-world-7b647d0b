@@ -78,6 +78,10 @@ final class ResponseValidator
         }
 
         if ($evidence !== []) {
+            foreach ($this->staleCounts($reply, $evidence) as $stale) {
+                $violations[] = "stale_count(said={$stale['said']},total={$stale['total']})";
+            }
+
             $unsupported = $this->unsupportedNumbers($reply, $evidence);
             if ($unsupported !== []) {
                 $violations[] = 'unsupported_numbers('.implode(',', array_slice($unsupported, 0, 5)).')';
@@ -104,6 +108,71 @@ final class ResponseValidator
         return $lang === 'unknown'
             ? (str_starts_with(strtolower($locale), 'fr') ? 'fr' : 'en')
             : $lang;
+    }
+
+    /**
+     * Truncated-listing counts quoted as if they were the total.
+     *
+     * A tool that caps its rows returns `returned_rows` + `total_matching`
+     * (or `irrigation_count` / `harvest_count`). When the reply states the
+     * capped row count as the answer and never mentions the real total, the
+     * user gets a confidently wrong number — the "40 vs 60 irrigations" bug.
+     *
+     * @param  array<int, string>  $evidence
+     * @return array<int, array{said: int, total: int}>
+     */
+    private function staleCounts(string $reply, array $evidence): array
+    {
+        $out = [];
+        foreach ($evidence as $json) {
+            $data = json_decode($json, true);
+            if (! is_array($data)) continue;
+
+            foreach ($this->countPairs($data) as [$returned, $total]) {
+                if ($total <= $returned) continue;
+                if (! $this->mentionsNumber($reply, $returned)) continue;
+                if ($this->mentionsNumber($reply, $total)) continue;
+
+                $out[] = ['said' => $returned, 'total' => $total];
+            }
+        }
+
+        return array_values(array_unique($out, SORT_REGULAR));
+    }
+
+    /**
+     * Every (returned_rows, total) pair found anywhere in a tool result.
+     *
+     * @param  array<mixed>  $data
+     * @return array<int, array{0: int, 1: int}>
+     */
+    private function countPairs(array $data): array
+    {
+        $pairs = [];
+        $returned = $data['returned_rows'] ?? null;
+        if (is_numeric($returned)) {
+            foreach (['total_matching', 'irrigation_count', 'harvest_count', 'usage_count', 'total'] as $key) {
+                if (isset($data[$key]) && is_numeric($data[$key])) {
+                    $pairs[] = [(int) $returned, (int) $data[$key]];
+                }
+            }
+        }
+
+        foreach ($data as $value) {
+            if (is_array($value)) {
+                foreach ($this->countPairs($value) as $p) $pairs[] = $p;
+            }
+        }
+
+        return $pairs;
+    }
+
+    /** True when the reply states this integer as a standalone number. */
+    private function mentionsNumber(string $reply, int $n): bool
+    {
+        $t = preg_replace('/(\d)[\x{0020}\x{00a0}\x{202f}](\d{3})\b/u', '$1$2', $reply) ?? $reply;
+
+        return (bool) preg_match('/(?<![\d.,])'.$n.'(?![\d.,])/u', $t);
     }
 
     /**

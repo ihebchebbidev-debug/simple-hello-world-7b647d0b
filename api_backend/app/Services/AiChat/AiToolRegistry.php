@@ -62,7 +62,7 @@ final class AiToolRegistry
                 'status' => ['type' => 'string', 'enum' => ['active', 'past', 'all']],
             ]),
 
-            $this->fn('get_operations', 'Recent rows for one operation type on optional plot/campaign/date filters.', [
+            $this->fn('get_operations', 'Recent rows for one operation type on optional plot/campaign/date filters. Rows are capped by `limit`; `total_matching` is the TRUE number of matching operations — always quote it for "combien", never count the rows yourself.', [
                 'type'        => ['type' => 'string', 'enum' => $ops],
                 'plot_id'     => ['type' => 'string'],
                 'campaign_id' => ['type' => 'string'],
@@ -347,8 +347,16 @@ final class AiToolRegistry
             $q->where('is_active', (bool) $args['active']);
         }
         $limit = max(1, min(60, (int) ($args['limit'] ?? 40)));
+        $total = (int) $q->clone()->count();
         $rows = $q->orderBy('name')->limit($limit)->get()->all();
-        return ['plots' => $rows, 'count' => count($rows)];
+        return [
+            'plots'          => $rows,
+            'count'          => $total,
+            'total_matching' => $total,
+            'returned_rows'  => count($rows),
+            'truncated'      => $total > count($rows),
+            'count_note'     => 'total_matching counts ALL matching plots; plots is only the first slice. Never present returned_rows as the total.',
+        ];
     }
 
     /** @param array<string,mixed> $args */
@@ -375,9 +383,22 @@ final class AiToolRegistry
         if (! empty($args['campaign_id'])) $q->where('campaign_id', (string) $args['campaign_id']);
         if (! empty($args['from']))        $q->where('operation_date', '>=', $this->safeDate($args['from'], 'from'));
         if (! empty($args['to']))          $q->where('operation_date', '<=', $this->safeDate($args['to'], 'to'));
+        // COUNT the whole filtered set BEFORE applying the row cap. Returning
+        // count(rows) made the model present a capped listing as the total
+        // ("40 irrigations" when the plot really had 60).
+        $total = (int) (clone $q)->count();
         $limit = max(1, min(50, (int) ($args['limit'] ?? 20)));
         $rows = $q->orderByDesc('operation_date')->limit($limit)->get()->all();
-        return ['type' => $type, 'rows' => $rows, 'count' => count($rows)];
+
+        return [
+            'type'           => $type,
+            'rows'           => $rows,
+            'returned_rows'  => count($rows),
+            'total_matching' => $total,
+            'truncated'      => $total > count($rows),
+            'count'          => $total,
+            'count_note'     => 'total_matching counts ALL rows matching the filters; rows is only the most recent slice. Never present returned_rows as the total.',
+        ];
     }
 
     /** @param array<string,mixed> $args */
@@ -493,8 +514,18 @@ final class AiToolRegistry
             }
         }
 
+        $total = (int) $query->clone()->count();
         $rows = $query->limit($limit)->get()->all();
-        return ['kind' => $kind, 'query' => $q, 'results' => $rows, 'count' => count($rows)];
+        return [
+            'kind'           => $kind,
+            'query'          => $q,
+            'results'        => $rows,
+            'count'          => $total,
+            'total_matching' => $total,
+            'returned_rows'  => count($rows),
+            'truncated'      => $total > count($rows),
+            'count_note'     => 'total_matching counts ALL matching catalog entries; results is only the first slice. Never present returned_rows as the total.',
+        ];
     }
 
     private function normalizeCatalogCategoryQuery(string $kind, string $query): ?string

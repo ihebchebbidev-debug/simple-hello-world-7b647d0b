@@ -168,6 +168,10 @@ return [
     ],
 
     // Per-user daily token budget (tenant-ready — swap user_id for tenant_id later).
+    // Deterministic "Vérification / Verification" provenance block appended to
+    // data answers. Off by default — the farm operator asked for it to go.
+    'evidence_footer' => (bool) env('AI_EVIDENCE_FOOTER', false),
+
     'budget' => [
         'enabled'      => (bool) env('OPENROUTER_BUDGET_ENABLED', true),
         'daily_tokens' => (int) env('OPENROUTER_DAILY_TOKENS', 200000),

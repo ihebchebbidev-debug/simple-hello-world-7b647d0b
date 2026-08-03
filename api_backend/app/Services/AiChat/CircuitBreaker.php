@@ -20,10 +20,25 @@ final class CircuitBreaker
     private const SUCC_KEY = 'openrouter.breaker.succ';
     private const FAIL_KEY = 'openrouter.breaker.fail';
 
+    private const PROBE_KEY = 'openrouter.breaker.probe';
+
     public function shouldTrip(): bool
     {
         $until = (int) Cache::get(self::OPEN_KEY, 0);
-        return $until > time();
+        if ($until <= time()) {
+            return false;
+        }
+
+        // Half-open: let ONE request through per open window so a user who
+        // retries during the cool-down gets a real answer instead of three
+        // consecutive "assistant paused" replies.
+        $probeKey = self::PROBE_KEY.':'.$until;
+        if (! Cache::get($probeKey, false)) {
+            Cache::put($probeKey, true, ($until - time()) + 5);
+            return false;
+        }
+
+        return true;
     }
 
     public function recordSuccess(): void

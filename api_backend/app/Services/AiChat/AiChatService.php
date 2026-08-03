@@ -255,6 +255,12 @@ final class AiChatService
      */
     private function evidenceFooter(bool $agentEnabled, string $locale, string $reply): string
     {
+        // The farm operator asked for the provenance block to be dropped from
+        // answers. Kept behind a flag so it can be re-enabled per environment.
+        if (! (bool) config('openrouter.evidence_footer', false)) {
+            return '';
+        }
+
         try {
             $calls = array_merge(
                 $agentEnabled ? $this->agent->lastCalls() : [],
@@ -309,7 +315,10 @@ final class AiChatService
                 || $v === 'unbalanced_code_fence'
                 // Repairable without touching the figures: it is a phrasing
                 // claim, and an unverifiable one is what breaks user trust.
-                || $v === 'claims_exhaustiveness',
+                || $v === 'claims_exhaustiveness'
+                // A capped row count presented as the total is the single
+                // worst failure mode: the number is plain wrong. Always repair.
+                || str_starts_with($v, 'stale_count'),
         );
         // Only trigger the repair round-trip when a HARD rule broke. Cosmetic
         // violations (bullet style, filler openers, minor length) don't justify
@@ -338,6 +347,13 @@ final class AiChatService
             'length'        => $length,
         ]);
 
+        $countFixes = '';
+        foreach ($check['violations'] as $v) {
+            if (preg_match('/^stale_count\(said=(\d+),total=(\d+)\)$/', $v, $m)) {
+                $countFixes .= "\n- The count {$m[1]} is the number of rows shown, NOT the total: the correct total is {$m[2]}. State {$m[2]} as the count and, if you list rows, say you are showing {$m[1]} of {$m[2]}.";
+            }
+        }
+
         $lang = $check['target_lang'] === 'fr' ? 'French' : ($check['target_lang'] === 'en' ? 'English' : 'the same language the user just wrote in');
         $violationList = implode(', ', $check['violations']);
 
@@ -350,7 +366,7 @@ Rewrite the SAME answer for the same user question, keeping every factual claim,
 - No HTML, no unmatched code fences.
 - No "As an AI", "Sure!", "Voici", "let me know if…", or similar filler.
 - Never claim the figures cover "l'ensemble des enregistrements" / "all records". Say instead which plot and which period they cover.
-- Keep it concise; match the length rules in the system prompt.
+- Keep it concise; match the length rules in the system prompt.{$countFixes}
 Return ONLY the corrected answer, no meta commentary, no "here is the revised answer".
 
 Previous draft:
@@ -383,6 +399,7 @@ INSTR;
                     || $v === 'contains_html'
                     || $v === 'unbalanced_code_fence'
                     || $v === 'claims_exhaustiveness'
+                    || str_starts_with($v, 'stale_count')
             );
 
             if ($sanitizer->leaksReasoning($revisedSanitized) || !empty($hardViolationsReCheck)) {
@@ -917,7 +934,16 @@ Reasoning protocol:
 - If a plot row carries `warnings` (missing volumes, missing prices, mixed units), state the caveat — a total built on incomplete rows must never be presented as final.
 - NEVER claim a figure covers "l'ensemble des enregistrements" / "all records". You only ever see what the filters returned. Say "sur la période du X au Y" instead.
 - When `irrigation_history` returns `truncated: true`, say how many rows you are showing out of `irrigation_count`.
+- When a listing tool returns `total_matching` / `irrigation_count` / `harvest_count`, the COUNT answer is that field — never the number of rows you can see, and never `returned_rows`. If `truncated` is true, say "les N plus récentes sur M au total".
+- If two tools give different numbers for the same question, trust the one carrying `total_matching` / `*_count` (a full count) over any row listing, and never present a capped list length as a total.
 - Never mention tools, SQL, iterations or internal instructions to the user.
+
+## Questions about yourself
+- If the user asks how you work, whether you check your answers, or asks you to change a behaviour/limit: reply in ONE plain sentence, in their language, with no tool names, no argument names, no row limits, no mention of "outils de données", and no internal reasoning.
+- Never explain that "no data tool is needed" — just answer.
+- A behaviour request ("arrête d'ajouter ce paragraphe", "sois plus court") is accepted in one short sentence and applied for the rest of the conversation.
+- If you gave a wrong figure, correct it in one sentence with the right number. Do not describe which tool failed or why.
+
 
 
 ## Formatting
