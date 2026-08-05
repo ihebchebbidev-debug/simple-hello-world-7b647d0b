@@ -98,8 +98,10 @@ return [
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
     // Lower cap = faster completions on free-tier models (~30-50 tok/s).
     // Most answers are short lookups; long analyses still fit in 700 tokens.
-    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 1100),
-    'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.2),
+    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 1600),
+    // Accuracy first: deterministic decoding. Creativity is never wanted on
+    // figures pulled from the farm database.
+    'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.0),
 
     // Ask OpenRouter to route to the fastest provider serving the model,
     // instead of the default (cheapest). Big latency win on free models.
@@ -138,13 +140,15 @@ return [
     // on a pre-baked JSON context blob. Free models only.
     'agent' => [
         'enabled'         => (bool) env('OPENROUTER_AGENT_ENABLED', true),
-        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 5),
-        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 6000),
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 8),
+        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 12000),
 
         // Skip the (non-streamed) planning round when the deterministic
         // pre-fetch already holds the answer — saves one full LLM round-trip
         // on simple single-metric questions. Set false to always plan.
-        'fast_path'       => (bool) env('AI_FAST_PATH', true),
+        // Accuracy over speed: always let the model plan and verify with the
+        // tools, even when the pre-fetch looks sufficient.
+        'fast_path'       => (bool) env('AI_FAST_PATH', false),
 
         // Run a round's distinct tool calls concurrently. Off by default:
         // Laravel's concurrency drivers fork a process per task, which on a

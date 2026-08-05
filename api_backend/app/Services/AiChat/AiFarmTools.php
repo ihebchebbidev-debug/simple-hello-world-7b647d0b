@@ -125,14 +125,16 @@ trait AiFarmTools
                 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
             ]),
 
-            $this->fn('cost_per_ha', 'Cost breakdown per plot by operation type (irrigation, fertilization, phytosanitary, harvest labour) in TND, with total cost and cost/ha. Use for "coût/ha de la parcelle X" or "coût/ha en traitement".', [
+            $this->fn('cost_per_ha', 'Cost breakdown per plot by operation type (irrigation, fertilization, phytosanitary, harvest labour) in TND, with total cost and cost/ha. Use for "coût/ha de la parcelle X", "coût/ha en traitement", or "coût du traitement contre la cératite" (pass `pest`).', [
                 'plot' => $plot,
                 'crop' => $crop,
                 'type' => ['type' => 'string', 'enum' => ['irrigation', 'fertilization', 'phytosanitary', 'harvest', 'all']],
+                'pest' => ['type' => 'string', 'description' => 'Restrict the cost to treatments targeting this pest/disease (e.g. "cératite", "mildiou"). Implies type=phytosanitary.'],
                 'from' => $from,
                 'to'   => $to,
                 'campaign'   => $campaign,
             ]),
+
 
             $this->fn('product_info', 'Look up a fertilizer or pesticide by name: unit, composition (N-P-K % for fertilizers, chemical_composition for pesticides) and current + historical price per unit. Use for "quel est le prix de X" and "quelle est la composition de Y".', [
                 'query' => ['type' => 'string', 'description' => 'Product name, 2+ chars.'],
@@ -358,12 +360,20 @@ trait AiFarmTools
         // A campaign is a named season window. Explicit from/to always win —
         // the user asked for a narrower slice inside that season.
         $this->campaignNote = null;
+        $this->campaignAmbiguity = null;
+        $this->campaignId = null;
         if (! empty($args['campaign'])) {
             $c = $this->resolveCampaign((string) $args['campaign']);
             if ($c === null) {
                 $this->campaignNote = 'Campaign "'.$args['campaign'].'" was not found; the window was NOT restricted to a campaign. Call list_campaigns to get the real names.';
             } else {
-                $this->campaignNote = 'Scoped to campaign "'.$c->name.'" ('.$c->start_date.' → '.$c->end_date.').';
+                $this->campaignId = (string) $c->id;
+                $this->campaignNote = 'Scoped to campaign "'.$c->name.'" ('.$c->start_date.' → '.$c->end_date.'). Rows explicitly attached to this campaign are included even when their date falls outside that window; rows with no campaign are matched on date.';
+                if ($this->campaignAmbiguity !== null) {
+                    $this->campaignNote .= ' WARNING: the label "'.$args['campaign'].'" matched several campaigns ('
+                        .implode(', ', $this->campaignAmbiguity)
+                        .'). The one above was picked. If the answer is empty or surprising, say which season was used and offer the others.';
+                }
                 $window[0] ??= $c->start_date;
                 $window[1] ??= $c->end_date;
             }
@@ -375,10 +385,24 @@ trait AiFarmTools
     /** Set by windowFrom(); surfaced through appliedFilters(). */
     private ?string $campaignNote = null;
 
+    /** Resolved campaign id for the current call; drives campaign-aware scoping. */
+    private ?string $campaignId = null;
+
+    /** Candidate campaign labels when the requested label was ambiguous. */
+    private ?array $campaignAmbiguity = null;
+
     /**
      * Resolve a campaign label ("2024-2025", "active", "en cours", a uuid)
      * to its row. Matching mirrors resolvePlots(): exact id, exact name,
      * normalised equality, then substring.
+     *
+     * A bare year ("campagne 2026") is intentionally NOT resolved by blind
+     * substring order: "2026" matches both "2025-2026" and "2026-2027", and
+     * silently picking the first one produced answers like "aucun traitement
+     * enregistré" for an operation that exists three weeks outside the
+     * chosen window. Bare years therefore prefer the campaign whose window
+     * actually covers most of that calendar year, and every other candidate
+     * is reported through `campaign_scope`.
      */
     private function resolveCampaign(string $label): ?object
     {
@@ -400,12 +424,81 @@ trait AiFarmTools
         foreach ($all as $c) {
             if (self::normLabel((string) $c->name) === $norm) return $c;
         }
+
+        $matches = [];
         foreach ($all as $c) {
-            if ($norm !== '' && str_contains(self::normLabel((string) $c->name), $norm)) return $c;
+            if ($norm !== '' && str_contains(self::normLabel((string) $c->name), $norm)) {
+                $matches[] = $c;
+            }
+        }
+        if ($matches === []) return null;
+
+        if (count($matches) > 1) {
+            $this->campaignAmbiguity = array_map(
+                static fn (object $c): string => $c->name.' ('.$c->start_date.' → '.$c->end_date.')',
+                $matches,
+            );
         }
 
-        return null;
+        // Bare year: pick the campaign covering the most days of that year.
+        if (preg_match('/^(\d{4})$/', $norm, $m) === 1) {
+            $yFrom = Carbon::parse($m[1].'-01-01');
+            $yTo   = Carbon::parse($m[1].'-12-31');
+            $best = null; $bestDays = -1;
+            foreach ($matches as $c) {
+                try {
+                    $s = Carbon::parse((string) $c->start_date)->max($yFrom);
+                    $e = Carbon::parse((string) $c->end_date)->min($yTo);
+                } catch (Throwable) {
+                    continue;
+                }
+                $days = $e->greaterThanOrEqualTo($s) ? $s->diffInDays($e) + 1 : 0;
+                if ($days > $bestDays) { $bestDays = $days; $best = $c; }
+            }
+            if ($best !== null) return $best;
+        }
+
+        return $matches[0];
     }
+
+    /**
+     * When a scoped query comes back empty, look just outside the date window
+     * before letting the model assert "aucun enregistrement". Returns the
+     * count and the date range of the rows the window excluded, so the answer
+     * becomes "rien sur cette campagne, mais 1 le 29/07/2026" instead of a
+     * flat — and misleading — no.
+     *
+     * @param  mixed  $qNoWindow  the same query WITHOUT the date filters
+     * @return array<string,mixed>|null
+     */
+    private function outsideWindowProbe(mixed $qNoWindow, string $dateColumn, ?string $from, ?string $to): ?array
+    {
+        if ($from === null && $to === null) return null;
+
+        try {
+            $total = (int) (clone $qNoWindow)->count();
+        } catch (Throwable) {
+            return null;
+        }
+        if ($total === 0) {
+            return [
+                'outside_window_count' => 0,
+                'note' => 'No matching record exists for this plot/filter in ANY period — the empty result is not a window artefact.',
+            ];
+        }
+
+        $first = (clone $qNoWindow)->reorder()->orderBy($dateColumn)->value($dateColumn);
+        $last  = (clone $qNoWindow)->reorder()->orderByDesc($dateColumn)->value($dateColumn);
+
+        return [
+            'outside_window_count' => $total,
+            'all_time_first_date'  => $first !== null ? (string) $first : null,
+            'all_time_last_date'   => $last !== null ? (string) $last : null,
+            'note' => 'The window returned 0 rows, but '.$total.' matching record(s) exist outside it ('
+                .(string) $first.' → '.(string) $last.'). NEVER answer a plain "aucun enregistrement": state that nothing matches the requested period/campaign AND give these dates, then ask whether the other period should be used.',
+        ];
+    }
+
 
     /** The campaign whose window ends just before $c starts. */
     private function previousCampaign(object $c): ?object
@@ -436,12 +529,43 @@ trait AiFarmTools
         catch (Throwable) { return null; }
     }
 
-    private function applyWindow(mixed $q, string $table, ?string $from, ?string $to): mixed
+    /**
+     * Restrict a query to the reporting window.
+     *
+     * When the window came from a resolved campaign AND the underlying table
+     * carries `campaign_id`, the row's own campaign membership wins over its
+     * date: an operation explicitly attached to campaign X belongs to that
+     * campaign even if it was recorded a few days outside the season window
+     * (late data entry, a season boundary moved after the fact…). Rows with
+     * no campaign_id still fall back to the date window. This kills the whole
+     * "the record exists but the campaign window excluded it" bug class
+     * instead of patching it per tool.
+     */
+    private function applyWindow(mixed $q, string $table, ?string $from, ?string $to, ?string $realTable = null): mixed
     {
+        $campaignScoped = $this->campaignId !== null
+            && $realTable !== null
+            && Schema::hasTable($realTable)
+            && Schema::hasColumn($realTable, 'campaign_id');
+
+        if ($campaignScoped) {
+            $cid = $this->campaignId;
+            $q->where(function ($w) use ($table, $cid, $from, $to) {
+                $w->where($table.'.campaign_id', $cid)
+                  ->orWhere(function ($d) use ($table, $from, $to) {
+                      $d->whereNull($table.'.campaign_id');
+                      if ($from !== null) $d->where($table.'.operation_date', '>=', $from);
+                      if ($to !== null)   $d->where($table.'.operation_date', '<=', $to);
+                  });
+            });
+            return $q;
+        }
+
         if ($from !== null) $q->where($table.'.operation_date', '>=', $from);
         if ($to !== null)   $q->where($table.'.operation_date', '<=', $to);
         return $q;
     }
+
 
     /**
      * Litre-denominated unit labels written into `unit_at_entry` by
@@ -609,7 +733,7 @@ trait AiFarmTools
                     MAX(op.operation_date) AS last_date")
                 ->whereIn('op.plot_id', $ids)
                 ->groupBy('op.plot_id');
-            $this->applyWindow($q, 'op', $from, $to);
+            $this->applyWindow($q, 'op', $from, $to, 'irrigation_operations');
             $agg = [];
             foreach ($q->get() as $r) {
                 $agg[(string) $r->plot_id] = [
@@ -705,7 +829,7 @@ trait AiFarmTools
             ->selectRaw("op.plot_id AS plot_id, COALESCE(SUM(op.water_quantity * $expr),0) AS cost")
             ->whereIn('op.plot_id', $ids)
             ->groupBy('op.plot_id');
-        $this->applyWindow($q, 'op', $from, $to);
+        $this->applyWindow($q, 'op', $from, $to, 'irrigation_operations');
 
         $out = [];
         foreach ($q->get() as $r) {
@@ -743,7 +867,7 @@ trait AiFarmTools
             ->selectRaw(implode(",\n                ", $select))
             ->whereIn('plot_id', $ids)
             ->groupBy('plot_id');
-        $this->applyWindow($q, 'fertilization_operations', $from, $to);
+        $this->applyWindow($q, 'fertilization_operations', $from, $to, 'fertilization_operations');
         $agg = collect($q->get())->keyBy('plot_id');
 
         $wanted = mb_strtolower((string) ($args['nutrient'] ?? 'all'));
@@ -797,7 +921,6 @@ trait AiFarmTools
                 'pe.name as product', 'pe.unit as product_unit', 'pe.chemical_composition',
             )
             ->whereIn('po.plot_id', $ids);
-        $this->applyWindow($q, 'po', $from, $to);
 
         if (! empty($args['pest'])) {
             $likes = array_map(
@@ -815,7 +938,17 @@ trait AiFarmTools
             $q->whereRaw('LOWER(pe.name) LIKE ?', ['%'.mb_strtolower((string) $args['product']).'%']);
         }
 
+        // Cloned BEFORE the date filter so an empty window can be explained
+        // with the dates that do exist instead of a flat "aucun traitement".
+        $qNoWindow = clone $q;
+        $this->applyWindow($q, 'po', $from, $to, 'phytosanitary_operations');
+
         $total = (clone $q)->count();
+        // Window-wide cost, not the sum of the (possibly truncated) listing.
+        $windowCost = (float) ((clone $q)
+            ->selectRaw('COALESCE(SUM(po.quantity_applied * po.price_at_entry),0) AS c')
+            ->value('c') ?? 0);
+
         $order = strtolower((string) ($args['order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
         $limit = max(1, min(40, (int) ($args['limit'] ?? 20)));
         $raw = $q->orderBy('po.operation_date', $order)->limit($limit)->get();
@@ -839,14 +972,26 @@ trait AiFarmTools
             ];
         }
 
-        return [
+        $out = [
             'window'          => ['from' => $from, 'to' => $to],
+            'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
             'pest'            => $args['pest'] ?? null,
             'treatment_count' => $total,
+            'returned_rows'   => count($rows),
+            'truncated'       => $total > count($rows),
+            'total_cost_tnd'  => round($windowCost, 2),
             'order'           => $order,
             'rows'            => $rows,
             'returned'        => count($rows),
         ];
+
+        if ($total === 0) {
+            $probe = $this->outsideWindowProbe($qNoWindow, 'po.operation_date', $from, $to);
+            if ($probe !== null) $out['empty_result_diagnostic'] = $probe;
+        }
+
+        return $out;
+
     }
 
     /** @return array<int, string> */
@@ -890,10 +1035,11 @@ trait AiFarmTools
                 'f.name as product', 'f.unit as product_unit',
             )
             ->whereIn('fo.plot_id', $ids);
-        $this->applyWindow($q, 'fo', $from, $to);
         if (! empty($args['product'])) {
             $q->whereRaw('LOWER(f.name) LIKE ?', ['%'.mb_strtolower((string) $args['product']).'%']);
         }
+        $qNoWindow = clone $q;
+        $this->applyWindow($q, 'fo', $from, $to, 'fertilization_operations');
 
         $total = (clone $q)->count();
         $order = strtolower((string) ($args['order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
@@ -915,13 +1061,23 @@ trait AiFarmTools
             ];
         }
 
-        return [
+        $out = [
             'window'            => ['from' => $from, 'to' => $to],
+            'applied_filters'   => $this->appliedFilters($args, $from, $to, $names),
             'product'           => $args['product'] ?? null,
             'application_count' => $total,
+            'returned_rows'     => count($rows),
+            'truncated'         => $total > count($rows),
             'order'             => $order,
             'rows'              => $rows,
         ];
+
+        if ($total === 0) {
+            $probe = $this->outsideWindowProbe($qNoWindow, 'fo.operation_date', $from, $to);
+            if ($probe !== null) $out['empty_result_diagnostic'] = $probe;
+        }
+
+        return $out;
     }
 
     /** @param array<string,mixed> $args */
@@ -943,6 +1099,8 @@ trait AiFarmTools
         [$from, $to] = $this->windowFrom($args);
         $plotIds = array_map(static fn ($p) => $p->id, $plots);
         $rows = [];
+        /** @var array<string,mixed> $probeQueries */
+        $probeQueries = [];
         $anyLike = static function ($where, array $columns) use ($terms): void {
             foreach ($columns as $col) {
                 foreach ($terms as $term) {
@@ -963,7 +1121,8 @@ trait AiFarmTools
                 ->whereIn('op.plot_id', $plotIds)
                 ->where(fn ($w) => $anyLike($w, $cols))
                 ->select('op.operation_date', 'op.plot_id', 'op.quantity_applied', 'product.name as product');
-            $this->applyWindow($q, 'op', $from, $to);
+            $probeQueries['fertilization'] = clone $q;
+            $this->applyWindow($q, 'op', $from, $to, 'fertilization_operations');
             foreach ($q->get() as $row) {
                 $rows[] = [
                     'date' => (string) $row->operation_date,
@@ -987,7 +1146,8 @@ trait AiFarmTools
                 ->whereIn('op.plot_id', $plotIds)
                 ->where(fn ($w) => $anyLike($w, $cols))
                 ->select('op.operation_date', 'op.plot_id', 'op.quantity_applied', 'product.name as product');
-            $this->applyWindow($q, 'op', $from, $to);
+            $probeQueries['phytosanitary'] = clone $q;
+            $this->applyWindow($q, 'op', $from, $to, 'phytosanitary_operations');
             foreach ($q->get() as $row) {
                 $rows[] = [
                     'date' => (string) $row->operation_date,
@@ -1020,7 +1180,7 @@ trait AiFarmTools
         }
         arsort($byPlot);
 
-        return [
+        $out = [
             'window' => ['from' => $from, 'to' => $to],
             'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
             'query' => $needle,
@@ -1033,7 +1193,20 @@ trait AiFarmTools
             'returned_rows' => min($total, $limit),
             'truncated' => $total > $limit,
         ];
+
+        if ($total === 0) {
+            foreach ($probeQueries as $kind => $probeQ) {
+                $probe = $this->outsideWindowProbe($probeQ, 'op.operation_date', $from, $to);
+                if ($probe !== null && (int) ($probe['outside_window_count'] ?? 0) > 0) {
+                    $out['empty_result_diagnostic'] = ['operation_type' => $kind] + $probe;
+                    break;
+                }
+            }
+        }
+
+        return $out;
     }
+
 
     /**
      * Expand an ingredient-family query into every spelling stored in the
@@ -1089,7 +1262,8 @@ trait AiFarmTools
         $q = DB::table('irrigation_operations')
             ->select('plot_id', 'operation_date', 'water_quantity', 'unit_at_entry', 'price_at_entry')
             ->whereIn('plot_id', $ids);
-        $this->applyWindow($q, 'irrigation_operations', $from, $to);
+        $qNoWindow = clone $q;
+        $this->applyWindow($q, 'irrigation_operations', $from, $to, 'irrigation_operations');
 
         $total = (clone $q)->count();
         $m3 = self::m3Expr();
@@ -1135,6 +1309,11 @@ trait AiFarmTools
             'rows'             => $rows,
         ];
 
+        if ($total === 0) {
+            $probe = $this->outsideWindowProbe($qNoWindow, 'operation_date', $from, $to);
+            if ($probe !== null) $out['empty_result_diagnostic'] = $probe;
+        }
+
         if ($daily !== null && $daily !== []) {
             $out['daily_totals'] = array_slice($daily, 0, 62);
             $out['daily_totals_note'] = 'Pre-aggregated per-day totals for the full window (not truncated). Use these when `truncated` is true.';
@@ -1158,7 +1337,8 @@ trait AiFarmTools
         $q = DB::table('harvest_operations')
             ->select('plot_id', 'operation_date', 'quantity_harvested', 'num_workers', 'days_worked', 'daily_rate_at_entry')
             ->whereIn('plot_id', $ids);
-        $this->applyWindow($q, 'harvest_operations', $from, $to);
+        $qNoWindow = clone $q;
+        $this->applyWindow($q, 'harvest_operations', $from, $to, 'harvest_operations');
 
         // Window-wide aggregates FIRST. Summing only the listed rows made the
         // totals silently wrong as soon as the listing hit `limit`.
@@ -1195,7 +1375,7 @@ trait AiFarmTools
             ];
         }
 
-        return [
+        $out = [
             'window'         => ['from' => $from, 'to' => $to],
             'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
             'harvest_count'  => $count,
@@ -1210,6 +1390,13 @@ trait AiFarmTools
             'totals_note'    => 'Totals cover the WHOLE window even when `rows` is truncated.',
             'rows'           => $rows,
         ];
+
+        if ($count === 0) {
+            $probe = $this->outsideWindowProbe($qNoWindow, 'operation_date', $from, $to);
+            if ($probe !== null) $out['empty_result_diagnostic'] = $probe;
+        }
+
+        return $out;
     }
 
 
@@ -1234,20 +1421,41 @@ trait AiFarmTools
             'harvest'       => 'op.num_workers * op.days_worked * '.self::priceExpr('labor', 'daily_rate_at_entry'),
         ];
 
+        // "Coût du traitement contre la cératite" is a cost question WITH a
+        // pest filter: without it the tool answered on the whole phyto cost
+        // (or on nothing at all), which is how a real treatment ended up
+        // reported as "0 TND".
+        $pest = ! empty($args['pest']) ? (string) $args['pest'] : null;
+        $pestLikes = $pest !== null
+            ? array_map(static fn (string $t): string => '%'.mb_strtolower($t).'%', $this->pestSearchTerms($pest))
+            : [];
+
         $byPlot = [];
+        $pestProbe = null;
         foreach ($costExpr as $type => $expr) {
             if ($want !== 'all' && $want !== $type) continue;
+            if ($pest !== null && $type !== 'phytosanitary') continue; // a pest only exists on treatments
             $table = self::OP_TABLE[$type];
             if (! Schema::hasTable($table)) continue;
             $q = DB::table($table.' as op')
                 ->selectRaw("op.plot_id AS plot_id, COALESCE(SUM($expr),0) AS cost")
                 ->whereIn('op.plot_id', $ids)
                 ->groupBy('op.plot_id');
-            $this->applyWindow($q, 'op', $from, $to);
+            if ($pestLikes !== [] && $type === 'phytosanitary') {
+                $q->where(function ($w) use ($pestLikes) {
+                    foreach ($pestLikes as $like) {
+                        $w->orWhereRaw('LOWER(COALESCE(op.target_pest, \'\')) LIKE ?', [$like])
+                          ->orWhereRaw('LOWER(COALESCE(op.remarks, \'\')) LIKE ?', [$like]);
+                    }
+                });
+            }
+
+            $this->applyWindow($q, 'op', $from, $to, $table);
             foreach ($q->get() as $r) {
                 $byPlot[(string) $r->plot_id][$type] = round((float) $r->cost, 2);
             }
         }
+
 
 
         $rows = []; $grand = 0.0; $grandHa = 0.0;
@@ -1265,10 +1473,11 @@ trait AiFarmTools
             ];
         }
 
-        return [
+        $out = [
             'window'   => ['from' => $from, 'to' => $to],
             'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
             'scope'    => $want,
+            'pest'     => $pest,
             'currency' => 'TND',
             'plots'    => array_slice($rows, 0, 40),
             'overall'  => [
@@ -1284,6 +1493,30 @@ trait AiFarmTools
             ],
             'cost_basis' => 'price_at_entry, falling back to the price_history row effective at the operation date — identical to the Production-cost report.',
         ];
+
+        // A 0 TND answer is only trustworthy once we've checked outside the
+        // window: otherwise a mis-resolved campaign turns a real treatment
+        // into "aucun traitement enregistré".
+        if ($grand <= 0.0) {
+            $probeType = $pest !== null ? 'phytosanitary' : ($want !== 'all' ? $want : null);
+            $probeTable = $probeType !== null ? (self::OP_TABLE[$probeType] ?? null) : null;
+            if ($probeTable !== null && Schema::hasTable($probeTable)) {
+                $probeQ = DB::table($probeTable.' as op')->whereIn('op.plot_id', $ids);
+                if ($pestLikes !== []) {
+                    $probeQ->where(function ($w) use ($pestLikes) {
+                        foreach ($pestLikes as $like) {
+                            $w->orWhereRaw('LOWER(COALESCE(op.target_pest, \'\')) LIKE ?', [$like])
+                              ->orWhereRaw('LOWER(COALESCE(op.remarks, \'\')) LIKE ?', [$like]);
+                        }
+                    });
+                }
+                $probe = $this->outsideWindowProbe($probeQ, 'op.operation_date', $from, $to);
+                if ($probe !== null) $out['empty_result_diagnostic'] = $probe;
+            }
+        }
+
+        return $out;
+
 
     }
 
@@ -1424,7 +1657,7 @@ trait AiFarmTools
 
         $scoped = function (string $table, mixed $q) use ($plotIds, $from, $to) {
             if ($plotIds !== []) $q->whereIn($table.'.plot_id', $plotIds);
-            $this->applyWindow($q, $table, $from, $to);
+            $this->applyWindow($q, $table, $from, $to, $table);
             return $q;
         };
 

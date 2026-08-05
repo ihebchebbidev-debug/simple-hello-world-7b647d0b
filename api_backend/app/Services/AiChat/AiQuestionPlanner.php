@@ -168,10 +168,15 @@ final class AiQuestionPlanner
 
         // ── Cost ──
         if ($this->has($q, ['cout', 'couts', 'cost', 'depense', 'depenses', 'charge', 'budget', 'tnd', 'dinar'])) {
-            $add('cost_per_ha', array_merge($scope, $window, [
-                'type' => $this->extractCostType($q),
-            ]));
+            // "coût du traitement contre la cératite" is a phytosanitary cost
+            // filtered by pest — without the filter the tool answers about a
+            // different (or empty) set.
+            $add('cost_per_ha', array_merge($scope, $window, array_filter([
+                'type' => $pest !== null ? 'phytosanitary' : $this->extractCostType($q),
+                'pest' => $pest,
+            ], static fn ($v) => $v !== null)));
         }
+
 
         // ── Data quality / completeness audit ──
         // "Est-ce fiable ?", "il manque des données", "pourquoi 0 ?" are meta
