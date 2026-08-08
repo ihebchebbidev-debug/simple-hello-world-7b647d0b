@@ -57,6 +57,18 @@ final class ResponseValidator
             }
         }
 
+        // Internal plumbing must never reach the user: row uuids, tool names,
+        // SQL errors, references to the system prompt. Seen verbatim in
+        // production answers, so it is a hard rule, not a style nit.
+        $internal = '/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+            .'|\bcost_per_ha\b|\bget_operations\b|\bsearch_catalog\b|\bplot_info\b|\bproduct_usage\b'
+            .'|\blist_plots\b|\blist_campaigns\b|\busage_count\b|\btotal_matching\b|\breturned_rows\b'
+            .'|\birrigation_count\b|\bharvest_count\b|\bSQLSTATE\b|invalid input syntax'
+            .'|DONN[EÉ]ES R[EÉ]ELLES|message syst[èe]me|outil attend|tool_failed)/iu';
+        if (preg_match($internal, $reply)) {
+            $violations[] = 'leaks_internals';
+        }
+
         // Length cap — very generous, only flag runaway replies
         $wordCount = str_word_count(strip_tags($reply));
         if ($wordCount > 320) {

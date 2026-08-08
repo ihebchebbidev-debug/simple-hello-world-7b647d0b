@@ -249,8 +249,8 @@ trait AiFarmTools
         } else {
             $needle = mb_strtolower($plot);
             $q = $applyCrop($base())->where(function ($w) use ($plot, $needle) {
-                $w->where('id', $plot)
-                  ->orWhereRaw('LOWER(name) = ?', [$needle])
+                if (self::looksLikeUuid($plot)) $w->where('id', $plot);
+                $w->orWhereRaw('LOWER(name) = ?', [$needle])
                   ->orWhereRaw('LOWER(name) LIKE ?', ['%'.$needle.'%']);
             });
             $rows = $q->orderBy('name')->limit(80)->get()->all();
@@ -404,6 +404,12 @@ trait AiFarmTools
      * actually covers most of that calendar year, and every other candidate
      * is reported through `campaign_scope`.
      */
+    /** True when the string is a uuid, i.e. safe to compare against a uuid column. */
+    public static function looksLikeUuid(string $v): bool
+    {
+        return (bool) preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', trim($v));
+    }
+
     private function resolveCampaign(string $label): ?object
     {
         if (! Schema::hasTable('campaigns')) return null;
@@ -416,7 +422,12 @@ trait AiFarmTools
             return $base()->where('is_active', true)->orderByDesc('start_date')->first();
         }
 
-        $hit = $base()->where('id', $raw)->first() ?? $base()->where('name', $raw)->first();
+        // NEVER hand a non-uuid label to a uuid column: Postgres aborts the
+        // whole query with `invalid input syntax for type uuid: "2026"`, the
+        // tool call fails, and the model ends up explaining a SQL error to the
+        // user instead of answering.
+        $hit = (self::looksLikeUuid($raw) ? $base()->where('id', $raw)->first() : null)
+            ?? $base()->where('name', $raw)->first();
         if ($hit) return $hit;
 
         $all  = $base()->orderByDesc('start_date')->limit(60)->get();

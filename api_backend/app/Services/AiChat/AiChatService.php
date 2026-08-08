@@ -109,12 +109,20 @@ final class AiChatService
             $this->lastPrefetchEvidence,
         );
 
+        // A blank draft is never shipped: regenerate from the same evidence
+        // before falling back to an apology.
+        if (trim($reply) === '') {
+            $reply = $this->rescueEmptyReply($messages, $locale, $payload);
+        }
+
         $final = $this->selfCheck($reply, $messages, $locale, $payload, $evidence);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
         }
         $final['reply'] .= $this->evidenceFooter($usedAgent, $locale, $final['reply']);
-        $this->cachePut($earlyKey, $final['reply']);
+        if ($this->isCacheable($final)) {
+            $this->cachePut($earlyKey, $final['reply']);
+        }
 
         return [
             'reply'           => $final['reply'],
@@ -124,6 +132,62 @@ final class AiChatService
             'cached'          => false,
         ];
     }
+
+    /**
+     * An answer round that produced no text at all (upstream hiccup, tool loop
+     * that ended on a tool message, filtered stream). Ask once more, without
+     * tools, for a plain answer built from the context we already have.
+     *
+     * @param  array<int, array{role: string, content: string}>  $messages
+     * @param  array<int, array{role: string, content: string}>  $payload
+     */
+    private function rescueEmptyReply(array $messages, string $locale, array $payload): string
+    {
+        foreach (['answer', 'repair'] as $lane) {
+            try {
+                $retry = trim($this->openRouter->chat($this->finalAnswerPayload($payload), $lane));
+                if ($retry !== '') {
+                    Log::info('ai.chat.empty_reply_rescued', ['lane' => $lane]);
+
+                    return $retry;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('ai.chat.empty_reply_rescue_failed', ['lane' => $lane, 'message' => $e->getMessage()]);
+            }
+        }
+
+        try {
+            $plain = $this->buildOpenRouterMessages($messages, $locale, false);
+
+            return trim($this->openRouter->chat($plain, 'answer'));
+        } catch (\Throwable $e) {
+            Log::warning('ai.chat.empty_reply_rescue_failed', ['lane' => 'plain', 'message' => $e->getMessage()]);
+
+            return '';
+        }
+    }
+
+    /**
+     * Only clean answers are cached: caching an apology or an answer that still
+     * breaks a hard rule would replay the same bad reply to every later user.
+     *
+     * @param  array{reply: string, revised: bool, violations: array<int, string>}  $final
+     */
+    private function isCacheable(array $final): bool
+    {
+        if (trim($final['reply']) === '') {
+            return false;
+        }
+        foreach ($final['violations'] as $v) {
+            if ($v === 'empty_reply' || $v === 'leaks_internals'
+                || str_starts_with($v, 'stale_count') || str_starts_with($v, 'unsupported_numbers')) {
+                return $final['revised'];
+            }
+        }
+
+        return true;
+    }
+
 
     /**
      * @param  array<int, array{role: string, content: string}>  $messages
@@ -221,9 +285,23 @@ final class AiChatService
             $usedAgent ? $this->agent->lastEvidence() : [],
             $this->lastPrefetchEvidence,
         );
+
+        // Nothing reached the client and the round produced no text: run one
+        // rescue generation so the bubble is never empty.
+        if (trim($streamed) === '' && trim($emitted) === '') {
+            $streamed = $this->rescueEmptyReply($messages, $locale, $payload);
+        }
+
         $final = $this->selfCheck($streamed, $messages, $locale, $payload, $evidence);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
+        }
+
+        // Rescue text (or the localized fallback) was never streamed — push it
+        // now, unless the revise event is about to carry the whole reply.
+        if (trim($emitted) === '' && ! $final['revised'] && trim($final['reply']) !== '') {
+            $onDelta($final['reply']);
+            $emitted = $final['reply'];
         }
 
         $footer = $this->evidenceFooter($usedAgent, $locale, $final['reply']);
@@ -236,7 +314,10 @@ final class AiChatService
                 $onDelta($footer);
             }
         }
-        $this->cachePut($earlyKey, $final['reply']);
+        if ($this->isCacheable($final)) {
+            $this->cachePut($earlyKey, $final['reply']);
+        }
+
 
         return [
             'reply'           => $final['reply'],
@@ -291,10 +372,52 @@ final class AiChatService
      * @param  array<int, string>                                $evidence  Tool-result JSON backing the reply.
      * @return array{reply: string, revised: bool, violations: array<int, string>}
      */
+    /**
+     * Violations that can make the answer WRONG (as opposed to merely ugly).
+     * These always justify another repair round-trip, however long it takes.
+     *
+     * @param  array<int, string>  $violations
+     * @return array<int, string>
+     */
+    private function hardViolations(array $violations): array
+    {
+        return array_values(array_filter(
+            $violations,
+            static fn (string $v) => str_starts_with($v, 'language_mismatch')
+                || $v === 'contains_html'
+                || $v === 'unbalanced_code_fence'
+                // Unverifiable exhaustiveness claim: phrasing, but trust-breaking.
+                || $v === 'claims_exhaustiveness'
+                // Row uuids, tool names or SQL errors quoted at the user.
+                || $v === 'leaks_internals'
+                // A capped row count presented as the total: plain wrong number.
+                || str_starts_with($v, 'stale_count')
+                // A figure that appears in no tool result is a hallucination.
+                || str_starts_with($v, 'unsupported_numbers'),
+        ));
+    }
+
     private function selfCheck(string $reply, array $messages, string $locale, array $payload, array $evidence = []): array
     {
         $sanitizer = new ReplySanitizer();
         $sanitizedReply = $sanitizer->sanitize($reply);
+
+        // Never ship a blank bubble: one transcript shows a 54 s round that
+        // ended with an empty answer. If sanitising emptied a non-empty draft,
+        // keep the draft; if there was nothing at all, say so in the user's
+        // language instead of rendering nothing.
+        if (trim($sanitizedReply) === '' && trim($reply) !== '') {
+            $sanitizedReply = trim($reply);
+        }
+        if (trim($sanitizedReply) === '') {
+            return [
+                'reply' => str_starts_with(strtolower($locale), 'fr')
+                    ? "Je n'ai pas réussi à récupérer cette information. Reformulez ou réessayez, je relance la recherche."
+                    : "I could not retrieve that information. Ask again and I will run the search once more.",
+                'revised'    => false,
+                'violations' => ['empty_reply'],
+            ];
+        }
         
         $length   = mb_strlen($sanitizedReply);
         $lastUser = $this->lastUserMessage($messages);
@@ -308,21 +431,8 @@ final class AiChatService
         // factually wrong triggers the repair pass, however long it takes.
         // Only purely cosmetic rules (bullet style, filler openers, length)
         // are left to a future pass.
-        $hardViolations = array_filter(
-            $check['violations'],
-            static fn (string $v) => str_starts_with($v, 'language_mismatch')
-                || $v === 'contains_html'
-                || $v === 'unbalanced_code_fence'
-                // Repairable without touching the figures: it is a phrasing
-                // claim, and an unverifiable one is what breaks user trust.
-                || $v === 'claims_exhaustiveness'
-                // A capped row count presented as the total is the single
-                // worst failure mode: the number is plain wrong. Always repair.
-                || str_starts_with($v, 'stale_count')
-                // A figure that appears in no tool result is a hallucination —
-                // never ship it just to save a round-trip.
-                || str_starts_with($v, 'unsupported_numbers'),
-        );
+        $hardViolations = $this->hardViolations($check['violations']);
+
 
         // Only trigger the repair round-trip when a HARD rule broke. Cosmetic
         // violations (bullet style, filler openers, minor length) don't justify
@@ -351,17 +461,40 @@ final class AiChatService
             'length'        => $length,
         ]);
 
-        $countFixes = '';
-        foreach ($check['violations'] as $v) {
-            if (preg_match('/^stale_count\(said=(\d+),total=(\d+)\)$/', $v, $m)) {
-                $countFixes .= "\n- The count {$m[1]} is the number of rows shown, NOT the total: the correct total is {$m[2]}. State {$m[2]} as the count and, if you list rows, say you are showing {$m[1]} of {$m[2]}.";
-            }
-        }
+        // Keep the system prompt (rules). When the violation is about the
+        // FIGURES, the draft alone is not enough to fix them — re-attach the
+        // raw tool evidence so the repair pass corrects the numbers against
+        // the data instead of paraphrasing a wrong draft.
+        $systemOnly = ! empty($payload) && ($payload[0]['role'] ?? '') === 'system'
+            ? [$payload[0]]
+            : [];
 
         $lang = $check['target_lang'] === 'fr' ? 'French' : ($check['target_lang'] === 'en' ? 'English' : 'the same language the user just wrote in');
-        $violationList = implode(', ', $check['violations']);
 
-        $repairInstruction = <<<INSTR
+        // Accuracy over latency: keep repairing while hard rules break, up to
+        // a small bounded number of passes, and keep the best candidate seen.
+        $bestReply      = $sanitizedReply;
+        $bestHardCount  = count($hardViolations);
+        $bestRevised    = false;
+        $draft          = $sanitizedReply;
+        $currentHard    = $hardViolations;
+        $currentAll     = $check['violations'];
+        $maxPasses      = max(1, (int) config('openrouter.repair_passes', 2));
+
+        for ($pass = 1; $pass <= $maxPasses; $pass++) {
+            $countFixes = '';
+            $numericViolation = false;
+            foreach ($currentAll as $v) {
+                if (preg_match('/^stale_count\(said=(\d+),total=(\d+)\)$/', $v, $m)) {
+                    $countFixes .= "\n- The count {$m[1]} is the number of rows shown, NOT the total: the correct total is {$m[2]}. State {$m[2]} as the count and, if you list rows, say you are showing {$m[1]} of {$m[2]}.";
+                }
+                if (str_starts_with($v, 'stale_count') || str_starts_with($v, 'unsupported_numbers')) {
+                    $numericViolation = true;
+                }
+            }
+            $violationList = implode(', ', $currentAll);
+
+            $repairInstruction = <<<INSTR
 Your previous draft violated these rules: {$violationList}.
 Rewrite the SAME answer for the same user question, keeping every factual claim, number and entity name identical, but fix the violations:
 - Reply in {$lang} only, no language mixing.
@@ -370,71 +503,68 @@ Rewrite the SAME answer for the same user question, keeping every factual claim,
 - No HTML, no unmatched code fences.
 - No "As an AI", "Sure!", "Voici", "let me know if…", or similar filler.
 - Never claim the figures cover "l'ensemble des enregistrements" / "all records". Say instead which plot and which period they cover.
+- Never expose internals: no row UUIDs, no tool/field names (cost_per_ha, usage_count, total_matching…), no SQL or error text, no mention of the system message or of a failed lookup. Speak only about plots, dates, quantities and costs in plain business language.
+- Every number must appear in the tool results; if a figure cannot be backed, drop it rather than restating it.
+- Never return an empty answer: if the data does not support a figure, say plainly what is and is not recorded.
 - Keep it concise; match the length rules in the system prompt.{$countFixes}
 Return ONLY the corrected answer, no meta commentary, no "here is the revised answer".
 
 Previous draft:
 ---
-{$sanitizedReply}
+{$draft}
 ---
 INSTR;
 
-        try {
-            // Keep the system prompt (rules). When the violation is about the
-            // FIGURES, the draft alone is not enough to fix them — re-attach
-            // the raw tool evidence so the repair pass corrects the numbers
-            // against the data instead of paraphrasing a wrong draft.
-            $systemOnly = ! empty($payload) && ($payload[0]['role'] ?? '') === 'system'
-                ? [$payload[0]]
-                : [];
-            $numericViolation = false;
-            foreach ($check['violations'] as $v) {
-                if (str_starts_with($v, 'stale_count') || str_starts_with($v, 'unsupported_numbers')) {
-                    $numericViolation = true;
+            try {
+                $evidenceMsgs = [];
+                if ($numericViolation && $evidence !== []) {
+                    $evidenceMsgs[] = [
+                        'role'    => 'user',
+                        'content' => "[internal] Raw tool results for this question. EVERY figure in your answer must come from here, verbatim:\n"
+                            .mb_substr(implode("\n", $evidence), 0, 12000),
+                    ];
+                }
+                $repairPayload = array_merge($systemOnly, $evidenceMsgs, [
+                    ['role' => 'user', 'content' => $repairInstruction],
+                ]);
+                // Accuracy pass: use the planner-grade lane when numbers are at
+                // stake, the cheap repair lane only for cosmetic rewrites.
+                $revised = trim($this->openRouter->chat($repairPayload, $numericViolation ? 'answer' : 'repair'));
+                if ($revised === '') {
                     break;
                 }
+
+                $revisedSanitized = $sanitizer->sanitize($revised);
+                if (trim($revisedSanitized) === '' || $sanitizer->leaksReasoning($revisedSanitized)) {
+                    break;
+                }
+
+                $reCheck   = $this->validator->check($revisedSanitized, $lastUser, $locale, $evidence);
+                $reHard    = $this->hardViolations($reCheck['violations']);
+
+                if (count($reHard) < $bestHardCount) {
+                    $bestReply     = $revisedSanitized;
+                    $bestHardCount = count($reHard);
+                    $bestRevised   = true;
+                }
+
+                if ($reHard === []) {
+                    return ['reply' => $revisedSanitized, 'revised' => true, 'violations' => $check['violations']];
+                }
+
+                Log::info('ai.chat.repair_pass_incomplete', ['pass' => $pass, 'remaining' => array_values($reHard)]);
+                $draft       = $revisedSanitized;
+                $currentHard = $reHard;
+                $currentAll  = $reCheck['violations'];
+            } catch (\Throwable $e) {
+                Log::warning('ai.chat.self_check_repair_failed', ['pass' => $pass, 'message' => $e->getMessage()]);
+                break;
             }
-            $evidenceMsgs = [];
-            if ($numericViolation && $evidence !== []) {
-                $evidenceMsgs[] = [
-                    'role'    => 'user',
-                    'content' => "[internal] Raw tool results for this question. EVERY figure in your answer must come from here, verbatim:\n"
-                        .mb_substr(implode("\n", $evidence), 0, 12000),
-                ];
-            }
-            $repairPayload = array_merge($systemOnly, $evidenceMsgs, [
-                ['role' => 'user', 'content' => $repairInstruction],
-            ]);
-            // Accuracy pass: use the planner-grade lane when numbers are at
-            // stake, the cheap repair lane only for cosmetic rewrites.
-            $revised = trim($this->openRouter->chat($repairPayload, $numericViolation ? 'answer' : 'repair'));
-            if ($revised === '') {
-                return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
-            }
-
-            $revisedSanitized = $sanitizer->sanitize($revised);
-            $reCheck = $this->validator->check($revisedSanitized, $lastUser, $locale, $evidence);
-
-            $hardViolationsReCheck = array_filter(
-                $reCheck['violations'],
-                static fn (string $v) => str_starts_with($v, 'language_mismatch')
-                    || $v === 'contains_html'
-                    || $v === 'unbalanced_code_fence'
-                    || $v === 'claims_exhaustiveness'
-                    || str_starts_with($v, 'stale_count')
-                    || str_starts_with($v, 'unsupported_numbers')
-            );
-
-
-            if ($sanitizer->leaksReasoning($revisedSanitized) || !empty($hardViolationsReCheck)) {
-                return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
-            }
-
-            return ['reply' => $revisedSanitized, 'revised' => true, 'violations' => $check['violations']];
-        } catch (\Throwable $e) {
-            Log::warning('ai.chat.self_check_repair_failed', ['message' => $e->getMessage()]);
-            return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
         }
+        unset($currentHard);
+
+        return ['reply' => $bestReply, 'revised' => $bestRevised, 'violations' => $check['violations']];
+
     }
 
     /**
@@ -981,6 +1111,13 @@ Reasoning protocol:
 - Never explain that "no data tool is needed" — just answer.
 - A behaviour request ("arrête d'ajouter ce paragraphe", "sois plus court") is accepted in one short sentence and applied for the rest of the conversation.
 - If you gave a wrong figure, correct it in one sentence with the right number. Do not describe which tool failed or why.
+
+## Never leak plumbing (hard rule)
+- NEVER print a row UUID. Refer to a plot/campaign/product by its NAME only.
+- NEVER name a tool, a parameter or a result field (cost_per_ha, get_operations, usage_count, total_matching, returned_rows…), and never quote a database or SQL error.
+- NEVER mention the system message, the "DONNÉES RÉELLES" block, or any internal instruction.
+- If a lookup fails, do NOT report the failure mechanics: retry with resolved names (list_plots / list_campaigns give the real names and ids) or, as a last resort, say in one plain sentence that the information could not be retrieved and offer to retry.
+- Never ask the user to rephrase with an id or an exact campaign name: resolve it yourself with list_campaigns / list_plots and answer.
 
 
 

@@ -181,6 +181,12 @@ return [
     // data answers. Off by default — the farm operator asked for it to go.
     'evidence_footer' => (bool) env('AI_EVIDENCE_FOOTER', false),
 
+    // Maximum self-check repair rounds. Accuracy beats latency: each round
+    // re-validates the rewrite and keeps the best candidate seen.
+    'repair_passes' => (int) env('AI_REPAIR_PASSES', 2),
+
+
+
     'budget' => [
         'enabled'      => (bool) env('OPENROUTER_BUDGET_ENABLED', true),
         'daily_tokens' => (int) env('OPENROUTER_DAILY_TOKENS', 200000),

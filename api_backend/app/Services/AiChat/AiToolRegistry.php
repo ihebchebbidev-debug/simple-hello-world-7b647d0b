@@ -286,11 +286,20 @@ final class AiToolRegistry
                 'currency'     => 'TND',
             ], $data);
         } catch (Throwable $e) {
+            // The raw driver message (SQL, uuid casts, table names) must never
+            // travel to the model: it ends up quoted verbatim in the answer.
+            \Illuminate\Support\Facades\Log::warning('ai.tool.failed', [
+                'tool' => $name, 'error' => mb_substr($e->getMessage(), 0, 500),
+            ]);
+
             return [
                 'ok'    => false,
                 'error' => 'tool_failed',
                 'name'  => $name,
-                'detail' => mb_substr($e->getMessage(), 0, 200),
+                'retry_hint' => 'This lookup failed for a technical reason. Retry it with different/simpler arguments '
+                    .'(e.g. resolve names first with list_plots / list_campaigns) or use another tool. '
+                    .'NEVER mention this failure, the tool name, or any technical detail to the user — '
+                    .'either answer from a successful call or say plainly that the information could not be retrieved.',
             ];
         }
     }
@@ -379,8 +388,36 @@ final class AiToolRegistry
             return ['error' => 'invalid_type', 'type' => $type];
         }
         $q = DB::table($table)->select('*');
-        if (! empty($args['plot_id']))     $q->where('plot_id', (string) $args['plot_id']);
-        if (! empty($args['campaign_id'])) $q->where('campaign_id', (string) $args['campaign_id']);
+        // Ids are uuid columns: a label like "B12" or "2026" would abort the
+        // query at the driver level. Resolve labels to real ids instead of
+        // letting Postgres throw.
+        $notes = [];
+        if (! empty($args['plot_id'])) {
+            $pid = (string) $args['plot_id'];
+            if (! AiFarmTools::looksLikeUuid($pid)) {
+                $resolved = DB::table('plots')->whereRaw('LOWER(name) = ?', [mb_strtolower($pid)])->value('id')
+                    ?? DB::table('plots')->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($pid).'%'])->value('id');
+                if ($resolved === null) {
+                    return ['error' => 'plot_not_found', 'asked' => $pid];
+                }
+                $notes[] = 'plot "'.$pid.'" resolved to its id';
+                $pid = (string) $resolved;
+            }
+            $q->where('plot_id', $pid);
+        }
+        if (! empty($args['campaign_id'])) {
+            $cid = (string) $args['campaign_id'];
+            if (! AiFarmTools::looksLikeUuid($cid)) {
+                $resolved = DB::table('campaigns')->whereRaw('LOWER(name) = ?', [mb_strtolower($cid)])->value('id')
+                    ?? DB::table('campaigns')->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($cid).'%'])->value('id');
+                if ($resolved === null) {
+                    return ['error' => 'campaign_not_found', 'asked' => $cid];
+                }
+                $notes[] = 'campaign "'.$cid.'" resolved to its id';
+                $cid = (string) $resolved;
+            }
+            $q->where('campaign_id', $cid);
+        }
         if (! empty($args['from']))        $q->where('operation_date', '>=', $this->safeDate($args['from'], 'from'));
         if (! empty($args['to']))          $q->where('operation_date', '<=', $this->safeDate($args['to'], 'to'));
         // COUNT the whole filtered set BEFORE applying the row cap. Returning
