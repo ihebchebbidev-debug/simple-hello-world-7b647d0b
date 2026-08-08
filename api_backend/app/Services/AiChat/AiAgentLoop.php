@@ -69,6 +69,7 @@ final class AiAgentLoop
         $this->calls = [];
         $maxIters   = max(1, (int) config('openrouter.agent.max_iterations', 4));
         $maxResBytes = max(256, (int) config('openrouter.agent.max_tool_result', 2048));
+        $ctxBudget   = max(8000, (int) config('openrouter.agent.max_context_chars', 90000));
         $toolDefs   = $this->tools->definitions();
 
         $transcript = $messages;
@@ -213,9 +214,21 @@ final class AiAgentLoop
                     'content' => '[internal] Every tool above succeeded but returned ZERO matching rows. Do NOT conclude that nothing is recorded. Call `locate_data` now with the raw keywords of the question (product, ingredient, pest, plot, whatever the user named) and no date filter: it scans all four operation tables and the catalogs and reports where the records live and over which dates. Then re-query the right tool over the window it reports.',
                 ];
             }
+
+            // Keep the transcript inside the model's context window. With 20+
+            // rounds of 20 kB tool payloads a free model hits its context limit
+            // and the whole request fails — which the user sees as "je n'ai pas
+            // pu répondre". Older tool payloads are compacted; the most recent
+            // ones (the evidence being reasoned over right now) stay intact.
+            $transcript = self::pruneTranscript($transcript, $ctxBudget);
         }
 
 
+
+
+
+
+        $transcript = self::pruneTranscript($transcript, $ctxBudget);
 
         // Final round: force natural-language answer (no tools) and stream it.
         $transcript[] = [
@@ -275,6 +288,55 @@ final class AiAgentLoop
         }
 
     }
+
+    /**
+     * Keep the running transcript under a character budget.
+     *
+     * Rounds are cheap; context is not. Once the accumulated tool payloads
+     * exceed the budget the upstream model rejects the whole request, and the
+     * user gets a bare failure instead of an answer. Oldest tool payloads are
+     * compacted first (head kept, so the model still knows what was asked and
+     * roughly what came back); the last few tool messages — the evidence being
+     * reasoned over right now — are never touched.
+     *
+     * @param  array<int, array<string, mixed>>  $transcript
+     * @return array<int, array<string, mixed>>
+     */
+    private static function pruneTranscript(array $transcript, int $budget, int $keepRecent = 8): array
+    {
+        $toolIdx = [];
+        $total   = 0;
+        foreach ($transcript as $i => $m) {
+            if (($m['role'] ?? '') !== 'tool') {
+                continue;
+            }
+            $toolIdx[] = $i;
+            $total += mb_strlen((string) ($m['content'] ?? ''));
+        }
+
+        if ($total <= $budget || count($toolIdx) <= $keepRecent) {
+            return $transcript;
+        }
+
+        $prunable = array_slice($toolIdx, 0, max(0, count($toolIdx) - $keepRecent));
+
+        foreach ($prunable as $i) {
+            if ($total <= $budget) {
+                break;
+            }
+            $content = (string) ($transcript[$i]['content'] ?? '');
+            $len     = mb_strlen($content);
+            if ($len <= 600) {
+                continue;
+            }
+            $kept = mb_substr($content, 0, 600);
+            $transcript[$i]['content'] = $kept.' … [older result compacted — re-run this tool if you need its full detail]';
+            $total -= ($len - mb_strlen($kept));
+        }
+
+        return $transcript;
+    }
+
 
     /**
      * Encode a tool result for the transcript within the byte budget.

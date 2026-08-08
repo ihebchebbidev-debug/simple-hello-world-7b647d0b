@@ -149,6 +149,13 @@ return [
 
         'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 20000),
 
+        // Hard ceiling on the accumulated tool evidence kept in the transcript.
+        // Beyond this the oldest tool payloads are compacted: 24 rounds of 20 kB
+        // results otherwise overflow a free model's context window and the whole
+        // request fails, which the user sees as "je n'ai pas pu répondre".
+        'max_context_chars' => (int) env('OPENROUTER_AGENT_MAX_CONTEXT_CHARS', 90000),
+
+
         // NOTE: there is no fast path and no fast mode. The agent always plans
         // and verifies with the tools, even when the deterministic pre-fetch
         // already looks sufficient — a shortcut answer is the one that skips
