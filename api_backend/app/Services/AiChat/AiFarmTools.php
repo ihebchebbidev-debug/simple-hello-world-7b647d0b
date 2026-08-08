@@ -22,11 +22,50 @@ use Throwable;
 trait AiFarmTools
 {
     /**
+     * Minimum `similar_text()` score for a fuzzy plot match to be usable.
+     * The old 60% let "P14" answer with P4's figures; below this the tool
+     * asks the user rather than reporting the wrong plot's numbers.
+     */
+    private const PLOT_MATCH_MIN_SCORE = 82.0;
+
+    /** Required lead over the runner-up; a closer race is a coin flip. */
+    private const PLOT_MATCH_MIN_GAP = 8.0;
+
+    /**
      * How the last `resolvePlots()` call matched the requested label.
      * Surfaced in `applied_filters` so the assistant can disclose a guess
      * instead of silently answering about a different plot.
      */
     private ?string $plotMatchNote = null;
+
+    /**
+     * Stop the tool and ask which plot was meant.
+     *
+     * @param  array<int, object>  $candidates
+     * @throws AiClarificationNeeded
+     */
+    private function needsPlotChoice(string $asked, array $candidates): never
+    {
+        $options = array_values(array_unique(array_map(
+            static function (object $r): string {
+                $area = $r->surface_area_ha ?? null;
+                $crop = trim((string) ($r->crop_type ?? ''));
+
+                return (string) $r->name
+                    .($crop !== '' ? ' — '.$crop : '')
+                    .($area !== null ? ' — '.$area.' ha' : '');
+            },
+            array_slice($candidates, 0, 8),
+        )));
+
+        throw new AiClarificationNeeded(
+            'ambiguous_plot',
+            $asked,
+            $options,
+            sprintf('"%s" matches several plots. Which one do you mean?', $asked),
+        );
+    }
+
 
     /** Pre-aggregated daily rollup — the fast path for period/stat questions. */
     private ?AiDailyRollup $rollup = null;
@@ -272,6 +311,22 @@ trait AiFarmTools
             });
             $rows = $q->orderBy('name')->limit(80)->get()->all();
 
+            // "P1" also LIKE-matches P10, P11, P12… Answering about all of
+            // them (or about the first) is the single most damaging silent
+            // error this assistant can make, so an inexact multi-hit is only
+            // accepted when exactly one row matches the label exactly.
+            if (count($rows) > 1) {
+                $target = self::normLabel($plot);
+                $exact  = array_values(array_filter(
+                    $rows,
+                    static fn ($r) => self::normLabel((string) $r->name) === $target,
+                ));
+                if (count($exact) === 1) {
+                    $rows = $exact;
+                } else {
+                    $this->needsPlotChoice($plot, $rows);
+                }
+            }
 
             if ($rows === []) {
                 // Fuzzy pass over the whole (crop-filtered) plot list.
@@ -290,26 +345,35 @@ trait AiFarmTools
                             $n = self::normLabel((string) $r->name);
                             return $n !== '' && (str_contains($n, $target) || str_contains($target, $n));
                         }));
-                        if ($contains !== []) {
+                        if (count($contains) === 1) {
                             $rows = $contains;
+                        } elseif (count($contains) > 1) {
+                            $this->needsPlotChoice($plot, $contains);
                         } else {
-                            $best = null;
-                            $bestScore = 0.0;
+                            // Ranked fuzzy pass. A near-tie between two plots
+                            // is a coin flip on which numbers get reported —
+                            // ask instead. A weak best match is not a match.
+                            $scored = [];
                             foreach ($all as $r) {
                                 $score = 0.0;
                                 similar_text($target, self::normLabel((string) $r->name), $score);
-                                if ($score > $bestScore) {
-                                    $bestScore = $score;
-                                    $best = $r;
-                                }
+                                $scored[] = ['row' => $r, 'score' => $score];
                             }
-                            if ($best !== null && $bestScore >= 60.0) {
-                                $rows = [$best];
+                            usort($scored, static fn (array $a, array $b): int => $b['score'] <=> $a['score']);
+
+                            $best   = $scored[0] ?? null;
+                            $second = $scored[1] ?? null;
+
+                            if ($best !== null && $best['score'] >= self::PLOT_MATCH_MIN_SCORE) {
+                                if ($second !== null && $best['score'] - $second['score'] < self::PLOT_MATCH_MIN_GAP) {
+                                    $this->needsPlotChoice($plot, [$best['row'], $second['row']]);
+                                }
+                                $rows = [$best['row']];
                                 $this->plotMatchNote = sprintf(
-                                    'No exact match for "%s". Answered about "%s" (fuzzy similarity %d%%). Tell the user which plot you used and ask them to confirm.',
+                                    'No exact match for "%s". Answered about "%s" (fuzzy similarity %d%%). Say which plot you used and ask the user to confirm.',
                                     $plot,
-                                    (string) $best->name,
-                                    (int) round($bestScore),
+                                    (string) $best['row']->name,
+                                    (int) round($best['score']),
                                 );
                             }
                         }
@@ -371,8 +435,8 @@ trait AiFarmTools
         // single day. Dropping the bound widens the window instead, and
         // appliedFilters() reports the discrepancy back to the model.
         $window = [
-            ! empty($args['from']) ? $this->boundOrNull($args['from'], 'from') : null,
-            ! empty($args['to']) ? $this->boundOrNull($args['to'], 'to') : null,
+            ! empty($args['from']) ? $this->boundOrClarify($args['from'], 'from') : null,
+            ! empty($args['to']) ? $this->boundOrClarify($args['to'], 'to') : null,
         ];
 
         // A campaign is a named season window. Explicit from/to always win —
@@ -462,32 +526,22 @@ trait AiFarmTools
         }
         if ($matches === []) return null;
 
-        if (count($matches) > 1) {
-            $this->campaignAmbiguity = array_map(
+        if (count($matches) === 1) {
+            return $matches[0];
+        }
+
+        // Several seasons carry this label. A bare year like "2026" spans both
+        // 2025-2026 and 2026-2027, and picking "the one covering the most days"
+        // silently answers about a season the user never named. Ask.
+        throw new AiClarificationNeeded(
+            'ambiguous_campaign',
+            $raw,
+            array_map(
                 static fn (object $c): string => $c->name.' ('.$c->start_date.' → '.$c->end_date.')',
-                $matches,
-            );
-        }
-
-        // Bare year: pick the campaign covering the most days of that year.
-        if (preg_match('/^(\d{4})$/', $norm, $m) === 1) {
-            $yFrom = Carbon::parse($m[1].'-01-01');
-            $yTo   = Carbon::parse($m[1].'-12-31');
-            $best = null; $bestDays = -1;
-            foreach ($matches as $c) {
-                try {
-                    $s = Carbon::parse((string) $c->start_date)->max($yFrom);
-                    $e = Carbon::parse((string) $c->end_date)->min($yTo);
-                } catch (Throwable) {
-                    continue;
-                }
-                $days = $e->greaterThanOrEqualTo($s) ? $s->diffInDays($e) + 1 : 0;
-                if ($days > $bestDays) { $bestDays = $days; $best = $c; }
-            }
-            if ($best !== null) return $best;
-        }
-
-        return $matches[0];
+                array_slice($matches, 0, 6),
+            ),
+            sprintf('"%s" matches several campaigns. Which season should I use?', $raw),
+        );
     }
 
     /**
@@ -537,6 +591,30 @@ trait AiFarmTools
             ->where('start_date', '<', $c->start_date)
             ->orderByDesc('start_date')
             ->first();
+    }
+
+    /**
+     * Resolve a requested date bound, or stop and ask.
+     *
+     * Dropping an unparseable bound silently WIDENS the window — the user asks
+     * about "ce trimestre agricole" and gets all-time totals presented as the
+     * answer to a scoped question. A date the user explicitly supplied must
+     * either resolve or be queried back.
+     */
+    private function boundOrClarify(mixed $v, string $edge): ?string
+    {
+        $raw = trim((string) $v);
+        if ($raw === '') return null;
+
+        $bound = $this->boundOrNull($raw, $edge);
+        if ($bound !== null) return $bound;
+
+        throw new AiClarificationNeeded(
+            'unparsed_date',
+            $raw,
+            ['JJ/MM/AAAA — e.g. 01/06/2026', 'a month, e.g. "juin 2026"', 'a campaign name, e.g. "2025-2026"'],
+            sprintf('I could not read the period "%s". Which exact dates should I cover?', $raw),
+        );
     }
 
     private function boundOrNull(mixed $v, string $edge): ?string
@@ -831,6 +909,17 @@ trait AiFarmTools
             // Two different, both-legitimate "averages". Quote the weighted one
             // for a farm/crop figure; the unweighted one only if the user asks
             // for "la moyenne des parcelles".
+            // THE per-hectare figure to quote. Choosing between a weighted and
+            // an unweighted mean is an agronomic decision, not a wording one,
+            // and a small model gets it wrong roughly half the time — so the
+            // server decides and hands back a single number.
+            'per_ha'           => count($rows) === 1
+                ? ($rows[0]['m3_per_ha'] ?? null)
+                : self::perHa($totalM3, $totalHa),
+            'per_ha_method'    => count($rows) === 1 ? 'single_plot' : 'weighted (total m³ ÷ total ha)',
+            'per_ha_rule'      => 'Quote `per_ha` and nothing else as THE m³/ha figure. `weighted_m3_per_ha` and '
+                .'`average_m3_per_ha` are provided for reconciliation only; mention `average_m3_per_ha` solely if '
+                .'the user explicitly asks for the unweighted mean of the plots.',
             'weighted_m3_per_ha' => self::perHa($totalM3, $totalHa),
             'average_m3_per_ha' => $withArea > 0 ? round($sumPerHa / $withArea, 2) : null,
             'average_note'     => 'weighted_m3_per_ha = total m³ / total ha (matches the Reports screen). average_m3_per_ha = unweighted mean of the per-plot m³/ha.',

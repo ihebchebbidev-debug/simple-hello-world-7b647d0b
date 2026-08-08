@@ -98,7 +98,7 @@ return [
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
     // Accuracy over latency: a listing answer ("les 12 traitements de P4") needs
     // room to name every row. Truncating mid-list is worse than waiting.
-    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 2600),
+    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 4000),
 
     // Accuracy first: deterministic decoding. Creativity is never wanted on
     // figures pulled from the farm database.
@@ -145,9 +145,9 @@ return [
         // Accuracy first: give the model enough rounds to cross-check a figure
         // with a second tool (e.g. confirm a zero-cost result against the
         // unfiltered treatment list) instead of answering from one lookup.
-        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 14),
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 24),
 
-        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 12000),
+        'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 20000),
 
         // NOTE: there is no fast path and no fast mode. The agent always plans
         // and verifies with the tools, even when the deterministic pre-fetch

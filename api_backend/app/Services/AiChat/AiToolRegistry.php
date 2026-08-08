@@ -18,6 +18,7 @@ use Throwable;
 final class AiToolRegistry
 {
     use AiFarmTools;
+    use AiSqlTools;
 
     public function __construct(
         private readonly NaturalDateParser $dates = new NaturalDateParser(),
@@ -108,6 +109,7 @@ final class AiToolRegistry
             ], ['phrase']),
 
             ...$this->farmDefinitions(),
+            ...$this->sqlDefinitions(),
         ];
     }
 
@@ -277,6 +279,7 @@ final class AiToolRegistry
                 'recent_operations'    => $this->toolRecentOperations($args),
                 'resolve_date_range'   => $this->toolResolveDate($args),
                 default                => $this->callFarm($name, $args)
+                    ?? $this->callSql($name, $args)
                     ?? ['error' => 'unknown_tool', 'name' => $name],
             };
 
@@ -285,6 +288,10 @@ final class AiToolRegistry
                 'generated_at' => now()->toIso8601String(),
                 'currency'     => 'TND',
             ], $data);
+        } catch (AiClarificationNeeded $c) {
+            // Not a failure: the question is genuinely ambiguous. Hand the
+            // options back so the model asks instead of picking one at random.
+            return array_merge(['ok' => false, 'name' => $name], $c->payload());
         } catch (Throwable $e) {
             // The raw driver message (SQL, uuid casts, table names) must never
             // travel to the model: it ends up quoted verbatim in the answer.

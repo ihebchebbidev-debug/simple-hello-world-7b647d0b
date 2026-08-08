@@ -94,7 +94,7 @@ final class ResponseValidator
                 $violations[] = "stale_count(said={$stale['said']},total={$stale['total']})";
             }
 
-            $unsupported = $this->unsupportedNumbers($reply, $evidence);
+            $unsupported = $this->unsupportedNumbers($reply, $evidence, $lastUserMessage);
             if ($unsupported !== []) {
                 $violations[] = 'unsupported_numbers('.implode(',', array_slice($unsupported, 0, 5)).')';
             }
@@ -326,27 +326,51 @@ final class ResponseValidator
     /**
      * Numbers stated in the reply that appear in no tool result.
      *
-     * Only meaningful magnitudes are checked: small integers are dates,
-     * counts and list markers, and flagging them would be pure noise.
+     * Small integers used to be exempt, which meant a hallucinated count
+     * ("3 irrigations" when the data says 5) was never caught — exactly the
+     * class of error that matters most on a farm-data assistant. They are now
+     * checked too. To keep that from flagging legitimate arithmetic, a figure
+     * also counts as supported when it is derivable from two evidence values
+     * (sum, difference, or percentage ratio), and when the user themselves put
+     * it in the question. Ordered-list markers are stripped before scanning.
      *
      * @param  array<int, string>  $evidence
      * @return array<int, string>
      */
-    private function unsupportedNumbers(string $reply, array $evidence): array
+    private function unsupportedNumbers(string $reply, array $evidence, string $lastUserMessage = ''): array
     {
+        $base = $this->numbersIn(implode(' ', $evidence));
+        if ($base === []) return [];
+
         $known = [];
-        foreach ($this->numbersIn(implode(' ', $evidence)) as $n) {
+        foreach (array_merge($base, $this->numbersIn($lastUserMessage)) as $n) {
             $known[] = $n;
             $known[] = round($n, 2);
             $known[] = round($n, 1);
             $known[] = round($n);
         }
-        if ($known === []) return [];
+        // Deterministic figures every answer may legitimately contain.
+        $known = array_merge($known, [0.0, 1.0, 100.0]);
+
+        // Derived values the model is allowed to compute from the evidence:
+        // totals, deltas and percentage variations. Bounded so the check
+        // stays cheap on a long tool payload.
+        $seed = array_slice(array_values(array_unique($base)), 0, 60);
+        foreach ($seed as $a) {
+            foreach ($seed as $b) {
+                $known[] = round($a + $b, 2);
+                $known[] = round($a - $b, 2);
+                if (abs($b) > 0.0001) {
+                    $known[] = round($a / $b * 100, 2);
+                    $known[] = round(($a - $b) / abs($b) * 100, 2);
+                }
+            }
+        }
 
         $bad = [];
-        foreach ($this->numbersIn($reply) as $n) {
-            // Skip integers below 100 (days, months, counts) and years.
-            if ($n == floor($n) && ($n < 100 || ($n >= 1900 && $n <= 2200))) continue;
+        foreach ($this->numbersIn($this->stripListMarkers($reply)) as $n) {
+            // Years are calendar labels, never a measured quantity.
+            if ($n == floor($n) && $n >= 1900 && $n <= 2200) continue;
 
             foreach ($known as $k) {
                 if (abs($k - $n) <= 0.011) continue 2;
@@ -355,6 +379,15 @@ final class ResponseValidator
         }
 
         return array_values(array_unique($bad));
+    }
+
+    /**
+     * Drop "1." / "2)" ordered-list prefixes and bullet numbering so list
+     * scaffolding is never mistaken for a stated figure.
+     */
+    private function stripListMarkers(string $reply): string
+    {
+        return preg_replace('/^\s*\d{1,2}[.)]\s+/m', '', $reply) ?? $reply;
     }
 
     /** @return array<int, float> */

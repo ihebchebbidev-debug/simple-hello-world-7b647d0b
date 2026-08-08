@@ -856,15 +856,13 @@ INSTR;
                 continue;
             }
 
-            $json = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            if (! is_string($json)) {
-                continue;
-            }
-            // Same cap the agent loop applies to a tool result.
-            $max = (int) config('openrouter.agent.max_tool_result', 6000);
-            if ($max > 0 && strlen($json) > $max) {
-                $json = substr($json, 0, $max).'…(tronqué)';
-            }
+            // Same JSON-safe shrinking the agent loop applies to a tool result:
+            // a raw substr() can cut mid-object and hand the model malformed
+            // JSON under a header that calls it "verified data".
+            $json = AiAgentLoop::encodeResult(
+                $result,
+                max(1024, (int) config('openrouter.agent.max_tool_result', 6000)),
+            );
 
             $this->lastPrefetchEvidence[] = $json;
             $this->lastPrefetchCalls[] = ['name' => $call['name'], 'args' => $call['args'], 'result' => $result];
@@ -1019,6 +1017,16 @@ Reasoning protocol:
 - "toutes les parcelles de vigne sauf P1" → pass `crop: "vigne"` + `exclude_plots: ["P1"]`, never one call per plot
 - broad KPIs, trends and period comparisons → `get_overview`, `aggregate_operations`, `compare_periods`
 - pest/product reference lookups → `search_catalog`
+- anything the list above does not cover (users and who recorded what, notifications, feedback, the mobile sync queue in detail, the audit log, backups, plots that have NEVER received a given operation, unusual groupings, cross-table joins) → `describe_data` then `run_sql`
+
+## Open-ended access: you can read the whole database
+- The typed tools are the FIRST choice, always: they resolve plot names, use the frozen `price_at_entry` snapshots and do the per-hectare arithmetic in SQL. Use them whenever one fits.
+- When none fits, you are NOT out of options. `describe_data` returns the full schema map — every readable table, its columns, its row count and the date range it covers, in plain domain language — and `run_sql` runs one read-only SELECT against it.
+- Consequence, and it is a hard rule: "je n'ai pas accès à cette information" / "cette donnée n'est pas disponible" is almost never true, and you may write it ONLY after `describe_data` shows the data has no home in the schema, or after a `run_sql` query written against the real columns returned zero rows. A question you have no typed tool for is a `run_sql` question, not an unanswerable one.
+- Workflow for an off-catalogue question: `describe_data` (whole map) → `describe_data` with the one table you need (exact column names and a sample row) → `run_sql`. Never guess column names; a `sql_failed` result means rewrite the query, never that the data is missing.
+- Aggregate inside SQL (COUNT, SUM, AVG, GROUP BY). Rows are capped, so a truncated listing must never be added up by hand — re-run it as an aggregate.
+- Money and per-hectare figures written by hand in SQL are wrong unless they follow the costing rules returned by `describe_data`: cost uses `price_at_entry`, nutrients use the `*_at_entry` percentages, per-ha divides by `plots.surface_area_ha`, and a multi-plot per-ha is SUM(value)/SUM(surface_area_ha). When money or per-ha is involved and a typed tool exists, use the typed tool and keep `run_sql` for cross-checking it.
+- `run_sql` is read-only by construction. Never tell the user you ran SQL, and never quote a query, a table name or a database error back to them — report only the resulting figures.
 
 ## Voice & precision
 - Executive-brief: numbers first, context second. No preambles, no filler ("Sure", "Voici"), no emoji.

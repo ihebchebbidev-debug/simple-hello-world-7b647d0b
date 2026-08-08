@@ -158,7 +158,7 @@ final class AiAgentLoop
                 $id   = $p['id'];
 
                 $result = $results[$i] ?? ['ok' => false, 'error' => 'tool_failed', 'name' => $name];
-                $encoded = $this->encodeResult($result, $maxResBytes);
+                $encoded = self::encodeResult($result, $maxResBytes);
 
                 if ($name !== 'plan') {
                     $roundData++;
@@ -325,8 +325,16 @@ final class AiAgentLoop
         return ! $sawSignal;
     }
 
-    private function encodeResult(array $result, int $maxBytes): string
-
+    /**
+     * Shrink a tool result to fit the transcript budget WITHOUT ever emitting
+     * broken JSON. Public + static because the deterministic pre-fetch in
+     * {@see AiChatService} must shorten its evidence exactly the same way —
+     * it used to `substr()` the JSON, which could cut mid-object and feed the
+     * model malformed "verified" data.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    public static function encodeResult(array $result, int $maxBytes): string
     {
         $encode = static fn (array $r): string =>
             json_encode($r, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
