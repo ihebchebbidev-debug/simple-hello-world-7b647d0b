@@ -70,16 +70,14 @@ final class AiChatService
             return ['reply' => $shortcut, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
-        $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
+        $agentEnabled = (bool) config('openrouter.agent.enabled', true);
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
-        // Fast path: the deterministic pre-fetch already answered the question,
-        // so the planning round would only re-ask for data we hold. Go straight
-        // to the answer call. {@see prefetchIsSufficient}
-        $usedAgent = $agentEnabled && ! $this->prefetchIsSufficient($messages);
-        if ($agentEnabled && ! $usedAgent) {
-            Log::info('ai.chat.fast_path', ['tools' => count($this->lastPrefetchCalls)]);
-        }
+        // No fast path: even when the deterministic pre-fetch looks sufficient,
+        // the agent still plans and cross-checks with the tools. Skipping that
+        // round is exactly what let a wrongly filtered pre-fetch through.
+        $usedAgent = $agentEnabled;
+
 
         if ($usedAgent) {
             try {
@@ -97,9 +95,8 @@ final class AiChatService
                 $payload = $this->buildOpenRouterMessages($messages, $locale, false);
                 $reply = $this->openRouter->chat($payload, 'answer');
             }
-        } elseif ($agentEnabled) {
-            $reply = $this->openRouter->chat($this->finalAnswerPayload($payload), 'answer');
         } else {
+
             $reply = $this->openRouter->chat($payload, 'answer');
         }
         $this->recordUsage($subjectId, $payload);
@@ -221,7 +218,7 @@ final class AiChatService
             return ['reply' => $shortcut, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
-        $agentEnabled = (bool) config('openrouter.agent.enabled', true) && ! (bool) config('openrouter.fast_mode', false);
+        $agentEnabled = (bool) config('openrouter.agent.enabled', true);
         $payload = $this->buildOpenRouterMessages($messages, $locale, $agentEnabled);
 
         $emitted = '';
@@ -231,11 +228,13 @@ final class AiChatService
             $onDelta($chunk);
         });
 
-        // Fast path — see reply(). Saves one full non-streamed planning
-        // round-trip, so the first token reaches the client immediately.
-        $usedAgent = $agentEnabled && ! $this->prefetchIsSufficient($messages);
+        // No fast path — see reply(). The agent always plans and verifies.
+        $usedAgent = $agentEnabled;
 
         if ($usedAgent) {
+            // Surface what the deterministic pre-fetch already resolved, so the
+            // UI shows those lookups even though the agent round follows.
+            $this->emitPrefetchEvents($onEvent);
             try {
                 $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
                 $trackedDelta->flush();
@@ -254,26 +253,8 @@ final class AiChatService
                     $streamed = $sanitizer->sanitize($streamed);
                 }
             }
-        } elseif ($agentEnabled) {
-            Log::info('ai.chat.fast_path', ['tools' => count($this->lastPrefetchCalls)]);
-            $this->emitPrefetchEvents($onEvent);
-            try {
-                $streamed = $this->openRouter->chatStream($this->finalAnswerPayload($payload), $trackedDelta, 'answer');
-                $trackedDelta->flush();
-                $streamed = $sanitizer->sanitize($streamed);
-            } catch (\Throwable $e) {
-                Log::warning('ai.chat.fast_path_failed', ['message' => $e->getMessage()]);
-                if (trim($emitted) !== '') {
-                    $streamed = trim($emitted);
-                } else {
-                    // Nothing rendered yet: fall back to the full agent loop so
-                    // the user still gets a complete answer, never an error.
-                    $usedAgent = true;
-                    $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
-                    $trackedDelta->flush();
-                }
-            }
         } else {
+
             $streamed = $this->openRouter->chatStream($payload, $trackedDelta, 'answer');
             $trackedDelta->flush();
             $streamed = $sanitizer->sanitize($streamed);
@@ -392,6 +373,13 @@ final class AiChatService
                 || $v === 'leaks_internals'
                 // A capped row count presented as the total: plain wrong number.
                 || str_starts_with($v, 'stale_count')
+                // A listing question answered with a summary/cost only.
+                || $v === 'listing_not_listed'
+                // "Aucun traitement" while the plot was demonstrably treated.
+                || $v === 'unqualified_absence'
+                // "No data" declared without the farm-wide search having run.
+                || $v === 'absence_without_search'
+
                 // A figure that appears in no tool result is a hallucination.
                 || str_starts_with($v, 'unsupported_numbers'),
         ));
@@ -488,6 +476,16 @@ final class AiChatService
                 if (preg_match('/^stale_count\(said=(\d+),total=(\d+)\)$/', $v, $m)) {
                     $countFixes .= "\n- The count {$m[1]} is the number of rows shown, NOT the total: the correct total is {$m[2]}. State {$m[2]} as the count and, if you list rows, say you are showing {$m[1]} of {$m[2]}.";
                 }
+                if ($v === 'listing_not_listed') {
+                    $countFixes .= "\n- The user asked WHICH operations were recorded, and your draft gave only a summary/cost. Rewrite it as a listing: state how many there are, then one line per operation with its date, product and dose taken verbatim from the tool rows.";
+                }
+                if ($v === 'unqualified_absence') {
+                    $countFixes .= "\n- Do not write a bare \"aucun traitement\": the plot WAS treated, just not against the pest/product asked about. Say that nothing matching the request is recorded, then name the pests and products that were actually applied.";
+                }
+                if ($v === 'absence_without_search') {
+                    $countFixes .= "\n- You told the user nothing is recorded without having run the farm-wide search. Do NOT rewrite this as a nicer refusal: call `locate_data` with the raw keywords of the question and no date filter, then answer from what it finds (or from the tool it points you to). Only if it returns nothing at all may you say the information is not recorded, and then say over which scope you looked.";
+                }
+
                 if (str_starts_with($v, 'stale_count') || str_starts_with($v, 'unsupported_numbers')) {
                     $numericViolation = true;
                 }
@@ -894,64 +892,11 @@ INSTR;
     }
 
     /**
-     * True when the deterministic pre-fetch already holds everything the answer
-     * needs, so the model's planning round would just re-request data we have.
-     *
-     * Deliberately conservative — the agent loop stays in charge of anything
-     * that smells like several lookups, a comparison, a ranking or an
-     * open-ended analysis. A false negative only costs the usual latency; a
-     * false positive would produce a half-answered question.
-     */
-    private function prefetchIsSufficient(array $messages): bool
-    {
-        if (! (bool) config('openrouter.agent.fast_path', true)) {
-            return false;
-        }
-        if ($this->lastPrefetchCalls === [] || count($this->lastPrefetchCalls) > 2) {
-            return false;
-        }
-
-        // Every pre-fetched tool must have actually resolved. A `plot_not_found`
-        // needs the agent's repair round.
-        foreach ($this->lastPrefetchCalls as $call) {
-            if (($call['result']['ok'] ?? false) !== true) {
-                return false;
-            }
-        }
-
-        $question = $this->lastUserMessage($messages);
-        if ($question === '') {
-            return false;
-        }
-        if (mb_strlen($question) > 320 || substr_count($question, '?') > 1) {
-            return false;
-        }
-
-        // Multi-lookup / analytical phrasing → keep the agent loop.
-        $q = ' '.mb_strtolower(strtr($question, [
-            'à' => 'a', 'â' => 'a', 'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
-            'î' => 'i', 'ï' => 'i', 'ô' => 'o', 'ö' => 'o', 'ù' => 'u', 'û' => 'u', 'ç' => 'c',
-        ])).' ';
-        foreach ([
-            'compar', 'versus', ' vs ', 'evolution', 'tendance', 'trend', 'progress',
-            'pourquoi', 'why', 'analyse', 'analys', 'explique', 'explain', 'recommand', 'recommend',
-            'classe', 'classement', 'ranking', 'top ', 'meilleur', 'pire', 'worst', 'best',
-            'toutes les parcelles', 'chaque parcelle', 'all plots', 'every plot',
-            'par parcelle', 'per plot', 'repartition', 'breakdown', 'resume general', 'bilan complet',
-        ] as $needle) {
-            if (str_contains($q, $needle)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
      * The pre-fetched payload plus the same "write the final answer now" pin the
-     * agent loop uses before its streaming round, so the fast path produces an
-     * answer of identical shape and discipline.
+     * agent loop uses before its streaming round, used by the retry lane so a
+     * rescue answer has identical shape and discipline.
      *
+
      * @param  array<int, array<string, mixed>>  $payload
      * @return array<int, array<string, mixed>>
      */
@@ -1091,6 +1036,9 @@ Reasoning protocol:
 - When a listing tool returns `total_matching` / `irrigation_count` / `harvest_count`, the COUNT answer is that field — never the number of rows you can see, and never `returned_rows`. If `truncated` is true, say "les N plus récentes sur M au total".
 - If two tools give different numbers for the same question, trust the one carrying `total_matching` / `*_count` (a full count) over any row listing, and never present a capped list length as a total.
 - NEVER assert "aucun enregistrement" / "0" when the tool result contains `empty_result_diagnostic` with `outside_window_count > 0`. Say that nothing matches the requested period or campaign, give the dates of the records that DO exist, and ask whether to look at that period instead.
+- When a result carries `filter_context` with `unfiltered_treatment_count > 0`, never write a bare "aucun traitement": say that no treatment targeting the requested pest/product is recorded, then name the pests and products that WERE applied on that plot, and offer to list them.
+- Answer the question that was ASKED, in the shape it was asked. "Quels traitements…", "les traitements sur la parcelle X" = a listing: give the number of treatments and one line per treatment (date, product, dose, dose/ha). A cost total is NOT an answer to a listing question — quote money only when the user used a cost word.
+- Never describe a filtered figure as "toutes campagnes confondues", and never attach a date range to an unfiltered total as if it were a filter. Follow the `coverage` sentence in the result: unfiltered → "toutes périodes enregistrées"; filtered → name the period or campaign.
 - If `applied_filters.campaign` (or the campaign note) warns that the label matched several campaigns, name the exact season and window you used before giving the figure.
 - Campaign scoping includes rows explicitly attached to that campaign even when their date sits slightly outside the season window. Report the campaign, not a raw date range, when the user asked by campaign.
 
@@ -1101,6 +1049,15 @@ Reasoning protocol:
 - If a result looks surprising (0, a huge jump, a missing month), verify it with a second tool before reporting it.
 - Prefer an extra tool round over an approximation. There is no time limit; an answer that takes longer but is exact is always the correct trade-off.
 - If after all rounds a figure is still uncertain, say precisely what is known and what could not be verified — never round an unknown into a confident number.
+
+## Hard questions: find the data before declaring it missing
+- An empty result is a HYPOTHESIS, not an answer. A tool returns nothing far more often because the plot, the product spelling, the operation type or the period was wrong than because the record does not exist.
+- Before ANY sentence meaning "il n'y a pas de données / aucun enregistrement / je ne trouve pas", you MUST have called `locate_data` with the raw keywords of the question and no date filter, and it must have come back with `total_all_time: 0`. Read its `verdict` and follow it literally.
+- Use `locate_data` as your first move too whenever the question is unusual, multi-hop, or names something you cannot map onto a tool argument (a remark, an ingredient, a symptom, an event). It tells you which record type holds the answer, over which dates, on which plots, and which tool to call next — then call that tool for the real figures.
+- Never quote `locate_data` counts as the answer. It locates; the typed tool measures.
+- A multi-part question is answered by as many lookups as it has parts. Never let one tool result stand in for a part you did not query, and never drop a sub-question because it was harder — take the extra rounds.
+- If the catalog knows a product/pest but no operation uses it, that is the answer: it exists but was never applied. That is not "no data".
+
 
 
 

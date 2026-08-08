@@ -25,8 +25,14 @@ final class AiQuestionPlanner
         private readonly NaturalDateParser $dates = new NaturalDateParser(),
     ) {}
 
-    /** Hard cap so a single turn never fans out into a scan of the whole farm. */
-    private const MAX_CALLS = 3;
+    /**
+     * Hard cap so a single turn never fans out into a scan of the whole farm.
+     * Raised from 3: a mixed question ("coût et traitements de P4 cette
+     * campagne") needs every branch pre-fetched, and the agent loop no longer
+     * has a fast path that would have skipped the missing lookup.
+     */
+    private const MAX_CALLS = 5;
+
 
     /**
      * @param  array<int, array{role?: string, content?: string}>  $messages

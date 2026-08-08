@@ -96,9 +96,10 @@ return [
     ], static fn ($m) => is_string($m) && trim($m) !== '')),
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
-    // Lower cap = faster completions on free-tier models (~30-50 tok/s).
-    // Most answers are short lookups; long analyses still fit in 700 tokens.
-    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 1600),
+    // Accuracy over latency: a listing answer ("les 12 traitements de P4") needs
+    // room to name every row. Truncating mid-list is worse than waiting.
+    'max_tokens'  => (int) env('OPENROUTER_MAX_TOKENS', 2600),
+
     // Accuracy first: deterministic decoding. Creativity is never wanted on
     // figures pulled from the farm database.
     'temperature' => (float) env('OPENROUTER_TEMPERATURE', 0.0),
@@ -121,18 +122,19 @@ return [
 
 
     // Retry / backoff.
-    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 2),
+    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 3),
     'retry_base_ms'     => (int) env('OPENROUTER_RETRY_BASE_MS', 400),
     'retry_max_ms'      => (int) env('OPENROUTER_RETRY_MAX_MS', 4000),
     // Full passes over the whole model fallback chain before giving up.
-    'recovery_passes'   => (int) env('OPENROUTER_RECOVERY_PASSES', 2),
+    // Never surface "service indisponible" while an untried model remains.
+    'recovery_passes'   => (int) env('OPENROUTER_RECOVERY_PASSES', 3),
+
     // Shorter quarantine: a rate-limited key recovers in seconds, not minutes,
     // and keeping it benched shrinks the usable key pool during a burst.
     'quarantine_seconds' => (int) env('OPENROUTER_QUARANTINE_SECONDS', 60),
 
 
-    // Fast mode: disable the agent tool loop to reduce round-trips.
-    'fast_mode' => (bool) env('OPENROUTER_FAST_MODE', false),
+
 
     // Tool-calling agent loop.
     // When enabled, the assistant plans + calls typed data tools (aggregations,
@@ -140,15 +142,19 @@ return [
     // on a pre-baked JSON context blob. Free models only.
     'agent' => [
         'enabled'         => (bool) env('OPENROUTER_AGENT_ENABLED', true),
-        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 8),
+        // Accuracy first: give the model enough rounds to cross-check a figure
+        // with a second tool (e.g. confirm a zero-cost result against the
+        // unfiltered treatment list) instead of answering from one lookup.
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 14),
+
         'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 12000),
 
-        // Skip the (non-streamed) planning round when the deterministic
-        // pre-fetch already holds the answer — saves one full LLM round-trip
-        // on simple single-metric questions. Set false to always plan.
-        // Accuracy over speed: always let the model plan and verify with the
-        // tools, even when the pre-fetch looks sufficient.
-        'fast_path'       => (bool) env('AI_FAST_PATH', false),
+        // NOTE: there is no fast path and no fast mode. The agent always plans
+        // and verifies with the tools, even when the deterministic pre-fetch
+        // already looks sufficient — a shortcut answer is the one that skips
+        // the cross-check that catches a wrong filter.
+
+
 
         // Run a round's distinct tool calls concurrently. Off by default:
         // Laravel's concurrency drivers fork a process per task, which on a
@@ -159,10 +165,13 @@ return [
 
 
     // Prompt cache — hash(system+messages+model) → cached reply.
+    // Short TTL on purpose: an operation entered from the mobile app must show
+    // up in the next answer. A stale-but-fast reply is a wrong reply here.
     'cache' => [
         'enabled' => (bool) env('OPENROUTER_CACHE_ENABLED', true),
-        'ttl'     => (int) env('OPENROUTER_CACHE_TTL', 600), // 10 minutes
+        'ttl'     => (int) env('OPENROUTER_CACHE_TTL', 60),
     ],
+
 
     // Short-TTL memo of the full context build (per-request assembly of ~15
     // stamp queries). Set to 0 to disable.
@@ -183,7 +192,7 @@ return [
 
     // Maximum self-check repair rounds. Accuracy beats latency: each round
     // re-validates the rewrite and keeps the best candidate seen.
-    'repair_passes' => (int) env('AI_REPAIR_PASSES', 2),
+    'repair_passes' => (int) env('AI_REPAIR_PASSES', 3),
 
 
 

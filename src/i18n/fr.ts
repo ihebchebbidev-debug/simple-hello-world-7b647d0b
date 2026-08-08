@@ -689,6 +689,11 @@ export const fr = {
     title: 'Assistant Flehty',
     subtitle: 'Posez vos questions sur les parcelles, rapports et opérations',
     online: 'En ligne · fondé sur les données réelles',
+    pace: {
+      ok: 'Chaque réponse est vérifiée sur la base de données',
+      busy: '{{count}} questions en 5 min · réponses mises en file pour rester exactes',
+    },
+
     open: 'Ouvrir l’assistant IA',
     close: 'Fermer l’assistant',
     newChat: 'Nouvelle conversation',

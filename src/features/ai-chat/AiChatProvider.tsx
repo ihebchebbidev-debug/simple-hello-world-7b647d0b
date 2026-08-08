@@ -39,8 +39,15 @@ type AiChatContextValue = {
   stopStreaming: () => void;
   startNewConversation: () => void;
   rateMessage: (messageId: string, rating: AiChatRating) => Promise<void>;
+  // Question pace over the last PACE_WINDOW_MS. `paceBusy` flips true once the
+  // user has fired PACE_LIMIT questions inside the window — the header dot goes
+  // green → red so it is visible that answers are being queued/slowed rather
+  // than rushed. Purely informational; sending is never blocked.
+  questionsInWindow: number;
+  paceBusy: boolean;
   // Server-backed history (only populated when the user is authenticated).
   historyAvailable: boolean;
+
   history: AiConversationSummary[];
   historyLoading: boolean;
   activeId: string | null;
@@ -80,6 +87,14 @@ function withInterpretationHint(messages: OutboundMessage[], locale: string): Ou
 // back-to-back turns coalesce into fewer PATCHes.
 const PERSIST_DEBOUNCE_MS = 500;
 
+// Question-pace signal. Four questions inside five minutes means the operator
+// is firing faster than the assistant can verify each answer against the farm
+// database, so the header dot turns red as a "slow down, answers are queued"
+// hint. Accuracy is never traded for speed — nothing is blocked or truncated.
+const PACE_WINDOW_MS = 5 * 60 * 1000;
+const PACE_LIMIT = 4;
+
+
 function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     try {
@@ -110,6 +125,28 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState<string | null>(() => loadAiChatState().conversationId);
   const [messages, setMessages] = useState<AiChatMessage[]>(() => loadAiChatState().messages);
   const [isSending, setIsSending] = useState(false);
+
+  // Timestamps of the questions asked in the current rolling window.
+  const [questionTimes, setQuestionTimes] = useState<number[]>([]);
+  const recordQuestion = useCallback(() => {
+    const now = Date.now();
+    setQuestionTimes((prev) => [...prev, now].filter((ts) => now - ts < PACE_WINDOW_MS));
+  }, []);
+  // Re-evaluate on a timer so the dot goes back to green on its own once the
+  // oldest question falls out of the window, without needing a new send.
+  const [paceTick, setPaceTick] = useState(0);
+  useEffect(() => {
+    if (questionTimes.length === 0) return;
+    const id = window.setInterval(() => setPaceTick((v) => v + 1), 10_000);
+    return () => window.clearInterval(id);
+  }, [questionTimes.length]);
+  const questionsInWindow = useMemo(() => {
+    void paceTick;
+    const now = Date.now();
+    return questionTimes.filter((ts) => now - ts < PACE_WINDOW_MS).length;
+  }, [paceTick, questionTimes]);
+
+
 
   const abortRef = useRef<AbortController | null>(null);
   // Synchronous send guard — closes the double-submit race where two clicks in
@@ -345,6 +382,8 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       // Synchronous re-entry guard — two clicks in the same tick both hit here.
       if (!text || sendingRef.current) return;
       sendingRef.current = true;
+      recordQuestion();
+
 
       // Snapshot the transcript from the ref at call time (documented — the
       // request body uses this exact array, not any later mutation from
@@ -533,7 +572,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         chunkTargetIdRef.current = null;
       }
     },
-    [flushChunks, i18n.language, schedulePersist, t],
+    [flushChunks, i18n.language, recordQuestion, schedulePersist, t],
   );
 
   // Regenerate the LAST assistant answer in the transcript. Finds the most
@@ -796,6 +835,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       stopStreaming,
       startNewConversation,
       rateMessage,
+      questionsInWindow,
+      paceBusy: questionsInWindow >= PACE_LIMIT,
+
       historyAvailable,
       history,
       historyLoading,
@@ -815,7 +857,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       messages,
       open,
       openChat,
+      questionsInWindow,
       rateMessage,
+
       refreshHistory,
       selectConversation,
       sendMessage,

@@ -162,8 +162,18 @@ trait AiFarmTools
                 'status' => ['type' => 'string', 'enum' => ['pending', 'failed', 'synced', 'all'], 'description' => 'Default all.'],
                 'limit'  => ['type' => 'integer', 'minimum' => 1, 'maximum' => 20],
             ]),
+
+            $this->fn('locate_data', 'DISCOVERY TOOL — finds WHERE something is recorded when you do not know which table, plot, product or period holds it. Give free-text keywords (a product, an active ingredient, a pest, a plot, a remark, anything the user said) and it scans irrigation, fertilization, phytosanitary and harvest records plus the fertilizer/pesticide/pest catalogs, returning for each place: how many rows match, the first and last date, which plots, sample rows, and `use_tool` — the tool to call next for the real figures. It ALWAYS also reports the all-time match count, so a period filter that hides existing data is visible instead of being reported as "aucun enregistrement". Call this WHENEVER a typed lookup returned nothing, the question is unusual or multi-hop, or the user names something you cannot map to a tool argument. Never answer "there is no data" before this tool has come back empty all-time.', [
+                'query' => ['type' => 'string', 'description' => 'Free-text keywords from the question (product, ingredient, pest, plot, remark…). All words must appear, in any order; accents/case/punctuation are ignored.'],
+                'plot'  => $plot,
+                'crop'  => $crop,
+                'from'  => $from,
+                'to'    => $to,
+                'campaign' => $campaign,
+            ], ['query']),
         ];
     }
+
 
     /**
      * @param  array<string, mixed>  $args
@@ -185,7 +195,9 @@ trait AiFarmTools
             'campaign_compare'      => $this->toolCampaignCompare($args),
             'data_quality'          => $this->toolDataQuality($args),
             'sync_status'           => $this->toolSyncStatus($args),
+            'locate_data'           => $this->toolLocateData($args),
             default                 => null,
+
         };
     }
 
@@ -248,12 +260,18 @@ trait AiFarmTools
             $rows = $applyCrop($base())->orderBy('name')->limit(80)->get()->all();
         } else {
             $needle = mb_strtolower($plot);
-            $q = $applyCrop($base())->where(function ($w) use ($plot, $needle) {
+            $folded = self::foldText($plot);
+            $nameFold = self::sqlFold('name');
+            $q = $applyCrop($base())->where(function ($w) use ($plot, $needle, $folded, $nameFold) {
                 if (self::looksLikeUuid($plot)) $w->where('id', $plot);
                 $w->orWhereRaw('LOWER(name) = ?', [$needle])
-                  ->orWhereRaw('LOWER(name) LIKE ?', ['%'.$needle.'%']);
+                  ->orWhereRaw('LOWER(name) LIKE ?', ['%'.$needle.'%'])
+                  // Folded pass in SQL: "P-4", "p 4" and "P4" are one plot.
+                  ->orWhereRaw($nameFold.' = ?', [$folded])
+                  ->orWhereRaw($nameFold.' LIKE ?', ['%'.$folded.'%']);
             });
             $rows = $q->orderBy('name')->limit(80)->get()->all();
+
 
             if ($rows === []) {
                 // Fuzzy pass over the whole (crop-filtered) plot list.
@@ -818,6 +836,11 @@ trait AiFarmTools
             'average_note'     => 'weighted_m3_per_ha = total m³ / total ha (matches the Reports screen). average_m3_per_ha = unweighted mean of the per-plot m³/ha.',
             'cost_basis'       => 'price_at_entry, falling back to the price_history row effective at the operation date — identical to the Reports/Production-cost screen.',
             'excluded'         => array_values((array) ($args['exclude_plots'] ?? [])),
+            // Truthful description of what the totals cover, so the answer can
+            // never mix "toutes campagnes confondues" with a filtered window.
+            'coverage'         => $from === null && $to === null && empty($args['campaign'])
+                ? 'No date or campaign filter was applied: these totals cover every recorded irrigation. The first/last dates per plot are the extent of the DATA, not a filter — do not present them as a period restriction, and do not claim a campaign scope.'
+                : 'These totals cover ONLY the requested window/campaign. State that period explicitly and never say "toutes campagnes confondues".',
             'reconcile_hint'   => 'These are summed totals, not a listing. If the user asks for the detail, disputes the number, or quotes a different figure, call irrigation_history with the SAME plot and window and show the individual rows.',
         ];
     }
@@ -934,20 +957,20 @@ trait AiFarmTools
             ->whereIn('po.plot_id', $ids);
 
         if (! empty($args['pest'])) {
-            $likes = array_map(
-                static fn (string $term): string => '%'.mb_strtolower($term).'%',
-                $this->pestSearchTerms((string) $args['pest']),
-            );
-            $q->where(function ($w) use ($likes) {
-                foreach ($likes as $like) {
-                    $w->orWhereRaw('LOWER(po.target_pest) LIKE ?', [$like])
-                      ->orWhereRaw('LOWER(COALESCE(po.remarks, \'\')) LIKE ?', [$like]);
-                }
+            $terms = $this->pestSearchTerms((string) $args['pest']);
+            $q->where(function ($w) use ($terms) {
+                self::whereMatchesAnyTerm($w, ['po.target_pest', 'po.remarks'], $terms);
             });
         }
         if (! empty($args['product'])) {
-            $q->whereRaw('LOWER(pe.name) LIKE ?', ['%'.mb_strtolower((string) $args['product']).'%']);
+            // Folded token match: "naturamin gold" also finds "Naturamin-Gold",
+            // and a product named only in the composition string still matches.
+            $product = (string) $args['product'];
+            $q->where(function ($w) use ($product) {
+                self::whereMatchesAllTokens($w, ['pe.name', 'pe.chemical_composition'], $product);
+            });
         }
+
 
         // Cloned BEFORE the date filter so an empty window can be explained
         // with the dates that do exist instead of a flat "aucun traitement".
@@ -994,15 +1017,75 @@ trait AiFarmTools
             'order'           => $order,
             'rows'            => $rows,
             'returned'        => count($rows),
+            // This tool answers a LISTING question. A "quels traitements…"
+            // question must be answered with the count and the individual
+            // rows (date, product, dose), not with a cost total alone.
+            'answer_shape'    => 'listing',
+            'answer_rule'     => 'State `treatment_count` and list each row (date, product, dose, dose/ha). Quote `total_cost_tnd` only if the user asked about cost.',
         ];
 
         if ($total === 0) {
             $probe = $this->outsideWindowProbe($qNoWindow, 'po.operation_date', $from, $to);
             if ($probe !== null) $out['empty_result_diagnostic'] = $probe;
+
+            // A pest/product filter returning 0 is the classic false negative:
+            // the treatment exists but was recorded under another pest label
+            // (or none at all). Show what IS recorded so the answer can never
+            // claim "aucun traitement" when the plot was in fact treated.
+            $ctx = $this->phytoFilterContext($ids, $args);
+            if ($ctx !== null) $out['filter_context'] = $ctx;
         }
 
         return $out;
 
+    }
+
+    /**
+     * All-time, filter-free picture of the phytosanitary log for a plot scope.
+     * Attached whenever a pest/product filter returns nothing, so the model
+     * distinguishes "this plot was never treated" from "it was treated, but
+     * not against the pest you named".
+     *
+     * @param  array<int, mixed>  $ids
+     * @param  array<string, mixed>  $args
+     * @return array<string, mixed>|null
+     */
+    private function phytoFilterContext(array $ids, array $args): ?array
+    {
+        if ($ids === [] || (empty($args['pest']) && empty($args['product']))) {
+            return null;
+        }
+        if (! Schema::hasTable('phytosanitary_operations')) {
+            return null;
+        }
+
+        try {
+            $base = DB::table('phytosanitary_operations as po')
+                ->leftJoin('pesticides as pe', 'pe.id', '=', 'po.pesticide_id')
+                ->whereIn('po.plot_id', $ids);
+
+            $count = (int) (clone $base)->count();
+            if ($count === 0) {
+                return [
+                    'unfiltered_treatment_count' => 0,
+                    'note' => 'No phytosanitary treatment at all is recorded for this plot scope, in any period. The plot was genuinely never treated.',
+                ];
+            }
+
+            $pests = (clone $base)->whereNotNull('po.target_pest')
+                ->distinct()->orderBy('po.target_pest')->limit(20)->pluck('po.target_pest')->all();
+            $products = (clone $base)->whereNotNull('pe.name')
+                ->distinct()->orderBy('pe.name')->limit(20)->pluck('pe.name')->all();
+
+            return [
+                'unfiltered_treatment_count' => $count,
+                'recorded_target_pests'      => array_values(array_filter(array_map('strval', $pests))),
+                'recorded_products'          => array_values(array_filter(array_map('strval', $products))),
+                'note' => 'The requested pest/product matched nothing, but '.$count.' treatment(s) ARE recorded on this plot scope. Say that no treatment targeting the requested pest is recorded, then name the pests/products that WERE applied. Never answer a bare "aucun traitement".',
+            ];
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /** @return array<int, string> */
@@ -1047,8 +1130,12 @@ trait AiFarmTools
             )
             ->whereIn('fo.plot_id', $ids);
         if (! empty($args['product'])) {
-            $q->whereRaw('LOWER(f.name) LIKE ?', ['%'.mb_strtolower((string) $args['product']).'%']);
+            $product = (string) $args['product'];
+            $q->where(function ($w) use ($product) {
+                self::whereMatchesAllTokens($w, ['f.name'], $product);
+            });
         }
+
         $qNoWindow = clone $q;
         $this->applyWindow($q, 'fo', $from, $to, 'fertilization_operations');
 
@@ -1113,12 +1200,11 @@ trait AiFarmTools
         /** @var array<string,mixed> $probeQueries */
         $probeQueries = [];
         $anyLike = static function ($where, array $columns) use ($terms): void {
-            foreach ($columns as $col) {
-                foreach ($terms as $term) {
-                    $where->orWhereRaw("LOWER(COALESCE($col, '')) LIKE ?", ['%'.$term.'%']);
-                }
-            }
+            // Each family term is a complete alternative spelling, and both
+            // sides are folded so "Acides Aminés" matches "acide amine".
+            self::whereMatchesAnyTerm($where, $columns, $terms);
         };
+
 
         if (Schema::hasTable('fertilizers') && Schema::hasTable('fertilization_operations')) {
             $cols = ['product.name'];
@@ -1235,7 +1321,7 @@ trait AiFarmTools
             'biostimulant' => ['biostimul', 'stimul', 'algue', 'extrait'],
         ];
 
-        $flat = self::deaccent($needle);
+        $flat = self::foldText($needle);
         foreach ($families as $terms) {
             foreach ($terms as $term) {
                 if (str_contains($flat, $term) || str_contains($term, $flat)) {
@@ -1244,7 +1330,13 @@ trait AiFarmTools
             }
         }
 
+        // Not a family: the folded phrase alone. Folding already absorbs case,
+        // accents and punctuation ("Naturamin-Gold" ≡ "naturamin gold");
+        // splitting into OR'd words here would match any product containing
+        // "gold" and silently widen the answer.
         return [$flat];
+
+
     }
 
     private static function deaccent(string $s): string
@@ -1258,6 +1350,121 @@ trait AiFarmTools
             'ç'=>'c','ñ'=>'n',
         ]));
     }
+
+    // ─── Text search: fold BOTH sides before comparing ──────────────────
+    //
+    // `LOWER(name) LIKE '%naturamin gold%'` misses "Naturamin-Gold" and
+    // "Acides Aminés" the moment the catalog spells a product with accents,
+    // a hyphen or a plural. Every product / pest lookup therefore compares a
+    // folded column against folded tokens: accents stripped, punctuation
+    // turned into spaces, and each word matched independently (AND) so word
+    // order and filler words stop mattering.
+
+    /** Accent + punctuation folding applied identically in PHP and in SQL. */
+    private const SEARCH_FOLD = [
+        'à'=>'a','â'=>'a','ä'=>'a','á'=>'a','ã'=>'a','å'=>'a',
+        'é'=>'e','è'=>'e','ê'=>'e','ë'=>'e',
+        'î'=>'i','ï'=>'i','í'=>'i',
+        'ô'=>'o','ö'=>'o','ó'=>'o','õ'=>'o',
+        'ù'=>'u','û'=>'u','ü'=>'u','ú'=>'u',
+        'ç'=>'c','ñ'=>'n',
+        '-'=>' ','_'=>' ','.'=>' ',','=>' ','/'=>' ','('=>' ',')'=>' ','+'=>' ','&'=>' ',"'"=>' ','’'=>' ','"'=>' ',
+    ];
+
+    /** Words that carry no selectivity in a product / pest name. */
+    private const SEARCH_STOPWORDS = [
+        'de', 'du', 'des', 'la', 'le', 'les', 'un', 'une', 'et', 'au', 'aux',
+        'pour', 'contre', 'sur', 'the', 'of', 'and', 'for',
+    ];
+
+    private static function sqlLiteral(string $s): string
+    {
+        return "'".str_replace("'", "''", $s)."'";
+    }
+
+    /**
+     * SQL expression folding a column the same way {@see foldText} folds the
+     * needle. Portable REPLACE() nesting — no pgsql-only translate().
+     */
+    private static function sqlFold(string $col): string
+    {
+        $expr = "LOWER(COALESCE($col, ''))";
+        foreach (self::SEARCH_FOLD as $from => $to) {
+            $expr = 'REPLACE('.$expr.', '.self::sqlLiteral($from).', '.self::sqlLiteral($to).')';
+        }
+        return $expr;
+    }
+
+    private static function foldText(string $s): string
+    {
+        $s = strtr(mb_strtolower(trim($s)), self::SEARCH_FOLD);
+        return trim((string) preg_replace('/\s+/u', ' ', $s));
+    }
+
+    /**
+     * Split a needle into the words a row must contain. Long words lose a
+     * trailing "s" so "traitements"/"aminés" match the singular spelling.
+     *
+     * @return array<int, string>
+     */
+    private static function searchTokens(string $needle): array
+    {
+        $tokens = [];
+        foreach (explode(' ', self::foldText($needle)) as $token) {
+            if ($token === '' || mb_strlen($token) < 2) continue;
+            if (in_array($token, self::SEARCH_STOPWORDS, true)) continue;
+            if (mb_strlen($token) > 4 && str_ends_with($token, 's')) {
+                $token = mb_substr($token, 0, -1);
+            }
+            $tokens[] = $token;
+        }
+        if ($tokens === []) {
+            $flat = self::foldText($needle);
+            if ($flat !== '') $tokens[] = $flat;
+        }
+        return array_values(array_unique($tokens));
+    }
+
+    /**
+     * `(colA has every token) OR (colB has every token) …` — the match a human
+     * means by "les traitements Naturamin".
+     *
+     * @param  array<int, string>  $columns
+     */
+    private static function whereMatchesAllTokens(mixed $where, array $columns, string $needle): void
+    {
+        $tokens = self::searchTokens($needle);
+        if ($tokens === []) return;
+
+        foreach ($columns as $col) {
+            $expr = self::sqlFold($col);
+            $where->orWhere(static function ($w) use ($expr, $tokens): void {
+                foreach ($tokens as $token) {
+                    $w->whereRaw($expr.' LIKE ?', ['%'.$token.'%']);
+                }
+            });
+        }
+    }
+
+    /**
+     * `any column contains any of these folded terms` — used for pest synonym
+     * lists, where each term is already a complete alternative spelling.
+     *
+     * @param  array<int, string>  $columns
+     * @param  array<int, string>  $terms
+     */
+    private static function whereMatchesAnyTerm(mixed $where, array $columns, array $terms): void
+    {
+        foreach ($columns as $col) {
+            $expr = self::sqlFold($col);
+            foreach ($terms as $term) {
+                $folded = self::foldText($term);
+                if ($folded === '') continue;
+                $where->orWhereRaw($expr.' LIKE ?', ['%'.$folded.'%']);
+            }
+        }
+    }
+
 
     /** @param array<string,mixed> $args */
     private function toolIrrigationHistory(array $args): array
@@ -1437,9 +1644,8 @@ trait AiFarmTools
         // (or on nothing at all), which is how a real treatment ended up
         // reported as "0 TND".
         $pest = ! empty($args['pest']) ? (string) $args['pest'] : null;
-        $pestLikes = $pest !== null
-            ? array_map(static fn (string $t): string => '%'.mb_strtolower($t).'%', $this->pestSearchTerms($pest))
-            : [];
+        $pestTerms = $pest !== null ? $this->pestSearchTerms($pest) : [];
+
 
         $byPlot = [];
         $pestProbe = null;
@@ -1452,14 +1658,12 @@ trait AiFarmTools
                 ->selectRaw("op.plot_id AS plot_id, COALESCE(SUM($expr),0) AS cost")
                 ->whereIn('op.plot_id', $ids)
                 ->groupBy('op.plot_id');
-            if ($pestLikes !== [] && $type === 'phytosanitary') {
-                $q->where(function ($w) use ($pestLikes) {
-                    foreach ($pestLikes as $like) {
-                        $w->orWhereRaw('LOWER(COALESCE(op.target_pest, \'\')) LIKE ?', [$like])
-                          ->orWhereRaw('LOWER(COALESCE(op.remarks, \'\')) LIKE ?', [$like]);
-                    }
+            if ($pestTerms !== [] && $type === 'phytosanitary') {
+                $q->where(function ($w) use ($pestTerms) {
+                    self::whereMatchesAnyTerm($w, ['op.target_pest', 'op.remarks'], $pestTerms);
                 });
             }
+
 
             $this->applyWindow($q, 'op', $from, $to, $table);
             foreach ($q->get() as $r) {
@@ -1513,16 +1717,18 @@ trait AiFarmTools
             $probeTable = $probeType !== null ? (self::OP_TABLE[$probeType] ?? null) : null;
             if ($probeTable !== null && Schema::hasTable($probeTable)) {
                 $probeQ = DB::table($probeTable.' as op')->whereIn('op.plot_id', $ids);
-                if ($pestLikes !== []) {
-                    $probeQ->where(function ($w) use ($pestLikes) {
-                        foreach ($pestLikes as $like) {
-                            $w->orWhereRaw('LOWER(COALESCE(op.target_pest, \'\')) LIKE ?', [$like])
-                              ->orWhereRaw('LOWER(COALESCE(op.remarks, \'\')) LIKE ?', [$like]);
-                        }
+                if ($pestTerms !== []) {
+                    $probeQ->where(function ($w) use ($pestTerms) {
+                        self::whereMatchesAnyTerm($w, ['op.target_pest', 'op.remarks'], $pestTerms);
                     });
                 }
+
                 $probe = $this->outsideWindowProbe($probeQ, 'op.operation_date', $from, $to);
                 if ($probe !== null) $out['empty_result_diagnostic'] = $probe;
+            }
+            if ($pest !== null) {
+                $ctx = $this->phytoFilterContext($ids, $args);
+                if ($ctx !== null) $out['filter_context'] = $ctx;
             }
         }
 
@@ -1537,13 +1743,17 @@ trait AiFarmTools
         $query = trim((string) ($args['query'] ?? ''));
         if (mb_strlen($query) < 2) return ['error' => 'query_too_short'];
         $kind = (string) ($args['kind'] ?? 'any');
-        $like = '%'.mb_strtolower($query).'%';
+        $match = static fn ($q, array $cols) => $q->where(
+            static fn ($w) => self::whereMatchesAllTokens($w, $cols, $query),
+        );
         $out  = [];
 
         if (($kind === 'any' || $kind === 'fertilizer') && Schema::hasTable('fertilizers')) {
-            $rows = DB::table('fertilizers')
-                ->select('id', 'name', 'unit', 'n_percent', 'p_percent', 'k_percent', 'is_active')
-                ->whereRaw('LOWER(name) LIKE ?', [$like])->limit(5)->get();
+            $rows = $match(
+                DB::table('fertilizers')
+                    ->select('id', 'name', 'unit', 'n_percent', 'p_percent', 'k_percent', 'is_active'),
+                ['name'],
+            )->limit(5)->get();
             foreach ($rows as $r) {
                 $out[] = [
                     'kind'        => 'fertilizer',
@@ -1556,9 +1766,12 @@ trait AiFarmTools
             }
         }
         if (($kind === 'any' || $kind === 'pesticide') && Schema::hasTable('pesticides')) {
-            $rows = DB::table('pesticides')
-                ->select('id', 'name', 'unit', 'chemical_composition', 'is_active')
-                ->whereRaw('LOWER(name) LIKE ?', [$like])->limit(5)->get();
+            $rows = $match(
+                DB::table('pesticides')
+                    ->select('id', 'name', 'unit', 'chemical_composition', 'is_active'),
+                ['name', 'chemical_composition'],
+            )->limit(5)->get();
+
             foreach ($rows as $r) {
                 $out[] = [
                     'kind'        => 'pesticide',
@@ -1955,7 +2168,216 @@ trait AiFarmTools
      * @param  array<string,mixed>  $args
      * @return array<string,mixed>
      */
+    /**
+     * Cross-table discovery: "where is this recorded?".
+     *
+     * The typed tools all need to know in advance WHICH table answers the
+     * question. A harder question ("a-t-on traité au soufre après la grêle ?")
+     * names something that maps to no tool argument, the typed lookup comes
+     * back empty and the assistant used to conclude "aucun enregistrement".
+     * This tool scans every operation table and catalog for the keywords, and
+     * always reports the all-time count next to the windowed one so a bad
+     * period filter is visible as a filter, not as missing data.
+     *
+     * @param  array<string,mixed>  $args
+     * @return array<string,mixed>
+     */
+    private function toolLocateData(array $args): array
+    {
+        $query = trim((string) ($args['query'] ?? ''));
+        if (mb_strlen($query) < 2) return ['error' => 'query_too_short'];
+        if (self::searchTokens($query) === []) {
+            return ['error' => 'query_has_no_searchable_word', 'asked' => $query];
+        }
+
+        [$from, $to] = $this->windowFrom($args);
+
+        // Plot scope is a soft filter here: discovery must never abort on an
+        // unresolved label, or the "where is it?" question fails exactly when
+        // it is most needed.
+        $plotIds = null;
+        $plotNote = null;
+        if (! empty($args['plot']) || ! empty($args['crop'])) {
+            $plots = $this->resolvePlots($args);
+            $plotIds = array_map(static fn ($p) => (string) $p->id, $plots);
+            if ($plotIds === []) {
+                $plotIds = null;
+                $plotNote = 'The plot/crop filter "'.($args['plot'] ?? $args['crop']).'" matched no plot, so the search ran over the WHOLE farm. Say which plots the hits belong to rather than assuming the requested one.';
+            }
+        }
+
+        // table => [alias, join, searchable columns, tool to call next]
+        $sources = [
+            'phytosanitary' => [
+                'table' => 'phytosanitary_operations',
+                'join'  => ['pesticides', 'pesticide_id'],
+                'cols'  => ['j.name', 'j.chemical_composition', 'op.target_pest', 'op.remarks'],
+                'tool'  => 'treatments',
+            ],
+            'fertilization' => [
+                'table' => 'fertilization_operations',
+                'join'  => ['fertilizers', 'fertilizer_id'],
+                'cols'  => ['j.name', 'op.remarks'],
+                'tool'  => 'fertilization_history',
+            ],
+            'irrigation' => [
+                'table' => 'irrigation_operations',
+                'join'  => null,
+                'cols'  => ['op.remarks'],
+                'tool'  => 'irrigation_history',
+            ],
+            'harvest' => [
+                'table' => 'harvest_operations',
+                'join'  => null,
+                'cols'  => ['op.remarks'],
+                'tool'  => 'harvest_history',
+            ],
+        ];
+
+        $plotNames = Schema::hasTable('plots')
+            ? DB::table('plots')->pluck('name', 'id')->all()
+            : [];
+
+        $found = [];
+        $totalInWindow = 0;
+        $totalAllTime  = 0;
+
+        foreach ($sources as $type => $src) {
+            $table = $src['table'];
+            if (! Schema::hasTable($table)) continue;
+
+            $cols = [];
+            foreach ($src['cols'] as $col) {
+                [$prefix, $name] = explode('.', $col, 2);
+                if ($prefix === 'op') {
+                    if (Schema::hasColumn($table, $name)) $cols[] = $col;
+                } elseif ($src['join'] !== null && Schema::hasColumn($src['join'][0], $name)) {
+                    $cols[] = $col;
+                }
+            }
+            // The plot name itself is searchable: "P4" as a free-text keyword
+            // must land on the plot, not on nothing.
+            if (Schema::hasTable('plots')) $cols[] = 'p.name';
+            if ($cols === []) continue;
+
+            $base = function () use ($table, $src, $cols, $query, $plotIds) {
+                $q = DB::table($table.' as op');
+                if ($src['join'] !== null && Schema::hasTable($src['join'][0])) {
+                    $q->leftJoin($src['join'][0].' as j', 'j.id', '=', 'op.'.$src['join'][1]);
+                }
+                if (Schema::hasTable('plots')) {
+                    $q->leftJoin('plots as p', 'p.id', '=', 'op.plot_id');
+                }
+                if ($plotIds !== null) $q->whereIn('op.plot_id', $plotIds);
+                $q->where(function ($w) use ($cols, $query) {
+                    self::whereMatchesAllTokens($w, $cols, $query);
+                });
+                return $q;
+            };
+
+            $allTime = (int) $base()->count();
+            if ($allTime === 0) continue;
+
+            $windowed = $base();
+            if ($from !== null) $windowed->where('op.operation_date', '>=', $from);
+            if ($to !== null)   $windowed->where('op.operation_date', '<=', $to);
+            $inWindow = ($from === null && $to === null) ? $allTime : (int) $windowed->count();
+
+            $totalAllTime  += $allTime;
+            $totalInWindow += $inWindow;
+
+            $span = $base()
+                ->selectRaw('MIN(op.operation_date) AS first_date, MAX(op.operation_date) AS last_date')
+                ->first();
+
+            $samples = [];
+            $sampleQ = $base()
+                ->select('op.plot_id', 'op.operation_date')
+                ->orderByDesc('op.operation_date')
+                ->limit(5);
+            foreach ($sampleQ->get() as $r) {
+                $samples[] = [
+                    'date' => (string) $r->operation_date,
+                    'plot' => $plotNames[$r->plot_id] ?? (string) $r->plot_id,
+                ];
+            }
+
+            $plotsHit = $base()
+                ->select('op.plot_id')
+                ->distinct()
+                ->limit(20)
+                ->pluck('plot_id')
+                ->map(static fn ($id) => $plotNames[$id] ?? (string) $id)
+                ->values()
+                ->all();
+
+            $found[] = [
+                'record_type'         => $type,
+                'matches_in_window'   => $inWindow,
+                'matches_all_time'    => $allTime,
+                'first_date'          => $span->first_date ?? null,
+                'last_date'           => $span->last_date ?? null,
+                'plots'               => $plotsHit,
+                'recent_samples'      => $samples,
+                'use_tool'            => $src['tool'],
+                'next_step'           => 'Call `'.$src['tool'].'` with these plots and a window that covers '
+                    .($span->first_date ?? '?').' → '.($span->last_date ?? '?').' to get the real figures.',
+            ];
+        }
+
+        // Catalog side: the thing may exist as a product/pest that was simply
+        // never applied — a very different answer from "no data".
+        $catalog = [];
+        foreach ([['fertilizers', 'fertilizer', ['name']], ['pesticides', 'pesticide', ['name', 'chemical_composition']], ['pests', 'pest', ['name', 'scientific_name']]] as [$table, $kind, $cols]) {
+            if (! Schema::hasTable($table)) continue;
+            $cols = array_values(array_filter($cols, static fn ($c) => Schema::hasColumn($table, $c)));
+            if ($cols === []) continue;
+            $rows = DB::table($table)
+                ->where(function ($w) use ($cols, $query) {
+                    self::whereMatchesAllTokens($w, $cols, $query);
+                })
+                ->limit(5)->pluck('name')->all();
+            foreach ($rows as $name) {
+                $catalog[] = ['kind' => $kind, 'name' => (string) $name];
+            }
+        }
+
+        $windowLabel = ($from === null && $to === null) ? 'all time' : (($from ?? '…').' → '.($to ?? '…'));
+
+        return [
+            'query'            => $query,
+            'window'           => ['from' => $from, 'to' => $to, 'label' => $windowLabel],
+            'plot_note'        => $plotNote,
+            'found_in'         => $found,
+            'catalog_matches'  => $catalog,
+            'total_in_window'  => $totalInWindow,
+            'total_all_time'   => $totalAllTime,
+            'verdict'          => $this->locateVerdict($totalAllTime, $totalInWindow, $catalog, $windowLabel),
+            'answer_rule'      => 'This tool only LOCATES data. Do not quote its counts as the final answer: call `use_tool` for each hit and read the figures there.',
+        ];
+    }
+
+    /** @param array<int, array<string, string>> $catalog */
+    private function locateVerdict(int $allTime, int $inWindow, array $catalog, string $windowLabel): string
+    {
+        if ($allTime === 0) {
+            return $catalog === []
+                ? 'Nothing matches these keywords anywhere in the farm records or the catalogs. Only now may you say the data does not exist — and say which keywords you searched.'
+                : 'The product/pest EXISTS in the catalog but was never recorded on any operation. Say exactly that: it is known but never applied — not "no data".';
+        }
+        if ($inWindow === 0) {
+            return 'Records EXIST ('.$allTime.' all-time) but NONE fall inside '.$windowLabel
+                .'. Never answer "aucun enregistrement": say the period is empty, then give the real dates from `first_date`/`last_date` and offer those figures.';
+        }
+        if ($inWindow < $allTime) {
+            return $inWindow.' of '.$allTime.' matching records fall inside '.$windowLabel
+                .'. Answer on the window, and state that figure is the window, not the whole history.';
+        }
+        return $allTime.' matching records, all inside '.$windowLabel.'. Call the `use_tool` of each hit for the figures.';
+    }
+
     private function toolSyncStatus(array $args): array
+
     {
         if (! Schema::hasTable('postings')) {
             return [

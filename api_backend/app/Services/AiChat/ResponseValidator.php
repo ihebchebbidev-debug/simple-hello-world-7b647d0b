@@ -98,7 +98,28 @@ final class ResponseValidator
             if ($unsupported !== []) {
                 $violations[] = 'unsupported_numbers('.implode(',', array_slice($unsupported, 0, 5)).')';
             }
+
+            foreach ($evidence as $json) {
+                $data = json_decode($json, true);
+                if (! is_array($data)) continue;
+
+                if ($this->listingAnsweredAsSummary($reply, $data)) {
+                    $violations[] = 'listing_not_listed';
+                }
+                if ($this->unqualifiedAbsence($reply, $data)) {
+                    $violations[] = 'unqualified_absence';
+                }
+            }
+
+            // "There is no data" is only credible once the farm-wide search
+            // has run. Without it, an empty answer is a failed lookup being
+            // reported as a fact about the farm.
+            if ($this->claimsNothingFound($reply) && ! $this->searchedFarmWide($evidence)) {
+                $violations[] = 'absence_without_search';
+            }
         }
+
+
 
         return [
             'ok'            => $violations === [],
@@ -121,6 +142,121 @@ final class ResponseValidator
             ? (str_starts_with(strtolower($locale), 'fr') ? 'fr' : 'en')
             : $lang;
     }
+
+    /**
+     * A listing tool returned rows, but the answer shows none of them.
+     *
+     * "Traitements contre la cératite sur la parcelle B12" was answered with a
+     * cost total and no dates — the user asked WHAT was applied and got money
+     * instead. When a result is marked `answer_shape: listing` and carries
+     * dated rows, at least one of those dates must appear in the reply.
+     *
+     * @param  array<mixed>  $data
+     */
+    private function listingAnsweredAsSummary(string $reply, array $data): bool
+    {
+        if (($data['answer_shape'] ?? null) !== 'listing') {
+            return false;
+        }
+        $rows = $data['rows'] ?? null;
+        if (! is_array($rows) || $rows === []) {
+            return false;
+        }
+
+        foreach ($rows as $row) {
+            $date = is_array($row) ? (string) ($row['date'] ?? '') : '';
+            if ($date === '') continue;
+            $ymd = substr($date, 0, 10);
+            [$y, $m, $d] = array_pad(explode('-', $ymd), 3, '');
+            // Accept the ISO form and the common FR forms (29/07/2026, 29 juillet 2026).
+            if (str_contains($reply, $ymd)
+                || ($d !== '' && preg_match('/\b'.((int) $d).'\D{1,12}'.$y.'\b/u', $reply) === 1)
+                || preg_match('#\b'.$d.'[/.-]'.$m.'[/.-]'.$y.'\b#u', $reply) === 1) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * "Aucun traitement" written while the plot demonstrably WAS treated.
+     *
+     * The tool attaches `filter_context.unfiltered_treatment_count` whenever a
+     * pest/product filter matched nothing. A bare absence claim that never
+     * names what WAS applied is misleading, even though it is literally true
+     * for the filter.
+     *
+     * @param  array<mixed>  $data
+     */
+    private function unqualifiedAbsence(string $reply, array $data): bool
+    {
+        $ctx = $data['filter_context'] ?? null;
+        if (! is_array($ctx) || (int) ($ctx['unfiltered_treatment_count'] ?? 0) <= 0) {
+            return false;
+        }
+
+        $claimsAbsence = preg_match(
+            '/\b(aucun|aucune|pas de|n\W?est enregistr|non enregistr|no treatment|none recorded)\b/iu',
+            $reply,
+        ) === 1;
+        if (! $claimsAbsence) {
+            return false;
+        }
+
+        $known = array_merge(
+            array_map('strval', (array) ($ctx['recorded_target_pests'] ?? [])),
+            array_map('strval', (array) ($ctx['recorded_products'] ?? [])),
+        );
+        foreach ($known as $label) {
+            $label = trim($label);
+            if ($label !== '' && mb_stripos($reply, $label) !== false) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+
+     * The reply tells the user nothing is recorded / nothing was found.
+     */
+    private function claimsNothingFound(string $reply): bool
+    {
+        return preg_match(
+            '/(aucun(e)? (enregistrement|donn[ée]e|op[ée]ration|trace|information)'
+            .'|aucune donn[ée]e'
+            .'|pas d\W?(enregistrement|op[ée]ration|donn[ée]e)'
+            .'|rien n\W?est enregistr'
+            .'|je ne trouve (pas|aucun)'
+            .'|not (recorded|found) (in|anywhere)'
+            .'|no (data|record|records|operations) (are |is |were )?(recorded|found|available))/iu',
+            $reply,
+        ) === 1;
+    }
+
+    /**
+     * Did the turn actually run the cross-table discovery lookup?
+     *
+     * `locate_data` results are recognisable by their verdict + all-time count:
+     * they are the only payload that proves the search was not limited to one
+     * table, one plot or one period.
+     *
+     * @param  array<int, string>  $evidence
+     */
+    private function searchedFarmWide(array $evidence): bool
+    {
+        foreach ($evidence as $json) {
+            $data = json_decode($json, true);
+            if (is_array($data) && array_key_exists('total_all_time', $data) && array_key_exists('verdict', $data)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
 
     /**
      * Truncated-listing counts quoted as if they were the total.

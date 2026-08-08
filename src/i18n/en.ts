@@ -689,6 +689,11 @@ export const en = {
     title: 'Flehty Assistant',
     subtitle: 'Ask about plots, reports, and daily operations',
     online: 'Online · grounded on live data',
+    pace: {
+      ok: 'Verifying every answer against the live database',
+      busy: '{{count}} questions in 5 min · answers queued to stay accurate',
+    },
+
     open: 'Open AI assistant',
     close: 'Close assistant',
     newChat: 'New conversation',

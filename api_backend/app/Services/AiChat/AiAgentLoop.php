@@ -74,6 +74,8 @@ final class AiAgentLoop
         $transcript = $messages;
         $usedTools  = [];   // tool names that returned ok
         $failedOnly = false;
+        $searchedWide = false; // a forced locate_data discovery pass already fired
+
 
         for ($iter = 0; $iter < $maxIters; $iter++) {
             // Keep the HTTP response alive while the (non-streaming) planning
@@ -148,6 +150,8 @@ final class AiAgentLoop
                 $parsed,
             ));
 
+            $roundEmpty = 0;
+
             foreach ($parsed as $i => $p) {
                 $name = $p['name'];
                 $args = $p['args'];
@@ -163,6 +167,7 @@ final class AiAgentLoop
                         $usedTools[] = $name;
                         $this->evidence[] = $encoded;
                         $this->calls[] = ['name' => $name, 'args' => $args, 'result' => $result];
+                        if (self::resultIsEmpty($result)) $roundEmpty++;
                     }
                 }
 
@@ -190,10 +195,26 @@ final class AiAgentLoop
                 $failedOnly = true;
                 $transcript[] = [
                     'role'    => 'user',
-                    'content' => '[internal] Every tool call above failed or matched nothing. Read the error payload (it may list `available_plots`) and retry ONCE with corrected arguments — fix the plot name, widen or drop the date window. If it still cannot resolve, say plainly what is missing.',
+                    'content' => '[internal] Every tool call above failed or matched nothing. Read the error payload (it may list `available_plots`) and retry with corrected arguments — fix the plot name, widen or drop the date window. If the arguments look right, call `locate_data` with the raw keywords from the question: it searches every table and every period and tells you where the records actually are. Only after locate_data comes back empty all-time may you say the data does not exist.',
+                ];
+            }
+
+            // Tools succeeded but every one came back with zero rows. That is
+            // the exact shape of the "aucun enregistrement" bug: the data is
+            // usually there under another table, plot or period. Force one
+            // discovery pass before the model is allowed to conclude.
+            if ($roundData > 0 && $roundOk > 0 && $roundEmpty === $roundOk
+                && ! $searchedWide && ! in_array('locate_data', $usedTools, true)
+                && $iter < $maxIters - 1
+            ) {
+                $searchedWide = true;
+                $transcript[] = [
+                    'role'    => 'user',
+                    'content' => '[internal] Every tool above succeeded but returned ZERO matching rows. Do NOT conclude that nothing is recorded. Call `locate_data` now with the raw keywords of the question (product, ingredient, pest, plot, whatever the user named) and no date filter: it scans all four operation tables and the catalogs and reports where the records live and over which dates. Then re-query the right tool over the window it reports.',
                 ];
             }
         }
+
 
 
         // Final round: force natural-language answer (no tools) and stream it.
@@ -266,7 +287,46 @@ final class AiAgentLoop
      *
      * @param array<string, mixed> $result
      */
+    /**
+     * Did a successful tool result actually carry any record?
+     *
+     * A tool that resolves its plot and window fine, then matches nothing,
+     * returns `ok` with empty lists — indistinguishable from real data unless
+     * the payload is inspected. This drives the forced discovery pass.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private static function resultIsEmpty(array $result): bool
+    {
+        // Any non-zero count anywhere in the payload means we found something.
+        $countKeys = [
+            'total_matching', 'total_all_time', 'total_in_window', 'count',
+            'returned_rows', 'irrigation_count', 'treatments_count',
+            'applications', 'matches', 'total',
+        ];
+        $sawSignal = false;
+
+        $walk = function (array $node) use (&$walk, $countKeys, &$sawSignal): void {
+            foreach ($node as $key => $value) {
+                if (is_array($value)) {
+                    if (is_string($key) && in_array($key, ['rows', 'items', 'operations', 'found_in', 'history', 'recent_samples'], true) && $value !== []) {
+                        $sawSignal = true;
+                    }
+                    $walk($value);
+                    continue;
+                }
+                if (is_string($key) && in_array($key, $countKeys, true) && (float) $value > 0) {
+                    $sawSignal = true;
+                }
+            }
+        };
+        $walk($result);
+
+        return ! $sawSignal;
+    }
+
     private function encodeResult(array $result, int $maxBytes): string
+
     {
         $encode = static fn (array $r): string =>
             json_encode($r, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';

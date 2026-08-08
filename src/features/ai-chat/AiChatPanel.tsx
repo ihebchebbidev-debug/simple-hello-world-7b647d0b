@@ -19,7 +19,10 @@ export default function AiChatPanel() {
     startNewConversation,
     rateMessage,
     historyAvailable,
+    questionsInWindow,
+    paceBusy,
   } = useAiChat();
+
   const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
@@ -69,13 +72,33 @@ export default function AiChatPanel() {
           style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
         >
           <div className="flex min-w-0 items-center gap-2.5">
+            {/* Pace dot: green while the assistant can verify each answer at
+                leisure, red once 4+ questions land inside 5 minutes. */}
+            <span
+              aria-hidden
+              title={
+                paceBusy
+                  ? t('aiChat.pace.busy', { count: questionsInWindow })
+                  : t('aiChat.pace.ok')
+              }
+              className={`h-2.5 w-2.5 shrink-0 rounded-full transition-colors ${
+                paceBusy
+                  ? 'bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.18)] animate-pulse'
+                  : 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]'
+              }`}
+            />
             <div className="min-w-0">
               <h2 id="ai-chat-title" className="truncate text-sm font-semibold text-foreground">
                 {showHistory ? t('aiChat.history.title') : t('aiChat.title')}
               </h2>
-              <p className="truncate text-[11px] text-muted-foreground">{t('aiChat.subtitle')}</p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {paceBusy
+                  ? t('aiChat.pace.busy', { count: questionsInWindow })
+                  : t('aiChat.subtitle')}
+              </p>
             </div>
           </div>
+
 
           <div className="flex shrink-0 items-center gap-1">
             {historyAvailable ? (
