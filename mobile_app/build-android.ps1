@@ -64,6 +64,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Success "Capacitor sync complete."
 
+# ── 3b. App icon + splash from resources/ (Flehty logo) ──────────────────────
+Write-Info "Generating Android launcher icons and splash from resources/..."
+npx @capacitor/assets generate --android --assetPath resources 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-ErrorAndExit "Icon generation failed. Check resources/icon-only.png exists."
+}
+Write-Success "App icons generated."
+
 # ── 4. Clean old Gradle build caches inside the project ──────────────────────
 $androidDir = Join-Path -Path $PSScriptRoot -ChildPath "android"
 $gradlePath = Join-Path -Path $androidDir -ChildPath "gradlew.bat"

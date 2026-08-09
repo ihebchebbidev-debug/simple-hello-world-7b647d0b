@@ -8,8 +8,9 @@
     "build": "tsc -b && vite build",
     "build:embed": "tsc -b && vite build --config vite.embed.config.ts",
     "build:android-web": "tsc -b && vite build --config vite.android.config.ts",
-    "build:android": "npm run build:android-web && npx cap add android || true && npx cap sync android && cd android && gradlew.bat assembleRelease",
-    "android:setup": "npx cap add android || true && npx cap sync android",
+    "build:android": "npm run build:android-web && npx cap add android || true && npx cap sync android && npm run android:icons && cd android && gradlew.bat assembleRelease",
+    "android:icons": "npx @capacitor/assets generate --android --assetPath resources",
+    "android:setup": "npx cap add android || true && npx cap sync android && npm run android:icons",
     "android:full": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build-android.ps1",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -51,7 +52,8 @@
     "workbox-window": "^7.4.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.1.2",
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.4.2",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
