@@ -18,7 +18,9 @@ use Throwable;
 final class AiToolRegistry
 {
     use AiFarmTools;
+    use AiSearchTools;
     use AiSqlTools;
+
 
     public function __construct(
         private readonly NaturalDateParser $dates = new NaturalDateParser(),
@@ -94,11 +96,12 @@ final class AiToolRegistry
                 'crop'          => ['type' => 'string'],
             ], ['type', 'metric', 'period_a_from', 'period_a_to', 'period_b_from', 'period_b_to']),
 
-            $this->fn('search_catalog', 'Search fertilizers, pesticides, or pests by name or scientific name (case-insensitive substring).', [
+            $this->fn('search_catalog', 'Search fertilizers, pesticides, or pests. Fuzzy and accent/abbreviation tolerant: "sulfate de magnésium" finds "Sulfate de Mg", typos and word order are handled, and for fertilizers a nutrient word ("magnésium", "potasse") also matches products containing that nutrient. When nothing matches, the full catalog name list is returned in `catalog` — inspect it and pick/propose the closest real entry instead of saying the product does not exist.', [
                 'kind'  => ['type' => 'string', 'enum' => ['fertilizer', 'pesticide', 'pest']],
-                'query' => ['type' => 'string', 'description' => '2-60 chars, matched against name and scientific_name'],
+                'query' => ['type' => 'string', 'description' => '2-60 chars, matched against name, scientific_name, composition and category'],
                 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 20],
             ], ['kind', 'query']),
+
 
             $this->fn('recent_operations', 'Latest activity across all 4 operation types.', [
                 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 20],
@@ -109,8 +112,10 @@ final class AiToolRegistry
             ], ['phrase']),
 
             ...$this->farmDefinitions(),
+            ...$this->searchDefinitions(),
             ...$this->sqlDefinitions(),
         ];
+
     }
 
 
@@ -279,8 +284,10 @@ final class AiToolRegistry
                 'recent_operations'    => $this->toolRecentOperations($args),
                 'resolve_date_range'   => $this->toolResolveDate($args),
                 default                => $this->callFarm($name, $args)
+                    ?? $this->callSearch($name, $args)
                     ?? $this->callSql($name, $args)
                     ?? ['error' => 'unknown_tool', 'name' => $name],
+
             };
 
             return array_merge([
@@ -534,7 +541,22 @@ final class AiToolRegistry
         ];
     }
 
-    /** @param array<string,mixed> $args */
+    /**
+     * Catalog search that tolerates how humans actually type product names:
+     * accents, abbreviations ("Mg" ↔ "magnésium"), word order, plurals,
+     * typos, and nutrient-based descriptions ("un engrais magnésien").
+     *
+     * Strategy (best match wins, all candidates scored in PHP because the
+     * catalog tables are tiny):
+     *   1. exact / substring on the accent-folded name
+     *   2. token coverage after synonym + abbreviation expansion
+     *   3. fuzzy similarity (typo tolerance)
+     *   4. nutrient fallback for fertilizers ("magnésium" → mg_percent > 0)
+     * When nothing scores, the whole catalog is returned as `catalog` so the
+     * model can offer real options instead of claiming the product is absent.
+     *
+     * @param array<string,mixed> $args
+     */
     private function toolSearchCatalog(array $args): array
     {
         $kind = (string) ($args['kind'] ?? '');
@@ -543,33 +565,178 @@ final class AiToolRegistry
         $table = ['fertilizer' => 'fertilizers', 'pesticide' => 'pesticides', 'pest' => 'pests'][$kind] ?? null;
         if ($table === null || ! Schema::hasTable($table)) return ['error' => 'invalid_kind'];
         $limit = max(1, min(20, (int) ($args['limit'] ?? 10)));
-        $like = '%'.mb_strtolower($q).'%';
-        $query = DB::table($table)->whereRaw('LOWER(name) LIKE ?', [$like]);
 
-        if (Schema::hasColumn($table, 'scientific_name')) {
-            $query->orWhereRaw('LOWER(scientific_name) LIKE ?', [$like]);
-        }
+        $rows = DB::table($table)->limit(2000)->get()->all();
+        $needle = $this->foldText($q);
+        $tokens = $this->searchTokens($needle);
+        $categoryAlias = $this->normalizeCatalogCategoryQuery($kind, $q);
+        $nutrients = $kind === 'fertilizer' ? $this->nutrientsInQuery($needle) : [];
 
-        if (Schema::hasColumn($table, 'category')) {
-            $query->orWhereRaw('LOWER(category) LIKE ?', [$like]);
+        $scored = [];
+        foreach ($rows as $row) {
+            $r = (array) $row;
+            $name = $this->foldText((string) ($r['name'] ?? ''));
+            $sci  = $this->foldText((string) ($r['scientific_name'] ?? ''));
+            $chem = $this->foldText((string) ($r['chemical_composition'] ?? ''));
+            $cat  = $this->foldText((string) ($r['category'] ?? ''));
+            $hay  = trim($name.' '.$sci.' '.$chem.' '.$cat);
 
-            if ($categoryAlias = $this->normalizeCatalogCategoryQuery($kind, $q)) {
-                $query->orWhereRaw('LOWER(category) LIKE ?', ['%'.$categoryAlias.'%']);
+            $score = 0.0;
+            $how = null;
+
+            if ($name === $needle || $sci === $needle) {
+                $score = 100; $how = 'exact_name';
+            } elseif ($hay !== '' && str_contains($hay, $needle)) {
+                $score = 90; $how = 'substring';
+            } elseif ($categoryAlias !== null && $cat !== '' && str_contains($cat, $categoryAlias)) {
+                $score = 80; $how = 'category_synonym';
+            } else {
+                $hayTokens = $this->searchTokens($hay);
+                if ($tokens !== [] && $hayTokens !== []) {
+                    $hit = 0;
+                    foreach ($tokens as $t) {
+                        foreach ($hayTokens as $h) {
+                            if ($t === $h || (mb_strlen($t) >= 4 && str_contains($h, $t)) || (mb_strlen($h) >= 4 && str_contains($t, $h))) {
+                                $hit++;
+                                continue 2;
+                            }
+                        }
+                    }
+                    $coverage = $hit / count($tokens);
+                    if ($coverage >= 0.5) {
+                        $score = 45 + ($coverage * 30);
+                        $how = 'token_match';
+                    }
+                }
+
+                if ($score === 0.0 && $name !== '') {
+                    similar_text($needle, $name, $pct);
+                    if ($pct >= 72) { $score = $pct * 0.6; $how = 'fuzzy_name'; }
+                }
+            }
+
+            if ($score === 0.0 && $nutrients !== []) {
+                foreach ($nutrients as $col) {
+                    if (array_key_exists($col, $r) && (float) $r[$col] > 0) {
+                        $score = 40; $how = 'nutrient_content';
+                        break;
+                    }
+                }
+            }
+
+            if ($score > 0) {
+                $scored[] = ['score' => round($score, 1), 'matched_by' => $how, 'row' => $row];
             }
         }
 
-        $total = (int) $query->clone()->count();
-        $rows = $query->limit($limit)->get()->all();
-        return [
+        usort($scored, static fn ($a, $b) => $b['score'] <=> $a['score']);
+        $total = count($scored);
+        $slice = array_slice($scored, 0, $limit);
+
+        $result = [
             'kind'           => $kind,
             'query'          => $q,
-            'results'        => $rows,
+            'results'        => array_map(static fn ($s) => $s['row'], $slice),
+            'match_details'  => array_map(static fn ($s) => [
+                'name'       => (string) (((array) $s['row'])['name'] ?? ''),
+                'score'      => $s['score'],
+                'matched_by' => $s['matched_by'],
+            ], $slice),
             'count'          => $total,
             'total_matching' => $total,
-            'returned_rows'  => count($rows),
-            'truncated'      => $total > count($rows),
+            'returned_rows'  => count($slice),
+            'truncated'      => $total > count($slice),
             'count_note'     => 'total_matching counts ALL matching catalog entries; results is only the first slice. Never present returned_rows as the total.',
+            'match_note'     => 'Matching is fuzzy: accents, abbreviations (Mg = magnésium), word order and typos are tolerated. Confirm the retained product name in your answer.',
         ];
+
+        if ($total === 0) {
+            $names = [];
+            foreach ($rows as $row) {
+                $names[] = (string) (((array) $row)['name'] ?? '');
+            }
+            $result['catalog'] = array_slice(array_values(array_filter($names)), 0, 200);
+            $result['no_match_note'] = 'No scored match. The FULL catalog name list is provided in `catalog`: pick the closest real entry (the user may use a common/commercial name) and answer with it, or list the plausible candidates. Never claim the product is absent from the database without checking this list.';
+        }
+
+        return $result;
+    }
+
+    /** Accent-folded, lower-cased, punctuation-normalised text. */
+    private function foldText(string $raw): string
+    {
+        $s = mb_strtolower(trim($raw));
+        $s = strtr($s, [
+            'à' => 'a', 'â' => 'a', 'ä' => 'a', 'á' => 'a', 'ã' => 'a', 'å' => 'a',
+            'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+            'î' => 'i', 'ï' => 'i', 'í' => 'i',
+            'ô' => 'o', 'ö' => 'o', 'ó' => 'o', 'õ' => 'o',
+            'ù' => 'u', 'û' => 'u', 'ü' => 'u', 'ú' => 'u',
+            'ç' => 'c', 'ñ' => 'n', 'œ' => 'oe', 'æ' => 'ae',
+            '₂' => '2', '₃' => '3', '₄' => '4',
+        ]);
+        $s = (string) preg_replace('/[^a-z0-9%]+/u', ' ', $s);
+
+        return trim((string) preg_replace('/\s+/', ' ', $s));
+    }
+
+    /**
+     * Meaningful tokens with domain synonyms expanded both ways, so
+     * "sulfate de magnesium" and "Sulfate de Mg" collapse to the same set.
+     *
+     * @return array<int, string>
+     */
+    private function searchTokens(string $folded): array
+    {
+        static $stop = ['de', 'du', 'des', 'la', 'le', 'les', 'un', 'une', 'l', 'd', 'et', 'a', 'au', 'aux', 'en', 'of', 'the', 'for'];
+        static $syn = [
+            'magnesium' => 'mg', 'magnesien' => 'mg', 'magnesienne' => 'mg', 'mgo' => 'mg', 'mgso4' => 'mg sulfate',
+            'kieserite' => 'mg sulfate', 'azote' => 'n', 'azote2' => 'n', 'azoté' => 'n', 'nitrogen' => 'n',
+            'nitrate' => 'n nitrate', 'ammonitrate' => 'n ammonitre', 'ammonitre' => 'n ammonitre',
+            'phosphore' => 'p', 'phosphorus' => 'p', 'phosphate' => 'p phosphate',
+            'potassium' => 'k', 'potasse' => 'k potasse', 'potash' => 'k potasse',
+            'calcium' => 'ca', 'soufre' => 's sulfate', 'sulfur' => 's sulfate', 'sulphur' => 's sulfate',
+            'sulphate' => 'sulfate', 'so4' => 'sulfate',
+            'fer' => 'fe ferro', 'iron' => 'fe ferro', 'ferrique' => 'fe ferro', 'ferreux' => 'fe ferro',
+            'engrais' => '', 'fertilizer' => '', 'produit' => '', 'product' => '',
+        ];
+
+        $out = [];
+        foreach (explode(' ', $folded) as $tok) {
+            $tok = trim($tok);
+            if ($tok === '' || in_array($tok, $stop, true)) continue;
+            $tok = (string) preg_replace('/(?<=\w{4})s$/', '', $tok);
+            $expanded = $syn[$tok] ?? $tok;
+            if ($expanded === '') continue;
+            foreach (explode(' ', $expanded) as $part) {
+                if ($part !== '' && ! in_array($part, $out, true)) $out[] = $part;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Nutrient columns implied by the query, for "an X fertilizer" questions.
+     *
+     * @return array<int, string>
+     */
+    private function nutrientsInQuery(string $folded): array
+    {
+        $map = [
+            'magnesium' => 'mg_percent', 'magnesien' => 'mg_percent', 'mg' => 'mg_percent',
+            'azote' => 'n_percent', 'nitrogen' => 'n_percent',
+            'phosphore' => 'p_percent', 'phosphorus' => 'p_percent',
+            'potassium' => 'k_percent', 'potasse' => 'k_percent',
+            'calcium' => 'ca_percent', 'ca' => 'ca_percent',
+            'soufre' => 's_percent', 'sulfur' => 's_percent', 'sulphur' => 's_percent',
+        ];
+        $cols = [];
+        foreach (explode(' ', $folded) as $tok) {
+            if (isset($map[$tok]) && ! in_array($map[$tok], $cols, true)) $cols[] = $map[$tok];
+        }
+
+        return $cols;
     }
 
     private function normalizeCatalogCategoryQuery(string $kind, string $query): ?string
@@ -585,6 +752,7 @@ final class AiToolRegistry
             default => null,
         };
     }
+
 
     /** @param array<string,mixed> $args */
     private function toolRecentOperations(array $args): array

@@ -5,12 +5,14 @@ import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { cn } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import OutboxStatusBar from '@/components/OutboxStatusBar';
-import AiChatSheet from '@/features/ai-chat/AiChatSheet';
+import { Toaster } from 'sonner';
+import AiChatPanel from '@/features/ai-chat/AiChatPanel';
 import { AiChatProvider, useAiChat } from '@/features/ai-chat/AiChatProvider';
 
 const ShellChat = () => {
-  const { isOpen, closeChat } = useAiChat();
-  return <AiChatSheet open={isOpen} onClose={closeChat} />;
+  // AiChatPanel reads open state from the provider itself (same as web).
+  useAiChat();
+  return <AiChatPanel />;
 };
 
 const MobileShell = () => {
@@ -30,6 +32,7 @@ const MobileShell = () => {
     <ProtectedRoute>
       <AiChatProvider>
         <div className="flex min-h-[100dvh] flex-col bg-background text-foreground">
+          <Toaster position="top-center" richColors closeButton />
           <OutboxStatusBar />
           <main className="flex-1">
             <Outlet />

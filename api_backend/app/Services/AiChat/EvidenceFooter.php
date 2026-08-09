@@ -15,7 +15,7 @@ namespace App\Services\AiChat;
 final class EvidenceFooter
 {
     /** Tools that read no farm data — never worth a provenance line. */
-    private const IGNORED = ['plan', 'resolve_date_range', 'search_catalog', 'list_plots', 'list_campaigns'];
+    private const IGNORED = ['plan', 'resolve_date_range', 'search_catalog', 'global_search', 'list_plots', 'list_campaigns'];
 
     /** @var array<string, array{fr: string, en: string}> */
     private const METRICS = [

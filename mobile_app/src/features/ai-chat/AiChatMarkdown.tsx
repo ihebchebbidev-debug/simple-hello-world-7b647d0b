@@ -11,19 +11,20 @@ type Block =
   | { type: 'code'; text: string }
   | { type: 'table'; header: string[]; rows: string[][] };
 
+/** Lightweight Markdown for assistant replies — no extra dependencies. */
 export default function AiChatMarkdown({ content }: Props) {
   const blocks = parseBlocks(content);
 
   return (
-    <div className="ai-chat-md space-y-2.5 text-[14px] leading-relaxed text-foreground/95">
+    <div className="ai-chat-md space-y-2.5 text-[14px] sm:text-[13px] leading-relaxed text-foreground/95">
       {blocks.map((block, i) => {
         if (block.type === 'heading') {
           const cls =
             block.level <= 1
               ? 'text-[15px] font-semibold text-foreground'
               : block.level === 2
-              ? 'text-[14px] font-semibold text-foreground'
-              : 'text-[12px] font-semibold uppercase tracking-wide text-muted-foreground';
+                ? 'text-[14px] font-semibold text-foreground'
+                : 'text-[12px] font-semibold uppercase tracking-wide text-muted-foreground';
           return (
             <p key={i} className={`${cls} first:mt-0`}>
               {renderInline(block.text)}
@@ -116,10 +117,12 @@ function parseBlocks(raw: string): Block[] {
 
   while (i < lines.length) {
     const trimmed = lines[i].trim();
+
     if (!trimmed) {
       i += 1;
       continue;
     }
+
     if (/^```/.test(trimmed)) {
       const buf: string[] = [];
       i += 1;
@@ -131,6 +134,7 @@ function parseBlocks(raw: string): Block[] {
       blocks.push({ type: 'code', text: buf.join('\n') });
       continue;
     }
+
     if (
       trimmed.includes('|') &&
       i + 1 < lines.length &&
@@ -148,17 +152,20 @@ function parseBlocks(raw: string): Block[] {
       blocks.push({ type: 'table', header, rows });
       continue;
     }
+
     const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
       blocks.push({ type: 'heading', text: heading[2], level: heading[1].length });
       i += 1;
       continue;
     }
+
     if (/^>\s?/.test(trimmed)) {
       blocks.push({ type: 'quote', text: trimmed.replace(/^>\s?/, '') });
       i += 1;
       continue;
     }
+
     if (/^[-*•]\s+/.test(trimmed)) {
       const items: string[] = [];
       while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
@@ -168,6 +175,7 @@ function parseBlocks(raw: string): Block[] {
       blocks.push({ type: 'ul', items });
       continue;
     }
+
     if (/^\d+[.)]\s+/.test(trimmed)) {
       const items: string[] = [];
       while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trim())) {
@@ -177,6 +185,7 @@ function parseBlocks(raw: string): Block[] {
       blocks.push({ type: 'ol', items });
       continue;
     }
+
     const paraLines: string[] = [trimmed];
     i += 1;
     while (i < lines.length) {
@@ -196,6 +205,7 @@ function parseBlocks(raw: string): Block[] {
     }
     blocks.push({ type: 'paragraph', text: paraLines.join('\n') });
   }
+
   return blocks.length > 0 ? blocks : [{ type: 'paragraph', text: raw }];
 }
 

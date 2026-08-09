@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+/** Keeps the chat composer above the mobile virtual keyboard (iOS/Android). */
 export function useMobileKeyboardInset(): number {
   const [inset, setInset] = useState(0);
 

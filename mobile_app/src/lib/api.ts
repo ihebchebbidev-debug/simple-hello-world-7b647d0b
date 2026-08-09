@@ -1,7 +1,8 @@
 /**
  * Axios client for the Agri-Sync Laravel API.
  *
- * - Base URL from VITE_API_URL (defaults to the deployed Render instance).
+ * - Base URL is HARDCODED to the production API (no env override) so packaged
+ *   APK builds always point at a reachable backend.
  * - Bearer token persisted via the `native` storage layer (Capacitor Preferences
  *   on device, localStorage on web). Token is loaded synchronously from
  *   localStorage so the request interceptor stays sync — the auth bootstrap
@@ -10,13 +11,8 @@
 import axios, { type AxiosError } from 'axios';
 import i18n from '@/i18n';
 
-const DEFAULT_BASE_URL = 'https://api.flehty.com/';
-
-function normalise(raw: string | undefined): string {
-  return (raw?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '').replace(/\/api$/, '');
-}
-
-export const BACKEND_URL = normalise(import.meta.env.VITE_API_URL as string | undefined);
+/** Hardcoded production API base URL. Change here to retarget the app. */
+export const BACKEND_URL = 'https://api.flehty.com';
 
 export const TOKEN_STORAGE_KEY = 'agri-sync.auth.token';
 export const USER_STORAGE_KEY = 'agri-sync.auth.user';

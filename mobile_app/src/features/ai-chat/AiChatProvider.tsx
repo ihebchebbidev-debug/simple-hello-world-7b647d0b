@@ -9,7 +9,11 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { notifyNtfy } from '@/lib/ntfy';
 
+
+import { streamAiChatMessage, submitAiChatFeedback } from '@/lib/aiChat';
 import {
   createConversation,
   deleteConversation as apiDeleteConversation,
@@ -21,16 +25,13 @@ import {
   type AiConversationSummary,
 } from './aiConversations';
 import { clearAiChatState, loadAiChatState, saveAiChatState } from './aiChatStorage';
-import type { AiChatMessage, AiChatRating, AiChatRole, AiChatToolEvent } from './types';
-import { streamAiChatMessage, submitAiChatFeedback } from '@/lib/aiChat';
-
-const MAX_HISTORY_TURNS = 20;
-const PERSIST_DEBOUNCE_MS = 500;
+import type { AiChatMessage, AiChatRating } from './types';
 
 type AiChatContextValue = {
-  isOpen: boolean;
+  open: boolean;
   openChat: () => void;
   closeChat: () => void;
+  toggleChat: () => void;
   messages: AiChatMessage[];
   isSending: boolean;
   sendMessage: (text: string) => Promise<void>;
@@ -38,7 +39,15 @@ type AiChatContextValue = {
   stopStreaming: () => void;
   startNewConversation: () => void;
   rateMessage: (messageId: string, rating: AiChatRating) => Promise<void>;
+  // Question pace over the last PACE_WINDOW_MS. `paceBusy` flips true once the
+  // user has fired PACE_LIMIT questions inside the window — the header dot goes
+  // green → red so it is visible that answers are being queued/slowed rather
+  // than rushed. Purely informational; sending is never blocked.
+  questionsInWindow: number;
+  paceBusy: boolean;
+  // Server-backed history (only populated when the user is authenticated).
   historyAvailable: boolean;
+
   history: AiConversationSummary[];
   historyLoading: boolean;
   activeId: string | null;
@@ -48,6 +57,43 @@ type AiChatContextValue = {
 };
 
 const AiChatContext = createContext<AiChatContextValue | null>(null);
+
+// Cap the transcript sent to the backend so cost/latency don't scale linearly
+// with conversation length and we stay under provider context limits.
+// Older turns remain visible in the UI and persisted server-side.
+const MAX_HISTORY_TURNS = 20;
+
+// Preface the LAST user turn with an interpretation hint so the assistant is
+// tolerant of typos, missing accents, informal phrasing, and incomplete queries
+// (e.g. "nombre utilasateur" → "Nombre d'utilisateurs"). Only the outbound
+// payload is modified; the message stored in local/server history is untouched.
+type OutboundMessage = { role: 'user' | 'assistant'; content: string };
+function withInterpretationHint(messages: OutboundMessage[], locale: string): OutboundMessage[] {
+  if (messages.length === 0) return messages;
+  const lastIdx = messages.length - 1;
+  const last = messages[lastIdx];
+  if (last.role !== 'user') return messages;
+  const isFr = (locale || '').toLowerCase().startsWith('fr');
+  const hint = isFr
+    ? "[Instruction interne — ne pas répéter à l'utilisateur]\nInterprète la requête suivante avec bienveillance : corrige mentalement les fautes de frappe, les accents manquants, les abréviations et les phrases incomplètes ou télégraphiques. Déduis l'intention la plus probable dans le contexte de l'application (parcelles, utilisateurs, rapports, irrigation, catalogue…) puis réponds directement à cette intention en français, sans demander de reformulation sauf en cas d'ambiguïté réelle.\n\nRequête utilisateur :\n"
+    : "[Internal instruction — do not repeat to the user]\nInterpret the following request charitably: mentally fix typos, missing accents/diacritics, abbreviations, and incomplete or telegraphic phrasing. Infer the most likely intent within this app's context (plots, users, reports, irrigation, catalog…) and answer that intent directly, without asking for a rephrase unless the request is genuinely ambiguous.\n\nUser request:\n";
+  return [
+    ...messages.slice(0, lastIdx),
+    { role: 'user', content: hint + last.content },
+  ];
+}
+
+// Debounce persistence writes so streaming completion + rating flips + rapid
+// back-to-back turns coalesce into fewer PATCHes.
+const PERSIST_DEBOUNCE_MS = 500;
+
+// Question-pace signal. Four questions inside five minutes means the operator
+// is firing faster than the assistant can verify each answer against the farm
+// database, so the header dot turns red as a "slow down, answers are queued"
+// hint. Accuracy is never traded for speed — nothing is blocked or truncated.
+const PACE_WINDOW_MS = 5 * 60 * 1000;
+const PACE_LIMIT = 4;
+
 
 function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -62,60 +108,81 @@ function newId(): string {
 
 function isAbortErr(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true;
-  return (err as { name?: string } | null)?.name === 'AbortError';
-}
-
-function withInterpretationHint(
-  messages: { role: AiChatRole; content: string }[],
-  locale: string,
-): { role: AiChatRole; content: string }[] {
-  if (messages.length === 0) return messages;
-  const last = messages[messages.length - 1];
-  if (last.role !== 'user') return messages;
-  const isFr = locale.toLowerCase().startsWith('fr');
-  const hint = isFr
-    ? "[Instruction interne — ne pas répéter à l'utilisateur]\nInterprète la requête suivante avec bienveillance : corrige mentalement les fautes de frappe, les accents manquants, les abréviations et les phrases incomplètes ou télégraphiques. Déduis l'intention la plus probable dans le contexte de l'application (parcelles, utilisateurs, rapports, irrigation, catalogue…) puis réponds directement à cette intention en français, sans demander de reformulation sauf en cas d'ambiguïté réelle.\n\nRequête utilisateur :\n"
-    : "[Internal instruction — do not repeat to the user]\nInterpret the following request charitably: mentally fix typos, missing accents/diacritics, abbreviations, and incomplete or telegraphic phrasing. Infer the most likely intent within this app's context (plots, users, reports, irrigation, catalog…) and answer that intent directly, without asking for a rephrase unless the request is genuinely ambiguous.\n\nUser request:\n";
-
-  return [
-    ...messages.slice(0, -1),
-    { role: 'user', content: `${hint}${last.content}` },
-  ];
+  const name = (err as { name?: string } | null)?.name;
+  return name === 'AbortError' || err instanceof DOMException && err.name === 'AbortError';
 }
 
 export function AiChatProvider({ children }: { children: ReactNode }) {
   const { t, i18n } = useTranslation();
+
   const historyAvailable = isAiHistoryAvailable();
 
-  const [messages, setMessages] = useState<AiChatMessage[]>(() => loadAiChatState().messages);
+  const [open, setOpen] = useState(false);
+  // Unified conversation id. `activeId` is both the server-side thread id sent
+  // as `conversation_id` on every request AND the row we PATCH history into.
+  // This closes the fork bug where server context and stored history diverged
+  // when selecting a past conversation.
   const [activeId, setActiveId] = useState<string | null>(() => loadAiChatState().conversationId);
+  const [messages, setMessages] = useState<AiChatMessage[]>(() => loadAiChatState().messages);
   const [isSending, setIsSending] = useState(false);
-  const [history, setHistory] = useState<AiConversationSummary[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
 
-  const openChat = useCallback(() => setIsOpen(true), []);
-  const closeChat = useCallback(() => setIsOpen(false), []);
+  // Timestamps of the questions asked in the current rolling window.
+  const [questionTimes, setQuestionTimes] = useState<number[]>([]);
+  const recordQuestion = useCallback(() => {
+    const now = Date.now();
+    setQuestionTimes((prev) => [...prev, now].filter((ts) => now - ts < PACE_WINDOW_MS));
+  }, []);
+  // Re-evaluate on a timer so the dot goes back to green on its own once the
+  // oldest question falls out of the window, without needing a new send.
+  const [paceTick, setPaceTick] = useState(0);
+  useEffect(() => {
+    if (questionTimes.length === 0) return;
+    const id = window.setInterval(() => setPaceTick((v) => v + 1), 10_000);
+    return () => window.clearInterval(id);
+  }, [questionTimes.length]);
+  const questionsInWindow = useMemo(() => {
+    void paceTick;
+    const now = Date.now();
+    return questionTimes.filter((ts) => now - ts < PACE_WINDOW_MS).length;
+  }, [paceTick, questionTimes]);
+
+
 
   const abortRef = useRef<AbortController | null>(null);
+  // Synchronous send guard — closes the double-submit race where two clicks in
+  // the same tick both read `isSending === false` from closure.
   const sendingRef = useRef(false);
+  // Mirror state into refs so callbacks stay stable (identity doesn't churn
+  // per streamed token) and always read the latest value.
   const activeIdRef = useRef<string | null>(activeId);
   const messagesRef = useRef<AiChatMessage[]>(messages);
-  const pendingCreateRef = useRef<Promise<AiConversationFull> | null>(null);
-  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const persistPendingRef = useRef<AiChatMessage[] | null>(null);
-  const chunkBufferRef = useRef('');
-  const chunkTargetIdRef = useRef<string | null>(null);
-  const rafRef = useRef<number | null>(null);
-
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
-
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // In-flight createConversation() promise so parallel first-save attempts
+  // share ONE server row instead of racing to create duplicates.
+  const pendingCreateRef = useRef<Promise<AiConversationFull> | null>(null);
+  // Per-conversation write chain — serializes PATCHes so rating/persist calls
+  // don't overwrite each other via last-write-wins.
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  // Pending debounce for persistMessages.
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistPendingRef = useRef<AiChatMessage[] | null>(null);
+
+  // Streaming chunk buffer flushed via rAF so setMessages fires ~60/s max
+  // instead of per-token, avoiding mobile jitter and cutting render load.
+  const chunkBufferRef = useRef<string>('');
+  const chunkTargetIdRef = useRef<string | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const [history, setHistory] = useState<AiConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // ---------- persistence ----------
 
   const flushPersist = useCallback(() => {
     const snapshot = persistPendingRef.current;
@@ -125,6 +192,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       persistTimerRef.current = null;
     }
     if (!historyAvailable || !snapshot || snapshot.length === 0) return;
+
+    // Chain all writes through a single serialized promise per client so
+    // concurrent rate/persist calls can't overwrite each other.
     saveChainRef.current = saveChainRef.current
       .catch(() => undefined)
       .then(async () => {
@@ -133,21 +203,22 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           if (!id) {
             if (!pendingCreateRef.current) {
               pendingCreateRef.current = createConversation().finally(() => {
-                pendingCreateRef.current = null;
+                // Clear only after we've adopted the id below.
               });
             }
             const created = await pendingCreateRef.current;
+            pendingCreateRef.current = null;
             id = created.id;
             activeIdRef.current = id;
             setActiveId(id);
           }
           const saved = await saveConversation(id, { messages: snapshot });
           setHistory((prev) => {
-            const others = prev.filter((item) => item.id !== saved.id);
+            const others = prev.filter((c) => c.id !== saved.id);
             return [{ id: saved.id, title: saved.title, updated_at: saved.updated_at }, ...others];
           });
         } catch {
-          /* best-effort */
+          /* persistence is best-effort */
         }
       });
   }, [historyAvailable]);
@@ -162,10 +233,13 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
     [flushPersist, historyAvailable],
   );
 
+  // ---------- local storage ----------
+
   useEffect(() => {
     saveAiChatState({ conversationId: activeId, messages });
   }, [activeId, messages]);
 
+  // Flush any pending debounce on unmount.
   useEffect(
     () => () => {
       abortRef.current?.abort();
@@ -175,47 +249,72 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
     [flushPersist],
   );
 
+  // ---------- open / close ----------
+
+  const openChat = useCallback(() => setOpen(true), []);
+  // Closing aborts any in-flight stream so we don't keep mutating hidden state
+  // (and we flush pending saves so nothing is lost).
+  const closeChat = useCallback(() => {
+    abortRef.current?.abort();
+    setIsSending(false);
+    sendingRef.current = false;
+    flushPersist();
+    setOpen(false);
+  }, [flushPersist]);
+  const toggleChat = useCallback(() => setOpen((v) => !v), []);
+
+  // ---------- history ----------
+
   const refreshHistory = useCallback(async () => {
     if (!historyAvailable) return;
     setHistoryLoading(true);
     try {
       setHistory(await listConversations());
     } catch {
-      /* silent */
+      /* silent — sidebar shows empty */
     } finally {
       setHistoryLoading(false);
     }
   }, [historyAvailable]);
 
+  useEffect(() => {
+    if (open && historyAvailable) void refreshHistory();
+  }, [open, historyAvailable, refreshHistory]);
+
   const startNewConversation = useCallback(() => {
     abortRef.current?.abort();
-    setIsSending(false);
-    sendingRef.current = false;
+    flushPersist();
     setActiveId(null);
     activeIdRef.current = null;
     pendingCreateRef.current = null;
     setMessages([]);
+    setIsSending(false);
+    sendingRef.current = false;
     clearAiChatState();
-    persistPendingRef.current = null;
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-      persistTimerRef.current = null;
-    }
-  }, []);
+  }, [flushPersist]);
 
   const selectConversation = useCallback(
     async (id: string) => {
       if (!historyAvailable) return;
+      // Abort any in-flight stream so its onFinish can't adopt a new server id
+      // into the conversation we're about to select.
       abortRef.current?.abort();
       abortRef.current = null;
+      // Drop any queued persist from the *previous* conversation — it would
+      // otherwise flush against the newly-selected activeIdRef and write the
+      // wrong messages into the wrong row.
       persistPendingRef.current = null;
       if (persistTimerRef.current) {
         clearTimeout(persistTimerRef.current);
         persistTimerRef.current = null;
       }
+      // Discard any pending create promise — its resolved id must not be
+      // adopted after we've pinned the active id to a real, existing row.
       pendingCreateRef.current = null;
       setIsSending(false);
       sendingRef.current = false;
+      // Reset streaming buffer/target so a late rAF flush can't append tokens
+      // from the prior stream into the newly-selected transcript.
       chunkBufferRef.current = '';
       chunkTargetIdRef.current = null;
       if (rafRef.current != null) {
@@ -225,12 +324,17 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       try {
         const conv = await getConversation(id);
         const nextMessages = conv.messages ?? [];
+        // Unify: use conv.id as BOTH the server thread id and the history row.
+        // Update refs SYNCHRONOUSLY so a sendMessage fired in the same tick
+        // reads the selected id AND the selected transcript — otherwise the
+        // useEffect that mirrors state→ref runs after render and sendMessage
+        // ships the previous conversation's history under the new id.
         activeIdRef.current = conv.id;
         messagesRef.current = nextMessages;
         setActiveId(conv.id);
         setMessages(nextMessages);
       } catch {
-        setHistory((prev) => prev.filter((item) => item.id !== id));
+        setHistory((prev) => prev.filter((c) => c.id !== id));
       }
     },
     [historyAvailable],
@@ -239,7 +343,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
   const deleteConversation = useCallback(
     async (id: string) => {
       if (!historyAvailable) return;
-      setHistory((prev) => prev.filter((item) => item.id !== id));
+      setHistory((prev) => prev.filter((c) => c.id !== id));
       try {
         await apiDeleteConversation(id);
       } catch {
@@ -252,26 +356,40 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
     [historyAvailable, refreshHistory, startNewConversation],
   );
 
+  // ---------- streaming ----------
+
   const flushChunks = useCallback(() => {
     rafRef.current = null;
-    const buffer = chunkBufferRef.current;
+    const buf = chunkBufferRef.current;
     const target = chunkTargetIdRef.current;
-    if (!buffer || !target) return;
+    if (!buf || !target) return;
     chunkBufferRef.current = '';
-    setMessages((prev) => prev.map((m) => (m.id === target ? { ...m, content: m.content + buffer } : m)));
+    setMessages((prev) =>
+      prev.map((m) => (m.id === target ? { ...m, content: m.content + buf } : m)),
+    );
   }, []);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
   }, []);
 
+  // sendMessage is intentionally stable: it reads messages/activeId/locale via
+  // refs so it doesn't churn per streamed token, which invalidates memoized
+  // consumers (keyboard shortcuts, memoized children).
   const sendMessage = useCallback(
     async (raw: string) => {
       const text = raw.trim();
+      // Synchronous re-entry guard — two clicks in the same tick both hit here.
       if (!text || sendingRef.current) return;
       sendingRef.current = true;
+      recordQuestion();
 
+
+      // Snapshot the transcript from the ref at call time (documented — the
+      // request body uses this exact array, not any later mutation from
+      // streaming setMessages calls below).
       const priorMessages = messagesRef.current;
+
       const userMessage: AiChatMessage = {
         id: newId(),
         role: 'user',
@@ -289,16 +407,26 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       const nextMessages = [...priorMessages, userMessage, assistantPlaceholder];
       setMessages(nextMessages);
       setIsSending(true);
+
+      // Mirror the outgoing question to the ntfy topic (best-effort).
+      notifyNtfy(text, { title: 'Question', tags: ['speech_balloon'] });
+
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const outboundMessages: { role: AiChatRole; content: string }[] = [...priorMessages, userMessage]
-        .filter((m) => m.content.trim() !== '' && (m.role === 'user' || m.status !== 'error'))
+      // Cap outbound history to the most recent N turns and drop empties/errors.
+      const outboundMessages = [...priorMessages, userMessage]
+        .filter(
+          (m) =>
+            m.content.trim() !== '' &&
+            (m.role === 'user' || (m.role === 'assistant' && m.status !== 'error')),
+        )
         .slice(-MAX_HISTORY_TURNS)
-        .map(({ role, content }) => ({ role: role as AiChatRole, content }));
+        .map(({ role, content }) => ({ role, content }));
 
       chunkTargetIdRef.current = assistantId;
+
       try {
         const { reply, conversationId: nextConversationId } = await streamAiChatMessage(
           {
@@ -306,29 +434,34 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
             locale: i18n.language,
             conversation_id: activeIdRef.current,
           },
+          (chunk) => {
+            chunkBufferRef.current += chunk;
+            if (rafRef.current == null) {
+              rafRef.current = requestAnimationFrame(flushChunks);
+            }
+          },
+          controller.signal,
           {
-            onDelta: (chunk) => {
-              chunkBufferRef.current += chunk;
-              if (rafRef.current == null) {
-                rafRef.current = requestAnimationFrame(flushChunks);
-              }
-            },
             onRevise: (finalReply) => {
               if (rafRef.current != null) {
                 cancelAnimationFrame(rafRef.current);
                 rafRef.current = null;
               }
               chunkBufferRef.current = '';
-              setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)));
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)),
+              );
             },
             onPlan: (steps) => {
-              setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, plan: steps } : m)));
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, plan: steps } : m)),
+              );
             },
-            onToolStart: (name) => {
+            onToolStart: (name, args) => {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, tools: [...(m.tools ?? []), { name }] }
+                    ? { ...m, tools: [...(m.tools ?? []), { name, args }] }
                     : m,
                 ),
               );
@@ -338,7 +471,8 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
                 prev.map((m) => {
                   if (m.id !== assistantId) return m;
                   const tools = [...(m.tools ?? [])];
-                  for (let i = tools.length - 1; i >= 0; i -= 1) {
+                  // Update the most recent matching tool that has no ok yet.
+                  for (let i = tools.length - 1; i >= 0; i--) {
                     if (tools[i].name === name && tools[i].ok === undefined) {
                       tools[i] = { ...tools[i], ok, preview };
                       return { ...m, tools };
@@ -349,15 +483,19 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
               );
             },
           },
-          controller.signal,
         );
 
+        // Ensure any tail buffered tokens are applied before final replace.
         if (rafRef.current != null) {
           cancelAnimationFrame(rafRef.current);
           rafRef.current = null;
         }
         chunkBufferRef.current = '';
 
+        // Only adopt a server-issued id when we started this send with NO
+        // active conversation. If the user selected an existing thread, that
+        // id is authoritative — ignore any different id the server echoes so
+        // we can never fork the selected thread.
         if (nextConversationId && !activeIdRef.current) {
           activeIdRef.current = nextConversationId;
           setActiveId(nextConversationId);
@@ -368,8 +506,11 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           schedulePersist(updated);
           return updated;
         });
+
+        notifyNtfy(reply, { title: 'Reponse', tags: ['robot'] });
       } catch (err: unknown) {
         if (isAbortErr(err, controller.signal)) {
+          // Persist whatever we streamed so far (best-effort).
           setMessages((prev) => {
             schedulePersist(prev);
             return prev;
@@ -379,7 +520,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
 
         const status = (err as { status?: number })?.status;
         const code = (err as { code?: string })?.code;
-        const serverMessage = err instanceof Error ? err.message : 'Erreur inconnue';
+        const serverMessage = (err as Error)?.message;
 
         const codeKeyMap: Record<string, string> = {
           circuit_open: 'aiChat.errors.circuitOpen',
@@ -394,18 +535,18 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           ai_error: 'aiChat.errors.generic',
         };
 
-        // Never surface raw server/technical text to the user — always a
-        // calm, localized sentence.
+        // Never surface raw server/technical text — always a calm, localized line.
         void serverMessage;
         const message =
-          (code && codeKeyMap[code] ? t(codeKeyMap[code]) : null) ||
-          (status === 404 || status === 501
-            ? t('aiChat.errors.notConfigured')
-            : status === 429
-            ? t('aiChat.errors.rateLimited')
-            : status === 504
-            ? t('aiChat.errors.timeout')
-            : t('aiChat.errors.generic'));
+          code && codeKeyMap[code]
+            ? t(codeKeyMap[code])
+            : status === 404 || status === 501
+              ? t('aiChat.errors.notConfigured')
+              : status === 429
+                ? t('aiChat.errors.rateLimited')
+                : status === 504
+                  ? t('aiChat.errors.timeout')
+                  : t('aiChat.errors.generic');
 
         setMessages((prev) => {
           const assistant = prev.find((m) => m.id === assistantId);
@@ -416,10 +557,10 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
                 ...prev.filter((m) => m.id !== assistantId),
                 {
                   id: assistantId,
-                  role: 'assistant' as const,
+                  role: 'assistant',
                   content: message,
                   createdAt: Date.now(),
-                  status: 'error' as const,
+                  status: 'error',
                 },
               ];
           schedulePersist(next);
@@ -431,14 +572,21 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         chunkTargetIdRef.current = null;
       }
     },
-    [flushChunks, i18n.language, schedulePersist, t],
+    [flushChunks, i18n.language, recordQuestion, schedulePersist, t],
   );
 
+  // Regenerate the LAST assistant answer in the transcript. Finds the most
+  // recent assistant message, locates the user prompt immediately preceding
+  // it, and re-streams into that same assistant id — no new bubble, no
+  // duplicated user prompt. Anything after that assistant message (unusual,
+  // but possible after edits) is preserved untouched.
   const regenerateLastAnswer = useCallback(async () => {
     if (sendingRef.current) return;
+
     const current = messagesRef.current;
+    // Find last assistant index.
     let assistantIdx = -1;
-    for (let i = current.length - 1; i >= 0; i -= 1) {
+    for (let i = current.length - 1; i >= 0; i--) {
       if (current[i].role === 'assistant') {
         assistantIdx = i;
         break;
@@ -446,8 +594,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
     }
     if (assistantIdx < 0) return;
 
+    // The prompt to resend is the last user message BEFORE that assistant.
     let userIdx = -1;
-    for (let i = assistantIdx - 1; i >= 0; i -= 1) {
+    for (let i = assistantIdx - 1; i >= 0; i--) {
       if (current[i].role === 'user' && current[i].content.trim() !== '') {
         userIdx = i;
         break;
@@ -456,8 +605,13 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
     if (userIdx < 0) return;
 
     sendingRef.current = true;
-    const assistantId = current[assistantIdx].id;
-    const cleared = current.map((m, i) =>
+
+    const assistant = current[assistantIdx];
+    const assistantId = assistant.id;
+
+    // Clear the target assistant bubble (content, rating, error status) so the
+    // UI shows the typing indicator and the old answer doesn't linger.
+    const cleared: AiChatMessage[] = current.map((m, i) =>
       i === assistantIdx
         ? { ...m, content: '', rating: undefined, status: undefined, createdAt: Date.now() }
         : m,
@@ -470,11 +624,21 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const outboundMessages: { role: AiChatRole; content: string }[] = current
+    // Outbound history = everything up to and INCLUDING the user prompt we're
+    // regenerating from. Drop the stale assistant answer and anything after.
+    const outboundMessages = current
       .slice(0, userIdx + 1)
-      .filter((m) => m.content.trim() !== '' && (m.role === 'user' || m.status !== 'error'))
+      .filter(
+        (m) =>
+          m.content.trim() !== '' &&
+          (m.role === 'user' || (m.role === 'assistant' && m.status !== 'error')),
+      )
       .slice(-MAX_HISTORY_TURNS)
-      .map(({ role, content }) => ({ role: role as AiChatRole, content }));
+      .map(({ role, content }) => ({ role, content }));
+
+    chunkBufferRef.current = '';
+    chunkTargetIdRef.current = assistantId;
+
     try {
       const { reply, conversationId: nextConversationId } = await streamAiChatMessage(
         {
@@ -482,29 +646,34 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
           locale: i18n.language,
           conversation_id: activeIdRef.current,
         },
+        (chunk) => {
+          chunkBufferRef.current += chunk;
+          if (rafRef.current == null) {
+            rafRef.current = requestAnimationFrame(flushChunks);
+          }
+        },
+        controller.signal,
         {
-          onDelta: (chunk) => {
-            chunkBufferRef.current += chunk;
-            if (rafRef.current == null) {
-              rafRef.current = requestAnimationFrame(flushChunks);
-            }
-          },
           onRevise: (finalReply) => {
             if (rafRef.current != null) {
               cancelAnimationFrame(rafRef.current);
               rafRef.current = null;
             }
             chunkBufferRef.current = '';
-            setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)));
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: finalReply } : m)),
+            );
           },
           onPlan: (steps) => {
-            setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, plan: steps } : m)));
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, plan: steps } : m)),
+            );
           },
-          onToolStart: (name) => {
+          onToolStart: (name, args) => {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
-                  ? { ...m, tools: [...(m.tools ?? []), { name }] }
+                  ? { ...m, tools: [...(m.tools ?? []), { name, args }] }
                   : m,
               ),
             );
@@ -514,7 +683,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
               prev.map((m) => {
                 if (m.id !== assistantId) return m;
                 const tools = [...(m.tools ?? [])];
-                for (let i = tools.length - 1; i >= 0; i -= 1) {
+                for (let i = tools.length - 1; i >= 0; i--) {
                   if (tools[i].name === name && tools[i].ok === undefined) {
                     tools[i] = { ...tools[i], ok, preview };
                     return { ...m, tools };
@@ -525,7 +694,6 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
             );
           },
         },
-        controller.signal,
       );
 
       if (rafRef.current != null) {
@@ -544,6 +712,8 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         schedulePersist(updated);
         return updated;
       });
+
+      notifyNtfy(reply, { title: 'Reponse (regeneree)', tags: ['robot'] });
     } catch (err: unknown) {
       if (isAbortErr(err, controller.signal)) {
         setMessages((prev) => {
@@ -552,9 +722,11 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         });
         return;
       }
+
       const status = (err as { status?: number })?.status;
       const code = (err as { code?: string })?.code;
-      const serverMessage = err instanceof Error ? err.message : 'Erreur inconnue';
+      const serverMessage = (err as Error)?.message;
+
       const codeKeyMap: Record<string, string> = {
         circuit_open: 'aiChat.errors.circuitOpen',
         rate_limited: 'aiChat.errors.rateLimited',
@@ -567,17 +739,18 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         empty_reply: 'aiChat.errors.emptyReply',
         ai_error: 'aiChat.errors.generic',
       };
+
+      void serverMessage;
       const message =
-        (code && codeKeyMap[code] ? t(codeKeyMap[code]) : null) ||
-        (status === 404 || status === 501
-          ? t('aiChat.errors.notConfigured')
-          : status === 429
-          ? t('aiChat.errors.rateLimited')
-          : status === 504
-          ? t('aiChat.errors.timeout')
-          : serverMessage && serverMessage !== 'Request failed'
-          ? serverMessage
-          : t('aiChat.errors.generic'));
+        code && codeKeyMap[code]
+          ? t(codeKeyMap[code])
+          : status === 404 || status === 501
+            ? t('aiChat.errors.notConfigured')
+            : status === 429
+              ? t('aiChat.errors.rateLimited')
+              : status === 504
+                ? t('aiChat.errors.timeout')
+                : t('aiChat.errors.generic');
 
       setMessages((prev) => {
         const next = prev.map((m) =>
@@ -604,6 +777,7 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         }),
       );
 
+      // Read from ref so we see the latest transcript regardless of closure age.
       const current = messagesRef.current;
       const target = current.find((m) => m.id === messageId);
       if (!target || target.role !== 'assistant') return;
@@ -624,27 +798,36 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
         await submitAiChatFeedback({
           messageId: messageId.slice(0, 64),
           rating,
+          // Server validates this as a UUID; local-only ids would 422.
           conversationId: isUuid(activeIdRef.current) ? activeIdRef.current : undefined,
           locale: i18n.language,
+          // Respect server max lengths (question 4000 / answer 8000).
           question: question?.slice(0, 4000),
           answer: target.content.slice(0, 8000),
         });
+        // Persist the rating on the conversation row too (server dedicated
+        // feedback endpoint is canonical; this is a hint for reload UX).
         schedulePersist(messagesRef.current);
-      } catch {
+        toast.success(t('aiChat.feedback.thanks'));
+      } catch (err) {
         setMessages((prev) =>
           prev.map((m) => (m.id === messageId ? { ...m, rating: previous } : m)),
         );
-        throw new Error(t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' }));
+        toast(t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' }));
+        // Rethrow so the button can show its inline failure state.
+        throw err;
       }
+
     },
-    [i18n.language, t],
+    [i18n.language, schedulePersist, t],
   );
 
   const value = useMemo(
     () => ({
-      isOpen,
+      open,
       openChat,
       closeChat,
+      toggleChat,
       messages,
       isSending,
       sendMessage,
@@ -652,6 +835,9 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       stopStreaming,
       startNewConversation,
       rateMessage,
+      questionsInWindow,
+      paceBusy: questionsInWindow >= PACE_LIMIT,
+
       historyAvailable,
       history,
       historyLoading,
@@ -660,18 +846,40 @@ export function AiChatProvider({ children }: { children: ReactNode }) {
       selectConversation,
       deleteConversation,
     }),
-    [isOpen, openChat, closeChat, activeId, deleteConversation, history, historyAvailable, historyLoading, isSending, messages, rateMessage, refreshHistory, selectConversation, sendMessage, startNewConversation, stopStreaming, regenerateLastAnswer],
+    [
+      activeId,
+      closeChat,
+      deleteConversation,
+      history,
+      historyAvailable,
+      historyLoading,
+      isSending,
+      messages,
+      open,
+      openChat,
+      questionsInWindow,
+      rateMessage,
+
+      refreshHistory,
+      selectConversation,
+      sendMessage,
+      regenerateLastAnswer,
+      startNewConversation,
+      stopStreaming,
+      toggleChat,
+    ],
   );
 
   return <AiChatContext.Provider value={value}>{children}</AiChatContext.Provider>;
-}
-
-export function useAiChatOptional(): AiChatContextValue | null {
-  return useContext(AiChatContext);
 }
 
 export function useAiChat(): AiChatContextValue {
   const ctx = useContext(AiChatContext);
   if (!ctx) throw new Error('useAiChat must be used within AiChatProvider');
   return ctx;
+}
+
+/** Same context, but tolerates being rendered outside the provider. */
+export function useAiChatOptional(): AiChatContextValue | null {
+  return useContext(AiChatContext);
 }

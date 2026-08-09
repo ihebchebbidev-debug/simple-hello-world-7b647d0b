@@ -11,22 +11,64 @@ import {
   Lightbulb,
   Loader2,
   RefreshCw,
-  ThumbsDown,
+
   ThumbsUp,
+  ThumbsDown,
   XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import AiChatMarkdown from './AiChatMarkdown';
-import AiChatThinkingIndicator from './AiChatThinkingIndicator';
+import AiChatTypingIndicator from './AiChatTypingIndicator';
 import { useMobileKeyboardInset } from './useMobileKeyboardInset';
 import type { AiChatMessage, AiChatRating } from './types';
 
-function formatTime(ts: number, locale: string): string {
-  try {
-    return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(ts));
-  } catch {
-    return '';
-  }
+function AgentActivity({ message }: { message: AiChatMessage }) {
+  const hasPlan = (message.plan?.length ?? 0) > 0;
+  const hasTools = (message.tools?.length ?? 0) > 0;
+  if (!hasPlan && !hasTools) return null;
+
+  return (
+    <div className="mb-2 space-y-1.5">
+      {hasPlan && (
+        <div className="rounded-lg border border-border/50 bg-[hsl(var(--surface-container))] px-3 py-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <Lightbulb className="h-3 w-3" aria-hidden />
+            <span>Plan</span>
+          </div>
+          <ol className="ml-4 list-decimal space-y-0.5 text-[12px] text-foreground/85">
+            {message.plan!.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {hasTools && (
+        <div className="flex flex-wrap gap-1.5">
+          {message.tools!.map((tool, i) => {
+            const pending = tool.ok === undefined;
+            const ok = tool.ok === true;
+            const Icon = pending ? Cog : ok ? CheckCircle2 : XCircle;
+            return (
+              <span
+                key={i}
+                title={tool.preview ?? JSON.stringify(tool.args ?? {})}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] tabular-nums ${
+                  pending
+                    ? 'border-border/50 bg-[hsl(var(--surface-container-high))] text-muted-foreground'
+                    : ok
+                      ? 'border-[hsl(var(--primary)/0.3)] bg-[hsl(var(--primary)/0.08)] text-[hsl(var(--primary-glow))]'
+                      : 'border-border/60 bg-[hsl(var(--surface-container-high))] text-muted-foreground'
+                }`}
+              >
+                <Icon className={`h-3 w-3 ${pending ? 'animate-spin' : ''}`} aria-hidden />
+                <span className="font-mono">{tool.name}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -44,7 +86,7 @@ function CopyButton({ text }: { text: string }) {
           setCopied(true);
           window.setTimeout(() => setCopied(false), 1500);
         } catch {
-          /* ignore */
+          /* clipboard unavailable — ignore */
         }
       }}
       className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[hsl(var(--surface-container-highest))] hover:text-foreground"
@@ -87,7 +129,11 @@ function FeedbackButtons({
   const renderIcon = (rating: AiChatRating, Icon: typeof ThumbsUp) => {
     if (pending === rating) return <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />;
     if (result?.rating === rating) {
-      return result.ok ? <Check className="h-3.5 w-3.5" aria-hidden /> : <XCircle className="h-3.5 w-3.5" aria-hidden />;
+      return result.ok ? (
+        <Check className="h-3.5 w-3.5" aria-hidden />
+      ) : (
+        <XCircle className="h-3.5 w-3.5" aria-hidden />
+      );
     }
     return <Icon className="h-3.5 w-3.5" aria-hidden />;
   };
@@ -126,62 +172,22 @@ function FeedbackButtons({
         {pending
           ? t('aiChat.feedback.sending', { defaultValue: 'Sending feedback…' })
           : result
-          ? result.ok
-            ? t('aiChat.feedback.thanks')
-            : t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' })
-          : ''}
+            ? result.ok
+              ? t('aiChat.feedback.thanks')
+              : t('aiChat.feedback.failed', { defaultValue: 'Feedback not saved' })
+            : ''}
       </span>
     </div>
   );
 }
 
-function AgentActivity({ message }: { message: AiChatMessage }) {
-  const hasPlan = (message.plan?.length ?? 0) > 0;
-  const hasTools = (message.tools?.length ?? 0) > 0;
-  if (!hasPlan && !hasTools) return null;
 
-  return (
-    <div className="mb-2 space-y-1.5">
-      {hasPlan && (
-        <div className="rounded-lg border border-border/50 bg-[hsl(var(--surface-container))] px-3 py-2">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            <Lightbulb className="h-3 w-3" aria-hidden />
-            <span>Plan</span>
-          </div>
-          <ol className="ml-4 list-decimal space-y-0.5 text-[12px] text-foreground/85">
-            {message.plan!.map((step, i) => (
-              <li key={i}>{step}</li>
-            ))}
-          </ol>
-        </div>
-      )}
-      {hasTools && (
-        <div className="flex flex-wrap gap-1.5">
-          {message.tools!.map((tool, i) => {
-            const pending = tool.ok === undefined;
-            const ok = tool.ok === true;
-            const Icon = pending ? Cog : ok ? CheckCircle2 : XCircle;
-            return (
-              <span
-                key={i}
-                title={tool.preview ?? JSON.stringify(tool.args ?? {})}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] tabular-nums ${
-                  pending
-                    ? 'border-border/50 bg-[hsl(var(--surface-container-high))] text-muted-foreground'
-                    : ok
-                    ? 'border-[hsl(var(--primary)/0.3)] bg-[hsl(var(--primary)/0.08)] text-[hsl(var(--primary-glow))]'
-                    : 'border-border/60 bg-[hsl(var(--surface-container-high))] text-muted-foreground'
-                }`}
-              >
-                <Icon className={`h-3 w-3 ${pending ? 'animate-spin' : ''}`} aria-hidden />
-                <span className="font-mono">{tool.name}</span>
-              </span>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+function formatTime(ts: number, locale: string): string {
+  try {
+    return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(ts));
+  } catch {
+    return '';
+  }
 }
 
 function MessageBubble({
@@ -202,31 +208,45 @@ function MessageBubble({
   const hasAgentActivity = !isUser && ((message.plan?.length ?? 0) > 0 || (message.tools?.length ?? 0) > 0);
 
   if (emptyAssistant && streaming) {
-    return <AiChatThinkingIndicator />;
+    return <AiChatTypingIndicator />;
   }
+
   if (emptyAssistant) return null;
 
   const canRate = !isUser && !isError && !streaming && !!onRate && !!message.content.trim();
   const canCopy = !isUser && !isError && !streaming && !!message.content.trim();
+  // Regenerate is offered on the last assistant bubble even on error — that's
+  // when users most want to retry. Hidden while a stream is in flight.
   const canRegenerate = !isUser && !streaming && !!onRegenerate;
-  const timeLabel = message.createdAt ? formatTime(message.createdAt, i18n.language) : '';
+  const timeLabel = formatTime(message.createdAt, i18n.language);
 
   return (
-    <div className={`flex animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`} data-role={message.role}>
+    <div
+      className={`flex animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`}
+      data-role={message.role}
+    >
       <div className={`flex flex-col ${isUser ? 'max-w-[min(100%,88%)]' : 'w-full'}`}>
         <div
           className={`leading-relaxed ${
             isUser
-              ? 'rounded-2xl rounded-tr-sm bg-[hsl(var(--primary))] px-3.5 py-2.5 text-[14px] sm:text-[13px] text-primary-foreground whitespace-pre-wrap break-words shadow-sm'
+              ? 'rounded-2xl rounded-tr-sm bg-primary px-3.5 py-2.5 text-[14px] sm:text-[13px] text-primary-foreground whitespace-pre-wrap break-words shadow-sm'
               : isError
-              ? 'rounded-2xl border border-border/60 bg-[hsl(var(--surface-container-high))] px-3.5 py-2.5 text-[13px] text-muted-foreground whitespace-pre-wrap break-words'
-              : 'text-foreground'
+                ? 'rounded-2xl border border-border/60 bg-[hsl(var(--surface-container-high))] px-3.5 py-2.5 text-[13px] text-muted-foreground whitespace-pre-wrap break-words'
+                : 'text-foreground'
           }`}
         >
-          {!isUser && !isError && hasAgentActivity && <AgentActivity message={message} />}
-          {isUser || isError || streaming ? message.content : <AiChatMarkdown content={message.content} />}
+          {!isUser && !isError && <AgentActivity message={message} />}
+          {isUser || isError || streaming ? (
+            message.content
+          ) : (
+            <AiChatMarkdown content={message.content} />
+          )}
         </div>
-        <div className={`mt-1 flex items-center gap-2 text-[11px] text-muted-foreground ${isUser ? 'justify-end' : 'justify-start'}`}>
+        <div
+          className={`mt-1 flex items-center gap-2 text-[11px] text-muted-foreground ${
+            isUser ? 'justify-end' : 'justify-start'
+          }`}
+        >
           {timeLabel && <span className="tabular-nums">{timeLabel}</span>}
           {(canCopy || canRate || canRegenerate) && (
             <div className="flex items-center gap-0.5">
@@ -245,7 +265,9 @@ function MessageBubble({
               {canRate && <FeedbackButtons message={message} onRate={onRate!} />}
             </div>
           )}
-          {message.rating && !isUser && <span className="text-[10.5px] text-muted-foreground/80">{t('aiChat.feedback.thanks')}</span>}
+          {message.rating && !isUser && (
+            <span className="text-[10.5px] text-muted-foreground/80">{t('aiChat.feedback.thanks')}</span>
+          )}
         </div>
       </div>
     </div>
@@ -260,6 +282,9 @@ type Props = {
   onRegenerate?: () => void;
 };
 
+// Threshold (px) below which we consider the user "at the bottom" and are
+// allowed to auto-scroll on new content. Above it, we respect their scroll
+// position and surface a "Jump to latest" affordance instead.
 const STICK_THRESHOLD_PX = 96;
 
 export default function AiChatMessageList({
@@ -274,7 +299,9 @@ export default function AiChatMessageList({
   const bottomRef = useRef<HTMLDivElement>(null);
   const keyboardInset = useMobileKeyboardInset();
 
+  // Whether we're currently stuck to the bottom (auto-scroll on).
   const [stickToBottom, setStickToBottom] = useState(true);
+  // Independent flag: user has scrolled far enough up that we surface a button.
   const [showJump, setShowJump] = useState(false);
 
   const scrollToBottom = useCallback((smooth: boolean) => {
@@ -290,12 +317,13 @@ export default function AiChatMessageList({
     setShowJump(!atBottom && distance > STICK_THRESHOLD_PX * 2);
   }, []);
 
+  // Only auto-scroll when the user is near the bottom; otherwise leave them be.
   useEffect(() => {
     if (!stickToBottom) return;
     scrollToBottom(!isSending);
   }, [messages, isSending, keyboardInset, stickToBottom, scrollToBottom]);
 
-  const suggestions = [
+  const suggestions: Array<{ label: string; icon: typeof Leaf }> = [
     { label: t('aiChat.suggestions.plots'), icon: Leaf },
     { label: t('aiChat.suggestions.water'), icon: Droplets },
     { label: t('aiChat.suggestions.reports'), icon: FileBarChart2 },
@@ -306,7 +334,7 @@ export default function AiChatMessageList({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-3 py-4 sm:px-4 [-webkit-overflow-scrolling:touch]"
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-3 py-4 sm:gap-4 sm:px-4 [-webkit-overflow-scrolling:touch]"
       >
         {messages.length === 0 && !isSending && (
           <div className="mx-auto flex max-w-sm flex-col items-center text-center animate-fade-in pt-4 sm:pt-10">
@@ -328,20 +356,31 @@ export default function AiChatMessageList({
           </div>
         )}
 
-        {messages.map((message, index) => {
-          const isLast = index === messages.length - 1;
-          const streaming = isSending && isLast && message.role === 'assistant';
-          const showRegenerate = !!onRegenerate && !isSending && message.role === 'assistant' && !message.status;
-          return (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              streaming={streaming}
-              onRate={onRate ? (rating) => onRate(message.id, rating) : undefined}
-              onRegenerate={showRegenerate ? onRegenerate : undefined}
-            />
-          );
-        })}
+        {(() => {
+          // Only the last assistant message gets a regenerate control.
+          let lastAssistantIdx = -1;
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant') {
+              lastAssistantIdx = i;
+              break;
+            }
+          }
+          return messages.map((message, index) => {
+            const isLast = index === messages.length - 1;
+            const streaming = isSending && isLast && message.role === 'assistant';
+            const showRegenerate =
+              !!onRegenerate && !isSending && index === lastAssistantIdx;
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                streaming={streaming}
+                onRate={onRate ? (rating) => onRate(message.id, rating) : undefined}
+                onRegenerate={showRegenerate ? onRegenerate : undefined}
+              />
+            );
+          });
+        })()}
 
         <div ref={bottomRef} className="h-px shrink-0" aria-hidden />
       </div>

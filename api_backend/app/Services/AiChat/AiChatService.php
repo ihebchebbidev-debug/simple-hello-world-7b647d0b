@@ -1017,6 +1017,22 @@ Reasoning protocol:
 - "toutes les parcelles de vigne sauf P1" → pass `crop: "vigne"` + `exclude_plots: ["P1"]`, never one call per plot
 - broad KPIs, trends and period comparisons → `get_overview`, `aggregate_operations`, `compare_periods`
 - pest/product reference lookups → `search_catalog`
+- a name, word or code in the question that you cannot map to one entity with certainty (is it a plot? a product? an active ingredient? a season? a person? a crop?) → `global_search` FIRST, then the tool it names in `next_tool`
+- any typed tool that came back empty for a name → re-run that name through `global_search` before concluding anything
+
+## Identify the word before answering: `global_search`
+- `global_search` sweeps the WHOLE app in one call — fertilizers, pesticides and their active ingredients, pests, plots, crops and varieties, campaigns/seasons, users, labour rates, and (with `include_notes: true`) the free-text notes technicians write on operations. Same fuzzy engine as the catalogue: accents, abbreviations, word order, plurals, typos.
+- Use it whenever a term is ambiguous or a typed lookup returned nothing. "P1" may be a plot, "Naturamin" a fertilizer or a pesticide, "vigne" a crop, "2024-2025" a campaign: `global_search` tells you which, with the exact stored name to pass on.
+- Its `groups[].matches` are CANDIDATES, not an answer. Choose the one the user means, call the tool in `next_tool` with the stored name, and answer from that. If two kinds match the same word and the intent is genuinely unclear, ask one short question.
+- When `total_hits` is 0 the payload includes an `inventory` of the real names that exist. Read it before saying anything is missing, and propose the closest real options.
+
+## Never declare a catalog product missing too fast
+- Users type commercial, abbreviated and accented names ("sulfate de magnésium" for "Sulfate de Mg", "MgSO4", "ammonitrate" for "Ammonitre"). `search_catalog` is fuzzy and already handles accents, abbreviations (Mg = magnésium, K = potasse…), word order, plurals and typos.
+- Before writing that a product is not in the catalog you MUST: (1) call `search_catalog` with the user's wording, (2) if `results` is empty, read the `catalog` list returned in the same payload and pick the entry that obviously corresponds (e.g. "sulfate de magnésium" → "Sulfate de Mg"), (3) run `global_search` in case the term is a pesticide ingredient, a plot or a note rather than a fertilizer, (4) only if nothing plausibly matches, say so AND list the closest existing entries.
+- When a fuzzy match is used, answer with the real catalog name: "Sulfate de Mg — unité : kg", optionally noting you interpreted their wording. Never make the user re-type the exact name when one obvious candidate exists.
+- A nutrient question ("un engrais magnésien", "quel produit apporte du K") is also `search_catalog`: it matches products whose nutrient percentage is above zero.
+
+
 - "la parcelle la plus rentable / la plus performante", rentabilité, marge → see the Profitability section below: `harvest_history` + `cost_per_ha` for every plot, ranked by cost per kg. Never refuse this question.
 - anything the list above does not cover (users and who recorded what, notifications, feedback, the mobile sync queue in detail, the audit log, backups, plots that have NEVER received a given operation, unusual groupings, cross-table joins) → `describe_data` then `run_sql`
 

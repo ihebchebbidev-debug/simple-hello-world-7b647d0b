@@ -41,7 +41,7 @@ final class ReplySanitizer
         // alone leaves mangled sentences ("** = 0**"), so the whole sentence
         // that carries the leak goes — it is plumbing talk, never an answer.
         $names = 'cost_per_ha|get_operations|aggregate_operations|compare_periods|search_catalog|recent_operations'
-            .'|resolve_date_range|list_plots|list_campaigns|plot_info|product_usage'
+            .'|resolve_date_range|global_search|list_plots|list_campaigns|plot_info|product_usage'
             .'|irrigation_history|fertilization_history|harvest_history|campaign_compare|data_quality|get_overview'
             .'|usage_count|total_matching|returned_rows|irrigation_count|harvest_count|empty_result_diagnostic'
             .'|campaign_scope|tool_failed|SQLSTATE|invalid input syntax|type uuid'

@@ -1,78 +1,50 @@
 import { BACKEND_URL, getAuthToken } from '@/lib/api';
-
-export type AiChatRole = 'user' | 'assistant';
-
-export type AiChatMessage = {
-  id: string;
-  role: AiChatRole;
-  content: string;
-  plan?: string[];
-  tools?: { name: string; status: 'pending' | 'ok' | 'error'; preview?: string }[];
-};
+import type { AiChatMessage } from '@/features/ai-chat/types';
 
 export type AiChatRequest = {
-  messages: { role: AiChatRole; content: string }[];
+  messages: Pick<AiChatMessage, 'role' | 'content'>[];
   locale: string;
   conversation_id?: string | null;
 };
 
+export type AiChatResponse = {
+  reply: string;
+  conversationId: string | null;
+};
+
+type StreamEvent =
+  | { type: 'delta'; content: string }
+  | { type: 'revise'; content: string; violations?: string[] }
+  | { type: 'done'; reply: string; conversation_id: string | null; revised?: boolean }
+  | { type: 'plan'; steps: string[] }
+  | { type: 'tool_start'; name: string; args?: Record<string, unknown> }
+  | { type: 'tool_end'; name: string; ok?: boolean; preview?: string }
+  | { type: 'error'; message: string; code?: string };
+
 export type AiChatStreamCallbacks = {
-  onDelta: (chunk: string) => void;
   onPlan?: (steps: string[]) => void;
-  onToolStart?: (name: string) => void;
+  onToolStart?: (name: string, args?: Record<string, unknown>) => void;
   onToolEnd?: (name: string, ok?: boolean, preview?: string) => void;
   onRevise?: (finalReply: string) => void;
 };
 
-export type AiChatResponse = { reply: string; conversationId: string | null };
+function unwrapReply(payload: unknown): { reply: string; conversationId: string | null } {
+  const root = payload as Record<string, unknown>;
+  const data = (root?.data ?? root) as Record<string, unknown>;
 
-export type AiChatFeedbackPayload = {
-  messageId: string;
-  rating: 'up' | 'down';
-  conversationId?: string | null;
-  locale?: string;
-  question?: string;
-  answer: string;
-};
+  const reply =
+    (typeof data.reply === 'string' && data.reply) ||
+    (typeof data.message === 'string' && data.message) ||
+    (typeof data.content === 'string' && data.content) ||
+    (typeof data.answer === 'string' && data.answer) ||
+    '';
 
-function parseErrorMessage(json: unknown, fallback: string): string {
-  if (json && typeof json === 'object' && 'error' in json) {
-    const err = (json as Record<string, unknown>).error;
-    if (err && typeof err === 'object' && 'message' in err && typeof (err as Record<string, unknown>).message === 'string') {
-      return (err as Record<string, any>).message;
-    }
-  }
-  if (json && typeof json === 'object' && 'message' in json && typeof (json as Record<string, unknown>).message === 'string') {
-    return (json as Record<string, any>).message;
-  }
-  return fallback;
-}
+  const conversationId =
+    (typeof data.conversation_id === 'string' && data.conversation_id) ||
+    (typeof data.conversationId === 'string' && data.conversationId) ||
+    null;
 
-export async function submitAiChatFeedback(payload: AiChatFeedbackPayload): Promise<void> {
-  const token = getAuthToken();
-  const res = await fetch(`${BACKEND_URL}/api/ai/feedback`, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      message_id: payload.messageId,
-      rating: payload.rating,
-      conversation_id: payload.conversationId ?? undefined,
-      locale: payload.locale,
-      question: payload.question,
-      answer: payload.answer,
-    }),
-  });
-
-  if (!res.ok) {
-    const json = await res.json().catch(() => ({}));
-    throw Object.assign(new Error(parseErrorMessage(json, 'Feedback failed')), {
-      status: res.status,
-    });
-  }
+  return { reply, conversationId };
 }
 
 export function cleanAssistantText(raw: string): string {
@@ -83,6 +55,8 @@ export function cleanAssistantText(raw: string): string {
     .replace(/<function(?:=[^>]*)?>[\s\S]*?(?:<\/function>|$)/gi, '')
     .replace(/<parameter(?:=[^>]*)?>[\s\S]*?(?:<\/parameter>|$)/gi, '')
     .replace(/<thought>[\s\S]*?(?:<\/thought>|$)/gi, '')
+    // Remove stray tool/artifact tokens like `tick :search_catalog`,
+    // `tool_call_id: call_123`, or other agent internals from the model stream.
     .replace(/^\s*(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*(?:\{[^}]*\}|\[[^\]]*\]|[^\r\n]*)\s*$/gim, '')
     .replace(/\b(?:tick|tool_call_id|tool_call|tool_calls)\s*:\s*[\w-]+\b/gi, '')
     .replace(/\n{3,}/g, '\n\n')
@@ -92,16 +66,26 @@ export function cleanAssistantText(raw: string): string {
   return cleaned;
 }
 
-type StreamEvent =
-  | { type: 'delta'; content: string }
-  | { type: 'revise'; content: string }
-  | { type: 'done'; reply: string; conversation_id: string | null }
-  | { type: 'plan'; steps: string[] }
-  | { type: 'tool_start'; name: string }
-  | { type: 'tool_end'; name: string; ok?: boolean; preview?: string }
-  | { type: 'error'; message: string; code?: string };
+function parseErrorMessage(payload: unknown, fallback: string): string {
+  const root = payload as Record<string, unknown>;
+  const error = root?.error as Record<string, unknown> | undefined;
+  if (typeof error?.message === 'string' && error.message.trim()) {
+    return error.message.trim();
+  }
+  return fallback;
+}
 
-/** Transient failures are retried silently so users never see a red error. */
+function parseErrorCode(payload: unknown): string | undefined {
+  const root = payload as Record<string, unknown>;
+  const error = root?.error as Record<string, unknown> | undefined;
+  const code = error?.code ?? root?.code;
+  return typeof code === 'string' && code ? code : undefined;
+}
+
+/**
+ * Transient failures the user should never see: we retry them silently
+ * instead of painting a red bubble in the transcript.
+ */
 function isRetryableAiError(err: unknown): boolean {
   const status = (err as { status?: number })?.status;
   const code = (err as { code?: string })?.code;
@@ -116,13 +100,15 @@ function isRetryableAiError(err: unknown): boolean {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Stream a chat completion from the Flehty AI agent, retrying transient
- * upstream failures transparently while nothing has been rendered yet.
+ * Public entry point: streams a reply and transparently retries transient
+ * upstream hiccups (up to 2 extra attempts) as long as nothing has been
+ * rendered yet, so the user sees a slightly slower answer rather than an error.
  */
 export async function streamAiChatMessage(
   body: AiChatRequest,
-  cbs: AiChatStreamCallbacks,
+  onDelta: (chunk: string) => void,
   signal?: AbortSignal,
+  onRevise?: ((finalReply: string) => void) | AiChatStreamCallbacks,
 ): Promise<AiChatResponse> {
   const delays = [600, 1600];
   for (let attempt = 0; ; attempt++) {
@@ -130,8 +116,12 @@ export async function streamAiChatMessage(
     try {
       return await streamAiChatOnce(
         body,
-        { ...cbs, onDelta: (chunk) => { rendered = true; cbs.onDelta(chunk); } },
+        (chunk) => {
+          rendered = true;
+          onDelta(chunk);
+        },
         signal,
+        onRevise,
       );
     } catch (err) {
       const aborted = signal?.aborted || (err as Error)?.name === 'AbortError';
@@ -143,9 +133,12 @@ export async function streamAiChatMessage(
 
 async function streamAiChatOnce(
   body: AiChatRequest,
-  cbs: AiChatStreamCallbacks,
+  onDelta: (chunk: string) => void,
   signal?: AbortSignal,
+  onRevise?: ((finalReply: string) => void) | AiChatStreamCallbacks,
 ): Promise<AiChatResponse> {
+  const cbs: AiChatStreamCallbacks =
+    typeof onRevise === 'function' ? { onRevise } : onRevise ?? {};
   const token = getAuthToken();
   const res = await fetch(`${BACKEND_URL}/api/ai/chat`, {
     method: 'POST',
@@ -163,13 +156,21 @@ async function streamAiChatOnce(
     signal,
   });
 
-  if (!res.ok || !res.body) {
-    let message = `Request failed (${res.status})`;
+  if (!res.ok) {
+    let message = 'Request failed';
+    let code: string | undefined;
     try {
-      const json = (await res.json()) as { error?: { message?: string } };
-      if (json?.error?.message) message = json.error.message;
-    } catch { /* ignore */ }
-    throw Object.assign(new Error(message), { status: res.status });
+      const json = await res.json();
+      message = parseErrorMessage(json, message);
+      code = parseErrorCode(json);
+    } catch {
+      // ignore
+    }
+    throw Object.assign(new Error(message), { status: res.status, code });
+  }
+
+  if (!res.body) {
+    throw new Error('Empty stream body');
   }
 
   const reader = res.body.getReader();
@@ -181,6 +182,7 @@ async function streamAiChatOnce(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
@@ -188,34 +190,125 @@ async function streamAiChatOnce(
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      let evt: StreamEvent;
-      try { evt = JSON.parse(trimmed) as StreamEvent; } catch { continue; }
 
-      if (evt.type === 'delta' && evt.content) {
-        const chunk = cleanAssistantText(evt.content);
+      let event: StreamEvent;
+      try {
+        event = JSON.parse(trimmed) as StreamEvent;
+      } catch {
+        continue;
+      }
+
+      if (event.type === 'delta' && event.content) {
+        const chunk = cleanAssistantText(event.content);
         if (chunk) {
           reply += chunk;
-          cbs.onDelta(chunk);
+          onDelta(chunk);
         }
-      } else if (evt.type === 'revise' && evt.content) {
-        const revised = cleanAssistantText(evt.content);
+      } else if (event.type === 'revise' && event.content) {
+        // Server-side self-check produced a corrected reply; replace the streamed draft.
+        const revised = cleanAssistantText(event.content);
         reply = revised;
         cbs.onRevise?.(revised);
-      } else if (evt.type === 'plan') {
-        cbs.onPlan?.(evt.steps ?? []);
-      } else if (evt.type === 'tool_start') {
-        cbs.onToolStart?.(evt.name);
-      } else if (evt.type === 'tool_end') {
-        cbs.onToolEnd?.(evt.name, evt.ok, evt.preview);
-      } else if (evt.type === 'done') {
-        reply = cleanAssistantText(evt.reply || reply);
-        conversationId = evt.conversation_id ?? conversationId;
-      } else if (evt.type === 'error') {
-        throw Object.assign(new Error(evt.message || 'Stream error'), { code: evt.code });
+      } else if (event.type === 'plan') {
+        cbs.onPlan?.(event.steps ?? []);
+      } else if (event.type === 'tool_start') {
+        cbs.onToolStart?.(event.name, event.args);
+      } else if (event.type === 'tool_end') {
+        cbs.onToolEnd?.(event.name, event.ok, event.preview);
+      } else if (event.type === 'done') {
+        reply = cleanAssistantText(event.reply || reply);
+        conversationId = event.conversation_id ?? conversationId;
+      } else if (event.type === 'error') {
+        throw Object.assign(new Error(event.message || 'Stream error'), {
+          status: 503,
+          code: event.code,
+        });
       }
     }
   }
 
-  if (!reply.trim()) throw new Error('Empty assistant reply');
+  if (!reply.trim()) {
+    throw new Error('Empty assistant reply');
+  }
+
   return { reply: reply.trim(), conversationId };
 }
+
+export async function postAiChatMessage(body: AiChatRequest): Promise<AiChatResponse> {
+  const token = getAuthToken();
+  const res = await fetch(`${BACKEND_URL}/api/ai/chat`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      messages: body.messages,
+      locale: body.locale,
+      conversation_id: body.conversation_id ?? undefined,
+      stream: false,
+    }),
+  });
+
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw Object.assign(new Error(parseErrorMessage(json, 'Request failed')), {
+      status: res.status,
+      code: parseErrorCode(json),
+    });
+  }
+
+  const { reply, conversationId } = unwrapReply(json);
+  const cleanedReply = cleanAssistantText(reply);
+  if (!cleanedReply.trim()) {
+    throw new Error('Empty assistant reply');
+  }
+
+  return { reply: cleanedReply.trim(), conversationId };
+}
+
+export type AiChatFeedbackPayload = {
+  messageId: string;
+  rating: 'up' | 'down';
+  conversationId?: string | null;
+  locale?: string;
+  question?: string;
+  answer?: string;
+  comment?: string;
+  tags?: string[];
+};
+
+/**
+ * Log a rating for one assistant reply. Backend upserts on (user, message_id),
+ * so calling again with the opposite rating flips the vote.
+ */
+export async function submitAiChatFeedback(payload: AiChatFeedbackPayload): Promise<void> {
+  const token = getAuthToken();
+  const res = await fetch(`${BACKEND_URL}/api/ai/feedback`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      message_id: payload.messageId,
+      rating: payload.rating,
+      conversation_id: payload.conversationId ?? undefined,
+      locale: payload.locale,
+      question: payload.question,
+      answer: payload.answer,
+      comment: payload.comment,
+      tags: payload.tags,
+    }),
+  });
+
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw Object.assign(new Error(parseErrorMessage(json, 'Feedback failed')), {
+      status: res.status,
+    });
+  }
+}
+
