@@ -14,6 +14,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\AiChatController;
 use App\Http\Controllers\Api\AiConversationController;
 use App\Http\Controllers\Api\AiTranscriptController;
+use App\Services\AiChat\AiDailyRollup;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BackupSnapshotController;
 use App\Http\Controllers\Api\CampaignController;
@@ -45,6 +46,34 @@ Route::get('/health', fn () => response()->json([
     'service' => config('app.name'),
     'time' => now()->toIso8601String(),
 ]));
+
+/**
+ * External cron trigger to keep the AI assistant's daily rollup warm.
+ *
+ * This deployment has no cron/worker service (see api_backend/render.yaml) —
+ * only a single `web` service — so Laravel's scheduler never fires and
+ * `Schedule::command('ai:rollup')->hourly()` in routes/console.php never
+ * actually runs. Without this, the rollup only got refreshed inline by
+ * whichever chat request happened to hit stale data first (see
+ * AiDailyRollup's inline-rebuild guard for what happens then).
+ *
+ * Point any free external cron (cron-job.org, UptimeRobot, a GitHub Actions
+ * schedule) at `GET /api/internal/ai-rollup?token=<AI_ROLLUP_TOKEN>` every
+ * 10-15 minutes. Set AI_ROLLUP_TOKEN in the environment; the route refuses
+ * to run (and refuses to leak whether a token was configured) without a
+ * matching one.
+ */
+Route::middleware('throttle:6,1')->get('/internal/ai-rollup', function (\Illuminate\Http\Request $request) {
+    $expected = (string) env('AI_ROLLUP_TOKEN', '');
+    $given = (string) $request->query('token', '');
+    if ($expected === '' || ! hash_equals($expected, $given)) {
+        return response()->json(['error' => 'forbidden'], 403);
+    }
+
+    app(AiDailyRollup::class)->refreshAll();
+
+    return response()->json(['status' => 'ok', 'time' => now()->toIso8601String()]);
+});
 
 /**
  * Register the same group of routes under multiple prefixes.

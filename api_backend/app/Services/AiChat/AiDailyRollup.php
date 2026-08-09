@@ -68,6 +68,19 @@ final class AiDailyRollup
     /** Rebuilds triggered by a read are capped so a chat turn never stalls. */
     private const MAX_INLINE_REBUILD_DAYS = 400;
 
+    /**
+     * A FULL rebuild (first build ever, or rows deleted) inline on a chat
+     * request scans the entire source table before that request can answer.
+     * Nothing on this deployment runs `ai:rollup` on a schedule (no cron/
+     * worker service — see render.yaml), so a stale rollup used to mean every
+     * chat turn paid that cost until someone happened to run the command by
+     * hand. Past this many source rows, skip serving from the rollup instead:
+     * callers already fall back to a scoped live query (bounded by the actual
+     * plot/date window asked about), which is far cheaper than rebuilding
+     * every plot's entire history just to answer one question.
+     */
+    private const MAX_INLINE_FULL_REBUILD_ROWS = 5000;
+
     /** @var array<string,bool> per-request guard: refresh each type at most once. */
     private array $refreshed = [];
 
@@ -188,7 +201,7 @@ final class AiDailyRollup
      * so the caller falls back to querying raw rows rather than serving a
      * stale number.
      */
-    public function refresh(string $opType, bool $force = false): bool
+    public function refresh(string $opType, bool $force = false, bool $capInlineWork = true): bool
     {
         $table = self::TABLE[$opType] ?? null;
         if ($table === null || ! Schema::hasTable($table) || ! $this->available()) {
@@ -218,11 +231,29 @@ final class AiDailyRollup
 
         try {
             if ($fullRebuild) {
+                // Guard: don't let a chat request pay for scanning a source
+                // table that has never been rolled up (or was just pruned).
+                // That belongs to `ai:rollup` running out of band; here we
+                // just decline to serve from the rollup this turn. Background
+                // callers (refreshAll(), i.e. the CLI command and the cron
+                // route) pass capInlineWork: false to opt out — they're
+                // exactly the context this expensive work belongs in.
+                if ($capInlineWork && $sig['rows'] > self::MAX_INLINE_FULL_REBUILD_ROWS) {
+                    Log::info('ai.rollup.inline_full_rebuild_skipped', ['op_type' => $opType, 'rows' => $sig['rows']]);
+
+                    return false;
+                }
                 $this->rebuildDays($opType, $table, null);
             } else {
                 $days = $this->daysTouchedSince($table, (string) $state->built_at);
-                if (count($days) > self::MAX_INLINE_REBUILD_DAYS) {
-                    $this->rebuildDays($opType, $table, null);
+                if ($capInlineWork && count($days) > self::MAX_INLINE_REBUILD_DAYS) {
+                    // Escalating to a full rebuild here used to make a stale
+                    // rollup WORSE (bigger inline scan instead of skipping).
+                    // Decline instead and let the live-query fallback answer
+                    // this turn; `ai:rollup` catches the rollup up later.
+                    Log::info('ai.rollup.inline_incremental_rebuild_skipped', ['op_type' => $opType, 'days' => count($days)]);
+
+                    return false;
                 } elseif ($days !== []) {
                     $this->rebuildDays($opType, $table, $days);
                 }
@@ -249,11 +280,16 @@ final class AiDailyRollup
         }
     }
 
-    /** Rebuild every operation type. Used by the scheduled/CLI refresh. */
+    /**
+     * Rebuild every operation type. Used by the CLI command and the
+     * `/internal/ai-rollup` cron route — always a background context, so the
+     * inline-work cap that protects live chat requests does not apply here:
+     * this is precisely where that cost belongs.
+     */
     public function refreshAll(bool $force = false): void
     {
         foreach (array_keys(self::TABLE) as $type) {
-            $this->refresh($type, $force);
+            $this->refresh($type, $force, capInlineWork: false);
         }
     }
 
