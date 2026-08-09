@@ -65,35 +65,59 @@ return [
     'repair_api_keys' => $openrouterKeys('OPENROUTER_REPAIR_API_KEY'),
 
 
-    // Model fallback chain — first entry is primary; used in order on upstream failure.
-    // Defaults target OpenRouter's currently-available free tier; override per env if
-    // a slug is retired (OpenRouter returns 404 for removed models — surface as
-    // `model_not_found` in the client).
-    'models' => array_values(array_filter([
-        // Free tool-capable models. Ordered by tool-calling reliability.
-        env('OPENROUTER_MODEL',            'deepseek/deepseek-chat-v3.1:free'),
-        env('OPENROUTER_MODEL_FALLBACK',   'google/gemini-2.0-flash-exp:free'),
-        env('OPENROUTER_MODEL_FALLBACK_2', 'meta-llama/llama-3.3-70b-instruct:free'),
-        env('OPENROUTER_MODEL_FALLBACK_3', 'qwen/qwen-2.5-72b-instruct:free'),
-    ], static fn ($m) => is_string($m) && trim($m) !== '')),
+    // Model fallback chain — first entry is primary; used in order on upstream
+    // failure. Hardcoded on purpose (not env-driven) — this is a point-in-time
+    // pick from OpenRouter's live catalog, not something to override per
+    // environment. Edit the arrays directly when the roster needs to change.
+    //
+    // IMPORTANT — free-tier model slugs churn constantly on OpenRouter (providers
+    // add/retire `:free` variants with no warning; a retired slug 404s as
+    // `model_not_found`, which is NOT retried — the client just moves to the next
+    // entry, dead or not). The previous roster here (deepseek-chat-v3.1:free,
+    // gemini-2.0-flash-exp:free, llama-3.3-70b-instruct:free, qwen-2.5-72b-instruct:free)
+    // was ALL retired/paywalled as of the verification below — every call to any
+    // of them 404'd, which is what forced every request through the full
+    // recovery-pass/retry storm before limping to a degraded, tool-less answer.
+    //
+    // Verified LIVE against OpenRouter's own `GET /api/v1/models` on 2026-08-09 —
+    // filtered for `pricing.prompt == 0` AND `tools` in `supported_parameters`.
+    // Spread across 4 different providers on purpose so one provider retiring a
+    // slug doesn't take down the whole chain again; `openrouter/free` (an
+    // OpenRouter-managed auto-router over whatever free+tool-capable models are
+    // live right now) sits last as a self-healing safety net against the next
+    // retirement wave. Re-run the same check periodically (fetch
+    // openrouter.ai/api/v1/models and filter as above) and update these arrays.
+    'models' => [
+        'openai/gpt-oss-20b:free',
+        'nvidia/nemotron-3-ultra-550b-a55b:free',
+        'nvidia/nemotron-3-super-120b-a12b:free',
+        'google/gemma-4-31b-it:free',
+        'openrouter/free',
+    ],
 
-    // Optional dedicated model lanes. Planner = best tool-calling/data-finding;
-    // answer = concise final wording; repair = cheap language/format cleanup.
-    // Empty lanes fall back to `models` above.
-    'planner_models' => array_values(array_filter([
-        env('OPENROUTER_PLANNER_MODEL',            env('OPENROUTER_MODEL', 'deepseek/deepseek-chat-v3.1:free')),
-        env('OPENROUTER_PLANNER_MODEL_FALLBACK',   env('OPENROUTER_MODEL_FALLBACK_2', 'qwen/qwen-2.5-72b-instruct:free')),
-    ], static fn ($m) => is_string($m) && trim($m) !== '')),
+    // Dedicated model lanes. Planner = best tool-calling/data-finding; answer =
+    // concise final wording; repair = cheap language/format cleanup. Each lane
+    // is short (2-3 models) on purpose — every extra entry is another wasted
+    // round-trip once the ones ahead of it are dead — and each ends on
+    // `openrouter/free`, an OpenRouter-managed auto-router over whatever free
+    // tool-capable models are live right now, as a self-healing safety net.
+    'planner_models' => [
+        'openai/gpt-oss-20b:free',
+        'nvidia/nemotron-3-super-120b-a12b:free',
+        'openrouter/free',
+    ],
 
-    'answer_models' => array_values(array_filter([
-        env('OPENROUTER_ANSWER_MODEL',            env('OPENROUTER_MODEL_FALLBACK', 'google/gemini-2.0-flash-exp:free')),
-        env('OPENROUTER_ANSWER_MODEL_FALLBACK',   env('OPENROUTER_MODEL_FALLBACK_3', 'meta-llama/llama-3.3-70b-instruct:free')),
-    ], static fn ($m) => is_string($m) && trim($m) !== '')),
+    'answer_models' => [
+        'openai/gpt-oss-20b:free',
+        'google/gemma-4-31b-it:free',
+        'openrouter/free',
+    ],
 
-    'repair_models' => array_values(array_filter([
-        env('OPENROUTER_REPAIR_MODEL',            env('OPENROUTER_ANSWER_MODEL', 'qwen/qwen-2.5-72b-instruct:free')),
-        env('OPENROUTER_REPAIR_MODEL_FALLBACK',   env('OPENROUTER_MODEL_FALLBACK', 'google/gemini-2.0-flash-exp:free')),
-    ], static fn ($m) => is_string($m) && trim($m) !== '')),
+    'repair_models' => [
+        'nvidia/nemotron-3-nano-30b-a3b:free',
+        'openai/gpt-oss-20b:free',
+        'openrouter/free',
+    ],
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
     // Accuracy over latency: a listing answer ("les 12 traitements de P4") needs
@@ -113,21 +137,25 @@ return [
     'referer' => env('OPENROUTER_REFERER', env('APP_URL', 'http://localhost')),
     'title'   => env('OPENROUTER_TITLE', 'Flehty Assistant'),
 
-    // Timeouts (seconds). 0 = no cap (let the model think as long as it needs).
-    // Only the connect phase and the per-chunk idle guard stay bounded, so a
-    // dead socket still fails fast while a slow-but-alive answer never gets cut.
+    // Timeouts (seconds). A struggling free-tier attempt used to be allowed to
+    // hang indefinitely (0 = unlimited) before failing over to the next model —
+    // that, multiplied by several recovery passes, is what drove "simple"
+    // questions past 300s end-to-end. Bounding it here just makes a stuck
+    // attempt fail over faster; it never cuts off a model that is actively
+    // producing tokens (streams are governed by stream_idle_timeout instead).
     'connect_timeout'   => (int) env('OPENROUTER_CONNECT_TIMEOUT', 30),
-    'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 0),  // 0 = unlimited wall clock
+    'request_timeout'   => (int) env('OPENROUTER_REQUEST_TIMEOUT', 30),
     'stream_idle_timeout' => (int) env('OPENROUTER_STREAM_IDLE_TIMEOUT', 300), // per-chunk idle only
 
 
     // Retry / backoff.
-    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 3),
+    'max_retries'       => (int) env('OPENROUTER_MAX_RETRIES', 2),
     'retry_base_ms'     => (int) env('OPENROUTER_RETRY_BASE_MS', 400),
     'retry_max_ms'      => (int) env('OPENROUTER_RETRY_MAX_MS', 4000),
     // Full passes over the whole model fallback chain before giving up.
-    // Never surface "service indisponible" while an untried model remains.
-    'recovery_passes'   => (int) env('OPENROUTER_RECOVERY_PASSES', 3),
+    // Never surface "service indisponible" while an untried model remains —
+    // but each extra pass multiplies worst-case latency, so keep it lean.
+    'recovery_passes'   => (int) env('OPENROUTER_RECOVERY_PASSES', 1),
 
     // Shorter quarantine: a rate-limited key recovers in seconds, not minutes,
     // and keeping it benched shrinks the usable key pool during a burst.
@@ -153,7 +181,10 @@ return [
         // Accuracy first: give the model enough rounds to cross-check a figure
         // with a second tool (e.g. confirm a zero-cost result against the
         // unfiltered treatment list) instead of answering from one lookup.
-        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 24),
+        // A real question rarely needs more than a handful of rounds — 24 only
+        // ever gets exercised when a weak free model loops, which is exactly
+        // what drives multi-minute replies. Capped lower; still generous.
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 8),
 
         'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 20000),
 
@@ -206,8 +237,11 @@ return [
     'evidence_footer' => (bool) env('AI_EVIDENCE_FOOTER', false),
 
     // Maximum self-check repair rounds. Accuracy beats latency: each round
-    // re-validates the rewrite and keeps the best candidate seen.
-    'repair_passes' => (int) env('AI_REPAIR_PASSES', 3),
+    // re-validates the rewrite and keeps the best candidate seen. Each round
+    // is a full ~100s model round-trip on the free tier, so this is capped at
+    // 2 — a violation that survives two rewrites essentially never clears on
+    // a third with the same model.
+    'repair_passes' => (int) env('AI_REPAIR_PASSES', 2),
 
 
 
