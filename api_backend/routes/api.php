@@ -57,14 +57,14 @@ Route::get('/health', fn () => response()->json([
  * whichever chat request happened to hit stale data first (see
  * AiDailyRollup's inline-rebuild guard for what happens then).
  *
- * Point any free external cron (cron-job.org, UptimeRobot, a GitHub Actions
- * schedule) at `GET /api/internal/ai-rollup?token=<AI_ROLLUP_TOKEN>` every
- * 10-15 minutes. Set AI_ROLLUP_TOKEN in the environment; the route refuses
- * to run (and refuses to leak whether a token was configured) without a
- * matching one.
+ * A GitHub Actions workflow (.github/workflows/ai-rollup-cron.yml) hits
+ * `GET https://api.flehty.com/api/internal/ai-rollup?token=...` every 15
+ * minutes. The token is hardcoded (not env-driven) so this works with zero
+ * Render dashboard configuration — `AI_ROLLUP_TOKEN` in the environment can
+ * still override it if it ever needs to be rotated without a code change.
  */
 Route::middleware('throttle:6,1')->get('/internal/ai-rollup', function (\Illuminate\Http\Request $request) {
-    $expected = (string) env('AI_ROLLUP_TOKEN', '');
+    $expected = (string) env('AI_ROLLUP_TOKEN', 'f258ff38ba58e1eae7b1c1ba2d449bcab8fb44828482271abf52aa292232d245');
     $given = (string) $request->query('token', '');
     if ($expected === '' || ! hash_equals($expected, $given)) {
         return response()->json(['error' => 'forbidden'], 403);

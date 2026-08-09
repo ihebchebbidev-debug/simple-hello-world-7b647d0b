@@ -1,0 +1,22 @@
+name: AI rollup keep-warm
+
+# Keeps the AI assistant's daily-operations rollup fresh. Render only runs a
+# single `web` service (see api_backend/render.yaml) — no cron/worker — so
+# Laravel's own scheduler never fires. Without an external trigger, the
+# rollup only gets rebuilt inline by whichever chat request happens to hit
+# stale data first, which is what used to make simple questions take 100+
+# seconds. This hits the API every 15 minutes instead so that rebuild always
+# happens in the background, never inside a user's request.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger AI rollup refresh
+        run: |
+          curl -fsS --max-time 60 \
+            "https://api.flehty.com/api/internal/ai-rollup?token=f258ff38ba58e1eae7b1c1ba2d449bcab8fb44828482271abf52aa292232d245"
