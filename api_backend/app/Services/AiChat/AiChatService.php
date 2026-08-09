@@ -58,6 +58,7 @@ final class AiChatService
      */
     public function reply(array $messages, string $locale, ?string $conversationId = null, int|string|null $subjectId = null): array
     {
+        $t0 = microtime(true);
         $id = $conversationId ?: (string) Str::uuid();
 
         // Cheap cache key on messages+locale+data stamp — avoids building the heavy
@@ -65,11 +66,13 @@ final class AiChatService
         $earlyKey = $this->earlyCacheKey($messages, $locale);
         if (! $this->isDispute($this->lastUserMessage($messages))
             && ($cached = $this->cacheGet($earlyKey)) !== null) {
+            $this->logTiming('cache_hit', $t0);
             return ['reply' => $cached, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => true];
         }
 
         if ($this->budget->isExhausted($subjectId)) {
             Log::info('ai.chat.budget_exhausted', ['subject' => (string) $subjectId]);
+            $this->logTiming('budget_exhausted', $t0);
             return [
                 'reply' => $this->budgetExhaustedMessage($locale), 'conversation_id' => $id,
                 'revised' => false, 'violations' => [], 'degraded' => true,
@@ -81,11 +84,13 @@ final class AiChatService
         // wording layer that could mis-quote them.
         if (($fast = $this->fastAnswer($messages, $locale)) !== null) {
             $this->cachePut($earlyKey, $fast['reply']);
+            $this->logTiming('fast_answer', $t0, ['tool' => $fast['call']['name']]);
             return ['reply' => $fast['reply'], 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
         if (($shortcut = $this->deterministicFarmAnswer($messages, $locale)) !== null) {
             $this->cachePut($earlyKey, $shortcut);
+            $this->logTiming('deterministic', $t0);
             return ['reply' => $shortcut, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
@@ -97,7 +102,7 @@ final class AiChatService
         // round is exactly what let a wrongly filtered pre-fetch through.
         $usedAgent = $agentEnabled;
 
-
+        $modelT0 = microtime(true);
         if ($usedAgent) {
             try {
                 $buf = '';
@@ -118,6 +123,7 @@ final class AiChatService
 
             $reply = $this->openRouter->chat($payload, 'answer');
         }
+        $modelMs = (int) round((microtime(true) - $modelT0) * 1000);
         $this->recordUsage($subjectId, $payload);
 
         $evidence = array_merge(
@@ -131,7 +137,9 @@ final class AiChatService
             $reply = $this->rescueEmptyReply($messages, $locale, $payload);
         }
 
+        $selfCheckT0 = microtime(true);
         $final = $this->selfCheck($reply, $messages, $locale, $payload, $evidence);
+        $selfCheckMs = (int) round((microtime(true) - $selfCheckT0) * 1000);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
         }
@@ -140,6 +148,12 @@ final class AiChatService
             $this->cachePut($earlyKey, $final['reply']);
         }
 
+        $this->logTiming($usedAgent ? 'agent' : 'direct', $t0, [
+            'model_ms'      => $modelMs,
+            'self_check_ms' => $selfCheckMs,
+            'revised'       => $final['revised'],
+        ]);
+
         return [
             'reply'           => $final['reply'],
             'conversation_id' => $id,
@@ -147,6 +161,25 @@ final class AiChatService
             'violations'      => $final['violations'],
             'cached'          => false,
         ];
+    }
+
+    /**
+     * One structured log line per request: which path answered it and how
+     * long it took. Anything at/above 3s logs as a warning so slow requests
+     * are trivially filterable in Render's logs without guesswork — this is
+     * what should be checked first the next time a question "feels slow".
+     *
+     * @param array<string, mixed> $extra
+     */
+    private function logTiming(string $path, float $t0, array $extra = []): void
+    {
+        $ms = (int) round((microtime(true) - $t0) * 1000);
+        $payload = array_merge(['path' => $path, 'total_ms' => $ms], $extra);
+        if ($ms >= 3000) {
+            Log::warning('ai.chat.timing', $payload);
+        } else {
+            Log::info('ai.chat.timing', $payload);
+        }
     }
 
     /**
@@ -216,18 +249,21 @@ final class AiChatService
         int|string|null $subjectId = null,
         ?callable $onEvent = null,
     ): array {
+        $t0 = microtime(true);
         $id = $conversationId ?: (string) Str::uuid();
 
         $earlyKey = $this->earlyCacheKey($messages, $locale);
         if (! $this->isDispute($this->lastUserMessage($messages))
             && ($cached = $this->cacheGet($earlyKey)) !== null) {
             $onDelta($cached);
+            $this->logTiming('cache_hit', $t0);
             return ['reply' => $cached, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => true];
         }
 
         if ($this->budget->isExhausted($subjectId)) {
             $msg = $this->budgetExhaustedMessage($locale);
             $onDelta($msg);
+            $this->logTiming('budget_exhausted', $t0);
             return ['reply' => $msg, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'degraded' => true];
         }
 
@@ -238,12 +274,14 @@ final class AiChatService
             }
             $onDelta($fast['reply']);
             $this->cachePut($earlyKey, $fast['reply']);
+            $this->logTiming('fast_answer', $t0, ['tool' => $fast['call']['name']]);
             return ['reply' => $fast['reply'], 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
         if (($shortcut = $this->deterministicFarmAnswer($messages, $locale)) !== null) {
             $onDelta($shortcut);
             $this->cachePut($earlyKey, $shortcut);
+            $this->logTiming('deterministic', $t0);
             return ['reply' => $shortcut, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
@@ -260,6 +298,7 @@ final class AiChatService
         // No fast path — see reply(). The agent always plans and verifies.
         $usedAgent = $agentEnabled;
 
+        $modelT0 = microtime(true);
         if ($usedAgent) {
             // Surface what the deterministic pre-fetch already resolved, so the
             // UI shows those lookups even though the agent round follows.
@@ -288,6 +327,7 @@ final class AiChatService
             $trackedDelta->flush();
             $streamed = $sanitizer->sanitize($streamed);
         }
+        $modelMs = (int) round((microtime(true) - $modelT0) * 1000);
 
         $this->recordUsage($subjectId, $payload);
 
@@ -302,7 +342,9 @@ final class AiChatService
             $streamed = $this->rescueEmptyReply($messages, $locale, $payload);
         }
 
+        $selfCheckT0 = microtime(true);
         $final = $this->selfCheck($streamed, $messages, $locale, $payload, $evidence);
+        $selfCheckMs = (int) round((microtime(true) - $selfCheckT0) * 1000);
         if ($final['revised']) {
             $this->recordUsage($subjectId, $payload);
         }
@@ -328,6 +370,11 @@ final class AiChatService
             $this->cachePut($earlyKey, $final['reply']);
         }
 
+        $this->logTiming($usedAgent ? 'agent' : 'direct', $t0, [
+            'model_ms'      => $modelMs,
+            'self_check_ms' => $selfCheckMs,
+            'revised'       => $final['revised'],
+        ]);
 
         return [
             'reply'           => $final['reply'],
