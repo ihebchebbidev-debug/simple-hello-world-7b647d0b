@@ -42,6 +42,17 @@ final class AiChatService
     ) {}
 
     /**
+     * Deterministic playbook for the ~20 questions the farm asks daily.
+     * Built lazily from the planner + registry already injected here.
+     */
+    private ?AiFastAnswers $fastAnswers = null;
+
+    private function fastAnswers(): AiFastAnswers
+    {
+        return $this->fastAnswers ??= new AiFastAnswers($this->planner, $this->toolRegistry);
+    }
+
+    /**
      * @param  array<int, array{role: string, content: string}>  $messages
      * @return array{reply: string, conversation_id: string, revised?: bool, violations?: array<int, string>, cached?: bool, degraded?: bool}
      */
@@ -63,6 +74,14 @@ final class AiChatService
                 'reply' => $this->budgetExhaustedMessage($locale), 'conversation_id' => $id,
                 'revised' => false, 'violations' => [], 'degraded' => true,
             ];
+        }
+
+        // Playbook shortcut: a known question resolved to a single data tool is
+        // rendered straight from that tool's numbers — no model round, so no
+        // wording layer that could mis-quote them.
+        if (($fast = $this->fastAnswer($messages, $locale)) !== null) {
+            $this->cachePut($earlyKey, $fast['reply']);
+            return ['reply' => $fast['reply'], 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
         if (($shortcut = $this->deterministicFarmAnswer($messages, $locale)) !== null) {
@@ -210,6 +229,16 @@ final class AiChatService
             $msg = $this->budgetExhaustedMessage($locale);
             $onDelta($msg);
             return ['reply' => $msg, 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'degraded' => true];
+        }
+
+        if (($fast = $this->fastAnswer($messages, $locale)) !== null) {
+            if ($onEvent !== null) {
+                $onEvent(['type' => 'tool_start', 'name' => $fast['call']['name'], 'args' => $fast['call']['args']]);
+                $onEvent(['type' => 'tool_end', 'name' => $fast['call']['name'], 'ok' => true]);
+            }
+            $onDelta($fast['reply']);
+            $this->cachePut($earlyKey, $fast['reply']);
+            return ['reply' => $fast['reply'], 'conversation_id' => $id, 'revised' => false, 'violations' => [], 'cached' => false];
         }
 
         if (($shortcut = $this->deterministicFarmAnswer($messages, $locale)) !== null) {
@@ -572,6 +601,35 @@ INSTR;
      *
      * @param  array<int, array{role: string, content: string}>  $messages
      */
+    /**
+     * @param  array<int, array{role: string, content: string}>  $messages
+     * @return array{reply: string, call: array{name: string, args: array<string, mixed>}, result: array<string, mixed>}|null
+     */
+    private function fastAnswer(array $messages, string $locale): ?array
+    {
+        try {
+            $fast = $this->fastAnswers()->answer($messages, $locale);
+        } catch (\Throwable $e) {
+            Log::warning('ai.chat.fast_answer_failed', ['message' => $e->getMessage()]);
+
+            return null;
+        }
+        if ($fast === null) {
+            return null;
+        }
+
+        Log::info('ai.chat.fast_answer', ['tool' => $fast['call']['name']]);
+        // The footer builder expects the same {name,args,result} shape the
+        // agent produces, so a playbook answer stays provenance-checkable.
+        $this->lastPrefetchCalls = [$fast['call'] + ['result' => $fast['result']]];
+        $footer = $this->evidenceFooter(false, $locale, $fast['reply']);
+        if ($footer !== '') {
+            $fast['reply'] .= $footer;
+        }
+
+        return $fast;
+    }
+
     private function deterministicFarmAnswer(array $messages, string $locale): ?string
     {
         $question = '';

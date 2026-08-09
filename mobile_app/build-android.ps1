@@ -24,7 +24,7 @@ function Write-ErrorAndExit($message) {
 Set-Location -Path $PSScriptRoot
 
 # ── 0. Redirect Gradle home OFF OneDrive ──────────────────────────────────────
-$localGradleHome = Join-Path $env:USERPROFILE "gradle_home"
+$localGradleHome = Join-Path $env:USERPROFILE "gradle_home_clean"
 if (-Not (Test-Path $localGradleHome)) {
     Write-Info "Creating local Gradle home at $localGradleHome (off OneDrive)..."
     New-Item -ItemType Directory -Path $localGradleHome -Force | Out-Null
@@ -34,6 +34,16 @@ Write-Info "GRADLE_USER_HOME set to: $env:GRADLE_USER_HOME"
 
 # Also set the project-level Gradle cache directory off OneDrive
 $env:GRADLE_OPTS = "-Dgradle.user.home=$localGradleHome"
+
+# ── 0b. Purge the transformed-jar cache ──────────────────────────────────────
+# "Failed to create Jar file ... jars-9\...\bcprov-jdk18on-*.jar" comes from a
+# corrupt/partial entry written by an earlier failed run; Gradle never repairs it.
+$jarsCache = Join-Path $localGradleHome "caches\jars-9"
+if (Test-Path $jarsCache) {
+    Write-Info "Removing stale Gradle jar cache ($jarsCache)..."
+    Remove-Item -Recurse -Force $jarsCache -ErrorAction SilentlyContinue
+}
+
 
 # ── 1. npm install ────────────────────────────────────────────────────────────
 Write-Info "Installing npm dependencies..."
@@ -72,6 +82,27 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Success "App icons generated."
 
+# ── 3c. Ensure the Gradle wrapper supports the installed JDK ─────────────────
+# JDK 21 emits class file major version 65, which Gradle < 8.5 cannot read
+# ("Unsupported class file major version 65"). Older android/ folders generated
+# by Capacitor 6 ship Gradle 8.2, so pin a modern wrapper before building.
+$requiredGradle = "8.11.1"
+$wrapperProps = Join-Path $PSScriptRoot "android\gradle\wrapper\gradle-wrapper.properties"
+if (Test-Path $wrapperProps) {
+    $props = Get-Content $wrapperProps -Raw
+    if ($props -match "gradle-(\d+)\.(\d+)") {
+        $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+        if ($major -lt 8 -or ($major -eq 8 -and $minor -lt 5)) {
+            Write-Info "Gradle wrapper $major.$minor is too old for modern JDKs; upgrading to $requiredGradle..."
+            $props = $props -replace "gradle-\d+(\.\d+)*(-\w+)?-(all|bin)\.zip", "gradle-$requiredGradle-all.zip"
+            Set-Content -Path $wrapperProps -Value $props -NoNewline
+            Write-Success "Gradle wrapper upgraded to $requiredGradle."
+        }
+    }
+}
+
+
+
 # ── 4. Clean old Gradle build caches inside the project ──────────────────────
 $androidDir = Join-Path -Path $PSScriptRoot -ChildPath "android"
 $gradlePath = Join-Path -Path $androidDir -ChildPath "gradlew.bat"
@@ -79,8 +110,17 @@ if (-Not (Test-Path $gradlePath)) {
     Write-ErrorAndExit "gradlew.bat not found at android\gradlew.bat. Make sure Android project was generated."
 }
 
-Write-Info "Cleaning previous Gradle build..."
+Write-Info "Aggressively cleaning previous Gradle build and caches..."
 Push-Location -Path $androidDir
+
+# Kill any existing Gradle daemons to release file locks
+& $gradlePath --stop 2>&1 | Out-Null
+
+# Explicitly wipe local project caches to prevent 'Corrupt serialized resolution result'
+Remove-Item -Recurse -Force .gradle -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force app\build -ErrorAction SilentlyContinue
+
 & $gradlePath clean 2>&1 | Out-Null
 Pop-Location
 Write-Success "Gradle clean complete."
@@ -88,7 +128,7 @@ Write-Success "Gradle clean complete."
 # ── 5. Build release APK ─────────────────────────────────────────────────────
 Write-Info "Building Android release APK (this may take a few minutes on first run)..."
 Push-Location -Path $androidDir
-& $gradlePath assembleRelease --no-daemon --stacktrace 2>&1
+& $gradlePath assembleRelease --no-daemon --no-build-cache --no-configuration-cache --stacktrace 2>&1
 $exitCode = $LASTEXITCODE
 Pop-Location
 

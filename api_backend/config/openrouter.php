@@ -136,6 +136,14 @@ return [
 
 
 
+    // Deterministic playbook answers.
+    // A question the planner resolves to ONE known data tool (water/ha,
+    // unités d'azote, dernières irrigations, coût/ha, prix produit, surface…)
+    // is answered straight from that tool's numbers, with no model round:
+    // instant, and impossible to mis-word. Anything ambiguous, disputed or
+    // multi-tool still goes through the full agent route.
+    'fast_answers' => (bool) env('OPENROUTER_FAST_ANSWERS', true),
+
     // Tool-calling agent loop.
     // When enabled, the assistant plans + calls typed data tools (aggregations,
     // per-plot/per-campaign/YoY breakdowns, catalog lookups) instead of relying
