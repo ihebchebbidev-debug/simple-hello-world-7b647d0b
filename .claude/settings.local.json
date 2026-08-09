@@ -11,7 +11,8 @@
       "PowerShell(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\ihebc\\\\OneDrive\\\\Desktop\\\\agrysync_prod\\\\api_backend\\\\app\\\\Http\\\\Requests\\\\BackupSnapshot\")",
       "Bash(node -e \"const fs=require\\('fs'\\); const buf=fs.readFileSync\\('src/assets/logo-icon.png'\\); const w=buf.readUInt32BE\\(16\\); const h=buf.readUInt32BE\\(20\\); console.log\\('Width:',w,'Height:',h,'Bytes:',buf.length\\);\")",
       "Bash(npx cap *)",
-      "Bash(gradlew.bat assembleDebug)"
+      "Bash(gradlew.bat assembleDebug)",
+      "Bash(where adb *)"
     ]
   }
 }
