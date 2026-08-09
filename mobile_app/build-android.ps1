@@ -35,13 +35,19 @@ Write-Info "GRADLE_USER_HOME set to: $env:GRADLE_USER_HOME"
 # Also set the project-level Gradle cache directory off OneDrive
 $env:GRADLE_OPTS = "-Dgradle.user.home=$localGradleHome"
 
-# ── 0b. Purge the transformed-jar cache ──────────────────────────────────────
-# "Failed to create Jar file ... jars-9\...\bcprov-jdk18on-*.jar" comes from a
-# corrupt/partial entry written by an earlier failed run; Gradle never repairs it.
-$jarsCache = Join-Path $localGradleHome "caches\jars-9"
-if (Test-Path $jarsCache) {
-    Write-Info "Removing stale Gradle jar cache ($jarsCache)..."
-    Remove-Item -Recurse -Force $jarsCache -ErrorAction SilentlyContinue
+# ── 0b. Purge ALL Gradle caches that can cause corruption ─────────────────────
+# The "Corrupt serialized resolution result" and "Problems reading data from
+# Binary store" errors come from stale/corrupt files in caches/ and .tmp/.
+# Nuking them forces a clean re-resolve on next build.
+$cacheDirs = @(
+    (Join-Path $localGradleHome "caches"),
+    (Join-Path $localGradleHome ".tmp")
+)
+foreach ($dir in $cacheDirs) {
+    if (Test-Path $dir) {
+        Write-Info "Removing Gradle cache: $dir ..."
+        Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+    }
 }
 
 
@@ -110,16 +116,44 @@ if (-Not (Test-Path $gradlePath)) {
     Write-ErrorAndExit "gradlew.bat not found at android\gradlew.bat. Make sure Android project was generated."
 }
 
-Write-Info "Aggressively cleaning previous Gradle build and caches..."
+Write-Info "Stopping Gradle daemons..."
 Push-Location -Path $androidDir
-
-# Kill any existing Gradle daemons to release file locks
 & $gradlePath --stop 2>&1 | Out-Null
+Stop-Process -Name java -Force -ErrorAction SilentlyContinue
+Pop-Location
 
-# Explicitly wipe local project caches to prevent 'Corrupt serialized resolution result'
+Write-Info "Aggressively cleaning previous Gradle build and caches..."
+
+# ── 0b. Purge ALL Gradle caches that can cause corruption ─────────────────────
+# The "Corrupt serialized resolution result" and "Problems reading data from
+# Binary store" errors come from stale/corrupt files in caches/ and .tmp/.
+# Nuking them forces a clean re-resolve on next build.
+$cacheDirs = @(
+    (Join-Path $localGradleHome "caches"),
+    (Join-Path $localGradleHome ".tmp"),
+    (Join-Path $localGradleHome "daemon")
+)
+foreach ($dir in $cacheDirs) {
+    if (Test-Path $dir) {
+        Write-Info "Removing Gradle cache: $dir ..."
+        Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+    }
+}
+
+Push-Location -Path $androidDir
+# Wipe ALL local project caches and build dirs for every subproject
 Remove-Item -Recurse -Force .gradle -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force app\build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force capacitor-cordova-android-plugins\build -ErrorAction SilentlyContinue
+
+# Also wipe build dirs inside node_modules capacitor subprojects
+Get-ChildItem -Path ..\node_modules\@capacitor -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $subBuild = Join-Path $_.FullName "android\build"
+    if (Test-Path $subBuild) {
+        Remove-Item -Recurse -Force $subBuild -ErrorAction SilentlyContinue
+    }
+}
 
 & $gradlePath clean 2>&1 | Out-Null
 Pop-Location
