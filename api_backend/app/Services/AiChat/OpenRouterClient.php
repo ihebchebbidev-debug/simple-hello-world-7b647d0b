@@ -131,9 +131,14 @@ final class OpenRouterClient
                     $this->breaker->recordFailure(hard: true);
                     $lastError = $e->getMessage();
                     $this->lastStatus = 0;
-                    $this->sleepBackoff($attempt, null);
+                    // Only wait when a retry on this model actually follows;
+                    // otherwise we sleep and then move on anyway.
+                    if ($attempt < $maxRetries) {
+                        $this->sleepBackoff($attempt, null);
+                    }
                     continue;
                 }
+
 
                 if ($response->successful()) {
                     $json    = $response->json();
@@ -255,9 +260,12 @@ final class OpenRouterClient
                     $this->breaker->recordFailure(hard: true);
                     $lastError = $e->getMessage();
                     $this->lastStatus = 0;
-                    $this->sleepBackoff($attempt, null);
+                    if ($attempt < $maxRetries) {
+                        $this->sleepBackoff($attempt, null);
+                    }
                     continue;
                 }
+
 
                 if (! $response->successful()) {
                     $status = $response->status();
@@ -288,9 +296,12 @@ final class OpenRouterClient
                     if ($emittedBytes === 0) {
                         $this->breaker->recordFailure();
                         $lastError = 'stream interrupted: '.$e->getMessage();
-                        $this->sleepBackoff($attempt, null);
+                        if ($attempt < $maxRetries) {
+                            $this->sleepBackoff($attempt, null);
+                        }
                         continue;
                     }
+
                     // Text already reached the user: keep it instead of turning a
                     // usable partial answer into an error.
                     $this->breaker->recordFailure();
@@ -575,6 +586,13 @@ final class OpenRouterClient
         };
     }
 
+    /**
+     * Wait before the next attempt — but never longer than the wall-clock
+     * budget can afford. A 4 s backoff burned right before the deadline is a
+     * pure 4 s addition to the user's wait: the retry it precedes can no longer
+     * start, so the sleep buys nothing. Skip it entirely when there is no room
+     * for another attempt, and otherwise clamp it to the spare time.
+     */
     private function sleepBackoff(int $attempt, ?Response $response): void
     {
         $base = max(50, (int) config('openrouter.retry_base_ms', 400));
@@ -593,9 +611,23 @@ final class OpenRouterClient
             }
         }
 
+        $left = AiDeadline::remaining();
+        if ($left !== null) {
+            // Not enough budget left to run the attempt this sleep is for.
+            if ($left < self::MIN_ATTEMPT_SECONDS) {
+                return;
+            }
+            $spareMs = (int) max(0, ($left - self::MIN_ATTEMPT_SECONDS) * 1000);
+            $ms = min($ms, $spareMs);
+            if ($ms <= 0) {
+                return;
+            }
+        }
+
         Log::info('ai.chat.retry_backoff', ['attempt' => $attempt, 'sleep_ms' => $ms]);
         usleep($ms * 1000);
     }
+
 
     /** @param array<string, mixed> $json */
     private function captureUsage(array $json): void
