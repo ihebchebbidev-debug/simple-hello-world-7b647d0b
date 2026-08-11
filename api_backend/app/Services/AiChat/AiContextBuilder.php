@@ -24,7 +24,7 @@ use Illuminate\Support\Facades\Schema;
  */
 final class AiContextBuilder
 {
-    private const KEY_PREFIX = 'ai_chat.ctx.v4';
+    private const KEY_PREFIX = 'ai_chat.ctx.v5';
 
     /** Per-section TTLs (seconds) — used as fallback if the stamp never changes. */
     private const TTL = [
@@ -848,12 +848,29 @@ final class AiContextBuilder
         $out = ['fertilizers' => [], 'pesticides' => [], 'pests' => []];
 
         if ($this->hasTable('fertilizers')) {
-            $cols = array_values(array_filter(['name', 'n_percent', 'p_percent', 'k_percent'], fn ($c) => $this->hasColumn('fertilizers', $c)));
+            // Full nutrient composition (N-P-K + Mg-Ca-S) and unit, exactly as
+            // shown in the Engrais catalogue screen, so composition questions
+            // never fall back to guessing.
+            $nutrients = ['n_percent', 'p_percent', 'k_percent', 'mg_percent', 'ca_percent', 's_percent'];
+            $cols = array_values(array_filter(
+                array_merge(['name', 'unit'], $nutrients),
+                fn ($c) => $this->hasColumn('fertilizers', $c),
+            ));
+            if (! in_array('name', $cols, true)) $cols = array_merge(['name'], $cols);
             $q = DB::table('fertilizers');
             if ($this->hasColumn('fertilizers', 'is_active')) $q->where('is_active', true);
-            $out['fertilizers'] = $q->select($cols ?: ['*'])
-                ->orderBy('name')->limit(40)->get()
-                ->map(fn ($r) => ['name' => $r->name ?? null, 'n' => (float) ($r->n_percent ?? 0), 'p' => (float) ($r->p_percent ?? 0), 'k' => (float) ($r->k_percent ?? 0)])
+            $out['fertilizers'] = $q->select($cols)
+                ->orderBy('name')->limit(300)->get()
+                ->map(fn ($r) => [
+                    'name' => $r->name ?? null,
+                    'unit' => $r->unit ?? null,
+                    'n'    => (float) ($r->n_percent ?? 0),
+                    'p'    => (float) ($r->p_percent ?? 0),
+                    'k'    => (float) ($r->k_percent ?? 0),
+                    'mg'   => (float) ($r->mg_percent ?? 0),
+                    'ca'   => (float) ($r->ca_percent ?? 0),
+                    's'    => (float) ($r->s_percent ?? 0),
+                ])
                 ->all();
         }
         if ($this->hasTable('pesticides')) {
@@ -868,8 +885,10 @@ final class AiContextBuilder
             if ($this->hasColumn('pesticides', 'unit')) $cols[] = 'unit';
             $q = DB::table('pesticides');
             if ($this->hasColumn('pesticides', 'is_active')) $q->where('is_active', true);
+            // The treatment catalogue is long (dozens of products); truncating
+            // it made the model invent compositions for the missing tail.
             $out['pesticides'] = $q->select($cols)
-                ->orderBy('name')->limit(40)->get()
+                ->orderBy('name')->limit(300)->get()
                 ->map(fn ($r) => [
                     'name' => $r->name ?? null,
                     'chemical_composition' => $ingredientCol ? ($r->{$ingredientCol} ?? null) : null,

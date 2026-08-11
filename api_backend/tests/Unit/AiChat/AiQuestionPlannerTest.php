@@ -54,7 +54,23 @@ final class AiQuestionPlannerTest extends TestCase
         $this->assertNotNull($args);
         $this->assertSame('P12', $args['plot']);
         $this->assertSame(now()->toDateString(), $args['to']);
+        // "à la date d'aujourd'hui" is a cut-off: everything the plot received
+        // UP TO today, not only what was applied today.
+        $this->assertNull($args['from'] ?? null);
     }
+
+    public function test_a_stated_cut_off_date_opens_the_window_start(): void
+    {
+        $args = $this->argsFor(
+            $this->plan("Quelle quantité d'eau / ha a reçu la parcelle P12 à la date du 30/06/2026"),
+            'water_per_ha',
+        );
+
+        $this->assertNotNull($args);
+        $this->assertNull($args['from'] ?? null);
+        $this->assertSame('2026-06-30', $args['to']);
+    }
+
 
     public function test_nitrogen_units_to_date(): void
     {

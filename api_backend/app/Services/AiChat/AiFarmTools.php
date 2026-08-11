@@ -1097,6 +1097,37 @@ trait AiFarmTools
             ];
         }
 
+        // Distinct products over the WHOLE window, not just the listed rows.
+        // "Quels produits / quelles compositions contre le mildiou ?" is a
+        // question about products, and letting the model dedupe a truncated
+        // row list is exactly where it invents or drops one.
+        $productsUsed = [];
+        try {
+            $agg = (clone $q)
+                ->select(
+                    'pe.name as product',
+                    'pe.chemical_composition',
+                    DB::raw('COUNT(*) AS applications'),
+                    DB::raw('MIN(po.operation_date) AS first_date'),
+                    DB::raw('MAX(po.operation_date) AS last_date'),
+                )
+                ->groupBy('pe.name', 'pe.chemical_composition')
+                ->orderByRaw('MIN(po.operation_date) asc')
+                ->limit(40)
+                ->get();
+            foreach ($agg as $a) {
+                $productsUsed[] = [
+                    'product'      => $a->product,
+                    'composition'  => $a->chemical_composition,
+                    'applications' => (int) $a->applications,
+                    'first_date'   => (string) $a->first_date,
+                    'last_date'    => (string) $a->last_date,
+                ];
+            }
+        } catch (Throwable) {
+            $productsUsed = [];
+        }
+
         $out = [
             'window'          => ['from' => $from, 'to' => $to],
             'applied_filters' => $this->appliedFilters($args, $from, $to, $names),
@@ -1107,6 +1138,8 @@ trait AiFarmTools
             'total_cost_tnd'  => round($windowCost, 2),
             'order'           => $order,
             'rows'            => $rows,
+            'products_used'   => $productsUsed,
+            'products_used_note' => 'Distinct products over the whole window (never truncated by `limit`). Answer "which products / which compositions" questions from this list, and quote a composition only if it is non-null here.',
             'returned'        => count($rows),
             // This tool answers a LISTING question. A "quels traitements…"
             // question must be answered with the count and the individual
@@ -1187,15 +1220,49 @@ trait AiFarmTools
 
         $norm = self::normLabel($needle);
         $aliases = [
-            'mildiou' => ['mildiou', 'mildew', 'plasmopara', 'downy mildew'],
-            'oidium'  => ['oïdium', 'oidium', 'powdery mildew', 'erysiphe', 'uncinula'],
-            'botrytis'=> ['botrytis', 'pourriture grise', 'gray mold', 'grey mold'],
-            'ceratite'=> ['cératite', 'ceratite', 'ceratitis capitata', 'mouche méditerranéenne'],
+            'mildiou'   => ['mildiou', 'mildew', 'plasmopara', 'downy mildew'],
+            'oidium'    => ['oïdium', 'oidium', 'powdery mildew', 'erysiphe', 'uncinula'],
+            'botrytis'  => ['botrytis', 'pourriture grise', 'gray mold', 'grey mold'],
+            'ceratite'  => ['cératite', 'ceratite', 'ceratitis capitata', 'mouche méditerranéenne'],
+            'cicadelle' => ['cicadelle', 'cicadelles', 'cicadellidae', 'scaphoideus', 'empoasca', 'leafhopper', 'jassid'],
+            'acarien'   => ['acarien', 'acariens', 'araignée rouge', 'araignee rouge', 'tetranychus', 'spider mite', 'mite'],
+            'thrips'    => ['thrips', 'thrip', 'frankliniella'],
+            'puceron'   => ['puceron', 'pucerons', 'aphid', 'aphis', 'myzus'],
+            'eudemis'   => ['eudémis', 'eudemis', 'ver de la grappe', 'lobesia'],
+            'black rot' => ['black rot', 'black-rot', 'guignardia', 'phyllosticta'],
         ];
         foreach ($aliases as $key => $values) {
             if ($norm !== '' && (str_contains($norm, $key) || str_contains($key, $norm))) {
                 $terms = array_merge($terms, $values);
             }
+        }
+
+        // The hard-coded table can never cover every pest an agronomist types.
+        // The `pests` catalogue is the farm's own vocabulary: pull the matching
+        // entry's common AND scientific name so "cicadelle" still finds rows
+        // recorded under "Scaphoideus titanus", and vice versa.
+        try {
+            if ($norm !== '' && Schema::hasTable('pests')) {
+                $rows = DB::table('pests')->select('name', 'scientific_name')->limit(400)->get();
+                foreach ($rows as $row) {
+                    $candidates = array_filter([(string) $row->name, (string) ($row->scientific_name ?? '')]);
+                    $hit = false;
+                    foreach ($candidates as $candidate) {
+                        $c = self::normLabel($candidate);
+                        if ($c !== '' && (str_contains($c, $norm) || str_contains($norm, $c))) {
+                            $hit = true;
+                            break;
+                        }
+                    }
+                    if ($hit) {
+                        foreach ($candidates as $candidate) {
+                            $terms[] = mb_strtolower(trim($candidate));
+                        }
+                    }
+                }
+            }
+        } catch (Throwable) {
+            // Catalogue lookup is an enrichment; the literal term still applies.
         }
 
         return array_values(array_unique(array_filter($terms, static fn ($term) => trim($term) !== '')));
@@ -1848,16 +1915,25 @@ trait AiFarmTools
         if (($kind === 'any' || $kind === 'fertilizer') && Schema::hasTable('fertilizers')) {
             $rows = $match(
                 DB::table('fertilizers')
-                    ->select('id', 'name', 'unit', 'n_percent', 'p_percent', 'k_percent', 'is_active'),
+                    ->select('id', 'name', 'unit', 'n_percent', 'p_percent', 'k_percent', 'mg_percent', 'ca_percent', 's_percent', 'is_active'),
                 ['name'],
             )->limit(5)->get();
             foreach ($rows as $r) {
+                // The full nutrient sheet, not just N-P-K: a "quelle est la
+                // composition de X ?" answer that silently drops Mg/Ca/S reads
+                // as authoritative while being incomplete.
+                $composition = [];
+                foreach (['N%' => 'n_percent', 'P%' => 'p_percent', 'K%' => 'k_percent',
+                    'Mg%' => 'mg_percent', 'Ca%' => 'ca_percent', 'S%' => 's_percent'] as $label => $col) {
+                    $composition[$label] = $r->{$col} !== null ? (float) $r->{$col} : 0.0;
+                }
                 $out[] = [
                     'kind'        => 'fertilizer',
                     'id'          => $r->id,
                     'name'        => $r->name,
                     'unit'        => $r->unit,
-                    'composition' => ['N%' => (float) $r->n_percent, 'P%' => (float) $r->p_percent, 'K%' => (float) $r->k_percent],
+                    'composition' => $composition,
+                    'composition_note' => 'Percentages by weight of the product. A 0 means the catalogue records no content for that nutrient — list only the non-zero ones unless the user asked for a specific nutrient.',
                     'prices'      => $this->priceHistoryFor('fertilizer', (string) $r->id),
                 ];
             }

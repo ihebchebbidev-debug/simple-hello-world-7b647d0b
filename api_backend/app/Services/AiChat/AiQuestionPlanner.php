@@ -471,7 +471,22 @@ final class AiQuestionPlanner
             return [null, now()->toDateString()];
         }
 
-        // Single explicit date: "à la date du 12/07/2026".
+        // "à la date d'aujourd'hui" / "à la date du 12/07/2026" is a CUT-OFF,
+        // not a single day: the agronomist asks what the plot has received up
+        // to that date. Answering with that one day alone is the single most
+        // damaging misreading of these questions, so it is handled before the
+        // generic single-date and "aujourd'hui" branches below.
+        if (preg_match('/\ba la date (?:d|du|de)\b/u', $q) === 1) {
+            if (preg_match('/\b([0-9]{1,2}[\/.\-][0-9]{1,2}[\/.\-][0-9]{2,4})\b/u', $question, $m) === 1) {
+                $d = $this->toIso($m[1]);
+                if ($d !== null) {
+                    return [null, $d];
+                }
+            }
+            return [null, now()->toDateString()];
+        }
+
+        // Single explicit date: "le 12/07/2026".
         if (preg_match('/\b([0-9]{1,2}[\/.\-][0-9]{1,2}[\/.\-][0-9]{2,4})\b/u', $question, $m) === 1) {
             $d = $this->toIso($m[1]);
             if ($d !== null) {
