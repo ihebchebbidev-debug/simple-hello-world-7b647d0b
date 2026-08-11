@@ -112,7 +112,7 @@ final class OpenRouterClient
                 // attempts x passes x agent rounds compounded into 300-400s.
                 if ($startedAny && ! AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
                     $lastError ??= 'ai wall-clock budget exhausted';
-                    Log::warning('ai.openrouter.budget_exhausted', ['purpose' => $purpose, 'stage' => 'chatRaw']);
+                    AiTrace::warning('ai.openrouter.budget_exhausted', ['purpose' => $purpose, 'stage' => 'chatRaw']);
                     break 3;
                 }
                 $startedAny = true;
@@ -125,9 +125,20 @@ final class OpenRouterClient
                     $payload['tools']       = $tools;
                     $payload['tool_choice'] = 'auto';
                 }
+                AiTrace::info('ai.llm.attempt', [
+                    'purpose' => $purpose, 'stage' => 'chatRaw', 'model' => $model,
+                    'pass' => $pass, 'attempt' => $attempt, 'tools' => $tools === null ? 0 : count($tools),
+                    'msgs' => count($messages),
+                ]);
+                $attemptT0 = microtime(true);
                 try {
                     $response = $this->request($key, $payload);
                 } catch (ConnectionException $e) {
+                    AiTrace::warning('ai.llm.connection_failed', [
+                        'purpose' => $purpose, 'stage' => 'chatRaw', 'model' => $model, 'attempt' => $attempt,
+                        'ms' => (int) round((microtime(true) - $attemptT0) * 1000),
+                        'message' => AiTrace::preview($e->getMessage(), 200),
+                    ]);
                     $this->breaker->recordFailure(hard: true);
                     $lastError = $e->getMessage();
                     $this->lastStatus = 0;
@@ -158,12 +169,17 @@ final class OpenRouterClient
                         $finish = $json['choices'][0]['finish_reason'] ?? 'unknown';
                         $lastError = "empty completion from {$model} (finish_reason={$finish})";
                         $this->lastStatus = 0;
+                        AiTrace::warning('ai.llm.empty_completion', [
+                            'purpose' => $purpose, 'model' => $model, 'attempt' => $attempt,
+                            'finish_reason' => $finish,
+                            'ms' => (int) round((microtime(true) - $attemptT0) * 1000),
+                        ]);
 
                         // finish_reason=length means the budget was consumed before any
                         // visible text (typically by reasoning tokens) — retrying the
                         // identical request just burns it again, so move to the next model.
                         if ($finish === 'length') {
-                            Log::warning('ai.openrouter.empty_completion_truncated', [
+                            AiTrace::warning('ai.openrouter.empty_completion_truncated', [
                                 'model' => $model, 'purpose' => $purpose,
                             ]);
                             break;
@@ -175,6 +191,13 @@ final class OpenRouterClient
                         break; // exhausted this model → fall through to the next one
                     }
                     $this->breaker->recordSuccess();
+                    AiTrace::timed('ai.llm.ok', (int) round((microtime(true) - $attemptT0) * 1000), 20000, [
+                        'purpose' => $purpose, 'stage' => 'chatRaw', 'model' => $model, 'attempt' => $attempt,
+                        'tool_calls' => count($toolCalls), 'content_len' => mb_strlen((string) $content),
+                        'prompt_tokens' => $this->lastPromptTokens, 'completion_tokens' => $this->lastCompletionTokens,
+                    ]);
+                    AiTrace::count('llm_calls');
+                    AiTrace::count('llm_ms', (int) round((microtime(true) - $attemptT0) * 1000));
                     return [
                         'content'    => is_string($content) ? $content : null,
                         'tool_calls' => $toolCalls,
@@ -186,6 +209,12 @@ final class OpenRouterClient
                 $this->keys->markFailed($key, $status);
                 $this->breaker->recordFailure(hard: $status >= 500 || $status === 401 || $status === 402 || $status === 403);
                 $lastError = 'HTTP '.$status.' '.mb_substr($response->body(), 0, 400);
+                AiTrace::warning('ai.llm.http_error', [
+                    'purpose' => $purpose, 'stage' => 'chatRaw', 'model' => $model, 'attempt' => $attempt,
+                    'status' => $status, 'retryable' => $this->isRetryable($status),
+                    'ms' => (int) round((microtime(true) - $attemptT0) * 1000),
+                    'body' => AiTrace::preview($response->body(), 200),
+                ]);
 
                 if ($this->isRetryable($status) && $attempt < $maxRetries) {
                     $this->sleepBackoff($attempt, $response);
@@ -214,6 +243,11 @@ final class OpenRouterClient
         // "network" (classify(0)) — that mislabel is what surfaced to users as
         // a bogus "network error" when the provider simply returned nothing.
         $code = $this->errorCode($lastError, 'empty completion');
+        AiTrace::warning('ai.llm.exhausted', [
+            'purpose' => $purpose, 'stage' => 'chatRaw', 'code' => $code,
+            'models' => $models, 'passes' => $passes, 'retries_per_model' => $maxRetries,
+            'last_error' => AiTrace::preview($lastError ?? 'unknown', 300),
+        ]);
 
 
         throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
@@ -243,13 +277,18 @@ final class OpenRouterClient
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
                 if ($startedAny && ! AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
                     $lastError ??= 'ai wall-clock budget exhausted';
-                    Log::warning('ai.openrouter.budget_exhausted', ['purpose' => $purpose, 'stage' => 'chatStream']);
+                    AiTrace::warning('ai.openrouter.budget_exhausted', ['purpose' => $purpose, 'stage' => 'chatStream']);
                     break 3;
                 }
                 $startedAny = true;
 
                 $key = $this->keys->next($purpose);
 
+                AiTrace::info('ai.llm.attempt', [
+                    'purpose' => $purpose, 'stage' => 'chatStream', 'model' => $model,
+                    'pass' => $pass, 'attempt' => $attempt, 'msgs' => count($messages),
+                ]);
+                $attemptT0 = microtime(true);
                 try {
                     $response = $this->request(
                         $key,
@@ -257,6 +296,11 @@ final class OpenRouterClient
                         stream: true,
                     );
                 } catch (ConnectionException $e) {
+                    AiTrace::warning('ai.llm.connection_failed', [
+                        'purpose' => $purpose, 'stage' => 'chatStream', 'model' => $model, 'attempt' => $attempt,
+                        'ms' => (int) round((microtime(true) - $attemptT0) * 1000),
+                        'message' => AiTrace::preview($e->getMessage(), 200),
+                    ]);
                     $this->breaker->recordFailure(hard: true);
                     $lastError = $e->getMessage();
                     $this->lastStatus = 0;
@@ -273,6 +317,11 @@ final class OpenRouterClient
                     $this->keys->markFailed($key, $status);
                     $this->breaker->recordFailure(hard: $status >= 500 || $status === 401 || $status === 402 || $status === 403);
                     $lastError = 'HTTP '.$status;
+                    AiTrace::warning('ai.llm.http_error', [
+                        'purpose' => $purpose, 'stage' => 'chatStream', 'model' => $model, 'attempt' => $attempt,
+                        'status' => $status, 'retryable' => $this->isRetryable($status),
+                        'ms' => (int) round((microtime(true) - $attemptT0) * 1000),
+                    ]);
 
                     if ($this->isRetryable($status) && $attempt < $maxRetries) {
                         $this->sleepBackoff($attempt, $response);
@@ -284,7 +333,14 @@ final class OpenRouterClient
                 // Stream: no retry once bytes start flowing.
                 $emittedBytes = 0;
                 $emitted = '';
-                $countingDelta = static function (string $chunk) use ($onDelta, &$emittedBytes, &$emitted): void {
+                $ttftMs = null;
+                $countingDelta = static function (string $chunk) use ($onDelta, &$emittedBytes, &$emitted, &$ttftMs, $attemptT0, $purpose, $model): void {
+                    if ($ttftMs === null) {
+                        // Time to first token: the number that tells whether a slow
+                        // turn is the model thinking or our own pipeline stalling.
+                        $ttftMs = (int) round((microtime(true) - $attemptT0) * 1000);
+                        AiTrace::timed('ai.llm.first_token', $ttftMs, 15000, ['purpose' => $purpose, 'model' => $model]);
+                    }
                     $emittedBytes += strlen($chunk);
                     $emitted .= $chunk;
                     $onDelta($chunk);
@@ -296,6 +352,11 @@ final class OpenRouterClient
                     if ($emittedBytes === 0) {
                         $this->breaker->recordFailure();
                         $lastError = 'stream interrupted: '.$e->getMessage();
+                        AiTrace::warning('ai.llm.stream_interrupted', [
+                            'purpose' => $purpose, 'model' => $model, 'attempt' => $attempt,
+                            'ms' => (int) round((microtime(true) - $attemptT0) * 1000),
+                            'message' => AiTrace::preview($e->getMessage(), 200),
+                        ]);
                         if ($attempt < $maxRetries) {
                             $this->sleepBackoff($attempt, null);
                         }
@@ -305,7 +366,7 @@ final class OpenRouterClient
                     // Text already reached the user: keep it instead of turning a
                     // usable partial answer into an error.
                     $this->breaker->recordFailure();
-                    Log::warning('ai.openrouter.stream_truncated_kept', [
+                    AiTrace::warning('ai.openrouter.stream_truncated_kept', [
                         'model' => $model, 'purpose' => $purpose, 'error' => $e->getMessage(),
                     ]);
                     return trim($emitted);
@@ -318,7 +379,7 @@ final class OpenRouterClient
                     $lastError = 'empty stream from '.$model
                         .($this->lastStreamError !== null ? ' ('.$this->lastStreamError.')' : '');
                     $this->lastStatus = 0;
-                    Log::warning('ai.openrouter.empty_stream', [
+                    AiTrace::warning('ai.openrouter.empty_stream', [
                         'model' => $model, 'purpose' => $purpose, 'cause' => $this->lastStreamError,
                     ]);
                     if ($attempt < $maxRetries) {
@@ -328,6 +389,13 @@ final class OpenRouterClient
                     break; // next model
                 }
                 $this->breaker->recordSuccess();
+                AiTrace::timed('ai.llm.stream_ok', (int) round((microtime(true) - $attemptT0) * 1000), 30000, [
+                    'purpose' => $purpose, 'model' => $model, 'attempt' => $attempt,
+                    'ttft_ms' => $ttftMs, 'chars' => mb_strlen($full), 'bytes' => $emittedBytes,
+                    'prompt_tokens' => $this->lastPromptTokens, 'completion_tokens' => $this->lastCompletionTokens,
+                ]);
+                AiTrace::count('llm_calls');
+                AiTrace::count('llm_ms', (int) round((microtime(true) - $attemptT0) * 1000));
                 return trim($full);
             }
         }
@@ -345,7 +413,7 @@ final class OpenRouterClient
 
             $content = trim((string) ($msg['content'] ?? ''));
             if ($content !== '') {
-                Log::warning('ai.openrouter.stream_fallback_nonstream', ['purpose' => $purpose]);
+                AiTrace::warning('ai.openrouter.stream_fallback_nonstream', ['purpose' => $purpose]);
                 $onDelta($content);
                 return $content;
             }
@@ -354,6 +422,11 @@ final class OpenRouterClient
         }
 
         $code = $this->errorCode($lastError, 'empty stream');
+        AiTrace::warning('ai.llm.exhausted', [
+            'purpose' => $purpose, 'stage' => 'chatStream', 'code' => $code,
+            'models' => $models, 'passes' => $passes, 'retries_per_model' => $maxRetries,
+            'last_error' => AiTrace::preview($lastError ?? 'unknown', 300),
+        ]);
 
 
         throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
@@ -377,6 +450,17 @@ final class OpenRouterClient
         if ($sort !== '' && ! isset($body['provider'])) {
             $body['provider'] = ['sort' => $sort, 'allow_fallbacks' => true];
         }
+
+        // Ask OpenRouter to keep the model out of "thinking" mode. Reasoning-first
+        // free models (gpt-oss and friends) otherwise spend the whole completion
+        // budget on reasoning tokens and stream ZERO answer text, which surfaced as
+        // `empty_stream` + a wasted wall-clock slot per attempt. Models that can't
+        // toggle reasoning simply ignore this field.
+        if (! isset($body['reasoning'])) {
+            $body['reasoning'] = ['enabled' => false, 'exclude' => true];
+        }
+
+
 
         $connectTimeout = (int) config('openrouter.connect_timeout', 30);
         $reqTimeout     = (int) config('openrouter.request_timeout', 0);
@@ -624,7 +708,8 @@ final class OpenRouterClient
             }
         }
 
-        Log::info('ai.chat.retry_backoff', ['attempt' => $attempt, 'sleep_ms' => $ms]);
+        AiTrace::info('ai.chat.retry_backoff', ['attempt' => $attempt, 'sleep_ms' => $ms]);
+        AiTrace::count('retries');
         usleep($ms * 1000);
     }
 

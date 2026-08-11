@@ -242,7 +242,7 @@ final class AiToolRegistry
         try {
             $results = \Illuminate\Support\Facades\Concurrency::run($tasks);
         } catch (Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('ai.tools.parallel_failed', [
+            AiTrace::warning('ai.tools.parallel_failed', [
                 'error' => mb_substr($e->getMessage(), 0, 200),
             ]);
             return [];   // caller falls back to sequential execution
@@ -271,6 +271,7 @@ final class AiToolRegistry
      */
     private function dispatch(string $name, array $args): array
     {
+        $t0 = microtime(true);
         try {
             $data = match ($name) {
                 'plan'                 => $this->toolPlan($args),
@@ -290,20 +291,48 @@ final class AiToolRegistry
 
             };
 
-            return array_merge([
+            $result = array_merge([
                 'ok'           => ! isset($data['error']),
                 'generated_at' => now()->toIso8601String(),
                 'currency'     => 'TND',
             ], $data);
+
+            $ms = (int) round((microtime(true) - $t0) * 1000);
+            AiTrace::count('tool_calls');
+            AiTrace::count('tool_ms', $ms);
+            // Every lookup is visible with its arguments, duration and whether it
+            // actually matched anything — that is what makes "aucun enregistrement"
+            // answers diagnosable straight from the log.
+            AiTrace::timed(
+                $result['ok'] ? 'ai.tool.ok' : 'ai.tool.no_result',
+                $ms,
+                4000,
+                [
+                    'tool'  => $name,
+                    'args'  => AiTrace::preview($args, 200),
+                    'error' => $result['ok'] ? null : (string) ($data['error'] ?? 'unknown'),
+                ],
+            );
+
+            return $result;
         } catch (AiClarificationNeeded $c) {
+            AiTrace::info('ai.tool.clarification_needed', [
+                'tool' => $name, 'args' => AiTrace::preview($args, 200),
+                'ms' => (int) round((microtime(true) - $t0) * 1000),
+            ]);
             // Not a failure: the question is genuinely ambiguous. Hand the
             // options back so the model asks instead of picking one at random.
             return array_merge(['ok' => false, 'name' => $name], $c->payload());
         } catch (Throwable $e) {
             // The raw driver message (SQL, uuid casts, table names) must never
             // travel to the model: it ends up quoted verbatim in the answer.
-            \Illuminate\Support\Facades\Log::warning('ai.tool.failed', [
-                'tool' => $name, 'error' => mb_substr($e->getMessage(), 0, 500),
+            AiTrace::warning('ai.tool.failed', [
+                'tool'      => $name,
+                'args'      => AiTrace::preview($args, 200),
+                'ms'        => (int) round((microtime(true) - $t0) * 1000),
+                'exception' => $e::class,
+                'at'        => basename($e->getFile()).':'.$e->getLine(),
+                'error'     => mb_substr($e->getMessage(), 0, 500),
             ]);
 
             return [

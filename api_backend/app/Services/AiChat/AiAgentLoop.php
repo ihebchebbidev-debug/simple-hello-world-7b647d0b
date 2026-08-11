@@ -92,7 +92,7 @@ final class AiAgentLoop
             // Without this reserve the loop consumed the entire request budget
             // and the user got the generic failure after minutes of waiting.
             if ($iter > 0 && ! AiDeadline::hasAtLeast(self::FINAL_ANSWER_RESERVE_SECONDS)) {
-                Log::warning('ai.agent.budget_reserve_reached', [
+                AiTrace::warning('ai.agent.budget_reserve_reached', [
                     'iteration' => $iter, 'tools_used' => array_values(array_unique($usedTools)),
                 ]);
                 break;
@@ -104,13 +104,32 @@ final class AiAgentLoop
                 $onEvent(['type' => 'tick', 'iteration' => $iter]);
             }
 
+            AiTrace::info('ai.agent.round', [
+                'iteration'  => $iter,
+                'max'        => $maxIters,
+                'msgs'       => count($transcript),
+                'tools_used' => array_values(array_unique($usedTools)),
+            ]);
+
+            $roundT0 = microtime(true);
             $msg = $this->openRouter->chatRaw($transcript, $toolDefs, 'planner');
 
             $toolCalls = $msg['tool_calls'] ?? [];
+            AiTrace::timed('ai.agent.round_planned', (int) round((microtime(true) - $roundT0) * 1000), 20000, [
+                'iteration'   => $iter,
+                'tool_calls'  => array_values(array_filter(array_map(
+                    static fn (array $c): string => (string) ($c['function']['name'] ?? '?'),
+                    is_array($toolCalls) ? $toolCalls : [],
+                ))),
+                'content_len' => mb_strlen((string) ($msg['content'] ?? '')),
+            ]);
 
 
             if ($toolCalls === []) {
                 $content = (string) ($msg['content'] ?? '');
+                AiTrace::info('ai.agent.no_tool_calls', [
+                    'iteration' => $iter, 'content_len' => mb_strlen($content), 'tools_used' => $usedTools,
+                ]);
 
                 // Guard: the model answered from thin air without ever touching
                 // the data. Push it back once to gather evidence first.
@@ -166,10 +185,16 @@ final class AiAgentLoop
                 }
             }
 
+            $toolsT0 = microtime(true);
             $results = $this->tools->callMany(array_map(
                 static fn (array $p): array => ['name' => $p['name'], 'args' => $p['args']],
                 $parsed,
             ));
+
+            AiTrace::timed('ai.agent.tools_done', (int) round((microtime(true) - $toolsT0) * 1000), 5000, [
+                'iteration' => $iter,
+                'calls'     => count($parsed),
+            ]);
 
             $roundEmpty = 0;
 
@@ -192,6 +217,19 @@ final class AiAgentLoop
                     }
                 }
 
+                if ($name !== 'plan') {
+                    $ok = ($result['ok'] ?? false) === true;
+                    AiTrace::info($ok ? 'ai.agent.tool_result' : 'ai.agent.tool_result_failed', [
+                        'iteration' => $iter,
+                        'tool'      => $name,
+                        'args'      => AiTrace::preview($args, 200),
+                        'ok'        => $ok,
+                        'empty'     => $ok ? self::resultIsEmpty($result) : null,
+                        'error'     => $ok ? null : (string) ($result['error'] ?? 'unknown'),
+                        'bytes'     => strlen($encoded),
+                    ]);
+                }
+
                 if ($name !== 'plan' && $onEvent !== null) {
                     $onEvent([
                         'type'    => 'tool_end',
@@ -209,6 +247,10 @@ final class AiAgentLoop
                 ];
             }
 
+
+            AiTrace::info('ai.agent.round_summary', [
+                'iteration' => $iter, 'data_calls' => $roundData, 'ok' => $roundOk, 'empty' => $roundEmpty,
+            ]);
 
             // Every data tool failed this round: nudge one explicit repair pass
             // (usually a wrong plot name — the payload carries available_plots).
@@ -256,6 +298,12 @@ final class AiAgentLoop
             'content' => '[internal] Based ONLY on the tool results above, write the final answer for the user now. Do not call any more tools. Follow the voice, precision and formatting rules from the system prompt. Before you write: (1) every figure you state must appear literally in a tool result — never add, average or extrapolate numbers yourself; (2) state the scope you actually queried (plot + period) and never claim the figures cover "l\'ensemble des enregistrements" or "all records"; (3) if any result carries `_truncated`, `warnings`, `plot_match_warning` or `date_warning`, say so in one short line before the numbers.',
         ];
 
+        AiTrace::info('ai.agent.final_answer_start', [
+            'evidence' => count($this->evidence),
+            'tools'    => array_values(array_unique($usedTools)),
+            'msgs'     => count($transcript),
+        ]);
+
         $emitted = '';
         $sanitizer = new ReplySanitizer();
         $tracking = $sanitizer->createStreamFilter(static function (string $delta) use ($onDelta, &$emitted): void {
@@ -281,10 +329,15 @@ final class AiAgentLoop
                 return $sanitizer->sanitize($rawReply2);
             }
 
+            AiTrace::info('ai.agent.final_answer_ok', ['reply_chars' => mb_strlen($cleanReply)]);
+
             return $cleanReply;
 
         } catch (Throwable $e) {
-            Log::warning('ai.agent.final_stream_failed', ['message' => $e->getMessage()]);
+            AiTrace::warning('ai.agent.final_stream_failed', [
+                'message'       => AiTrace::preview($e->getMessage(), 300),
+                'emitted_chars' => mb_strlen($emitted),
+            ]);
 
             // Bytes already reached the client — never re-emit a second full
             // answer on top of the partial one.

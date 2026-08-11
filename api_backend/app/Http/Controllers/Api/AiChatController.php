@@ -8,6 +8,8 @@ use App\Http\Controllers\Controller;
 use App\Models\AiFeedback;
 use App\Services\AiChat\AiChatService;
 use App\Services\AiChat\AiDeadline;
+use App\Services\AiChat\AiTrace;
+
 
 use App\Support\AiTranscriptLogger;
 use App\Support\Http\ApiResponse;
@@ -162,9 +164,23 @@ final class AiChatController extends Controller
         // model fallback, agent round and repair pass draws from it.
         AiDeadline::start();
 
+        // One trace id shared by every AI log line of this turn, so tailing the
+        // log (or grepping the id) shows the full story of a single question:
+        // plan -> model attempts -> tools -> self-check -> answer.
+        AiTrace::start([
+            'q'        => AiTrace::preview(end($data['messages'])['content'] ?? ''),
+            'locale'   => $locale,
+            'stream'   => $request->boolean('stream'),
+            'turns'    => count($data['messages']),
+            'conv'     => $conversationId,
+            'subject'  => $subjectId === null ? null : (string) $subjectId,
+            'budget_s' => AiDeadline::remaining(),
+        ]);
+
         if ($request->boolean('stream')) {
             return $this->streamResponse($request, $data['messages'], $locale, $conversationId, $subjectId);
         }
+
 
 
         $startedAt = microtime(true);
@@ -190,19 +206,20 @@ final class AiChatController extends Controller
             ]);
         } catch (RuntimeException $e) {
             $info = self::classifyError($e->getMessage());
-            Log::warning('ai.chat.failed', ['code' => $info['code'], 'message' => $e->getMessage()]);
+            AiTrace::warning('ai.chat.failed', ['code' => $info['code'], 'message' => AiTrace::preview($e->getMessage(), 400)]);
+            AiTrace::finish(['path' => 'failed', 'code' => $info['code']]);
             AiTranscriptLogger::record(
                 $request, $data['messages'], $locale, $conversationId,
                 false, 'error', $info['message'], $info['code'], (int) ((microtime(true) - $startedAt) * 1000),
             );
             return ApiResponse::error($info['code'], $info['message'], $info['status']);
         } catch (Throwable $e) {
-            Log::error('ai.chat.error', [
+            AiTrace::error('ai.chat.error', [
                 'exception' => $e::class,
-                'message'   => $e->getMessage(),
-                'file'      => $e->getFile(),
-                'line'      => $e->getLine(),
+                'message'   => AiTrace::preview($e->getMessage(), 400),
+                'at'        => basename($e->getFile()).':'.$e->getLine(),
             ]);
+            AiTrace::finish(['path' => 'exception', 'code' => 'ai_error']);
             AiTranscriptLogger::record(
                 $request, $data['messages'], $locale, $conversationId,
                 false, 'error', $e->getMessage(), 'ai_error', (int) ((microtime(true) - $startedAt) * 1000),
@@ -296,19 +313,20 @@ final class AiChatController extends Controller
                 );
             } catch (RuntimeException $e) {
                 $info = self::classifyError($e->getMessage());
-                Log::warning('ai.chat.stream_failed', ['code' => $info['code'], 'message' => $e->getMessage()]);
+                AiTrace::warning('ai.chat.stream_failed', ['code' => $info['code'], 'message' => AiTrace::preview($e->getMessage(), 400)]);
+                AiTrace::finish(['path' => 'stream_failed', 'code' => $info['code']]);
                 $emit(['type' => 'error', 'code' => $info['code'], 'message' => $info['message']]);
                 AiTranscriptLogger::record(
                     $request, $messages, $locale, $conversationId,
                     true, 'error', $info['message'], $info['code'], (int) ((microtime(true) - $startedAt) * 1000),
                 );
             } catch (Throwable $e) {
-                Log::error('ai.chat.stream_error', [
+                AiTrace::error('ai.chat.stream_error', [
                     'exception' => $e::class,
-                    'message'   => $e->getMessage(),
-                    'file'      => $e->getFile(),
-                    'line'      => $e->getLine(),
+                    'message'   => AiTrace::preview($e->getMessage(), 400),
+                    'at'        => basename($e->getFile()).':'.$e->getLine(),
                 ]);
+                AiTrace::finish(['path' => 'stream_exception', 'code' => 'ai_error']);
                 $emit(['type' => 'error', 'code' => 'ai_error', 'message' => 'Could not generate a reply.']);
                 AiTranscriptLogger::record(
                     $request, $messages, $locale, $conversationId,

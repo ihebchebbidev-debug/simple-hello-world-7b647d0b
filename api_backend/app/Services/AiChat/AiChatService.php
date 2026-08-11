@@ -71,7 +71,7 @@ final class AiChatService
         }
 
         if ($this->budget->isExhausted($subjectId)) {
-            Log::info('ai.chat.budget_exhausted', ['subject' => (string) $subjectId]);
+            AiTrace::info('ai.chat.budget_exhausted', ['subject' => (string) $subjectId]);
             $this->logTiming('budget_exhausted', $t0);
             return [
                 'reply' => $this->budgetExhaustedMessage($locale), 'conversation_id' => $id,
@@ -102,6 +102,12 @@ final class AiChatService
         // round is exactly what let a wrongly filtered pre-fetch through.
         $usedAgent = $agentEnabled;
 
+        AiTrace::info('ai.chat.model_round', [
+            'mode'         => $usedAgent ? 'agent' : 'direct',
+            'msgs'         => count($payload),
+            'prompt_chars' => array_sum(array_map(static fn (array $m): int => mb_strlen((string) ($m['content'] ?? '')), $payload)),
+        ]);
+
         $modelT0 = microtime(true);
         if ($usedAgent) {
             try {
@@ -111,7 +117,7 @@ final class AiChatService
                     $reply = $buf;
                 }
             } catch (\Throwable $e) {
-                Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
+                AiTrace::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => AiTrace::preview($e->getMessage(), 300)]);
                 // Rebuild without the agent prompt: the tool-oriented prompt sent
                 // to a tool-less call is what produced long, English, data-free
                 // answers. The tool-less prompt keeps voice, locale and honesty
@@ -175,11 +181,14 @@ final class AiChatService
     {
         $ms = (int) round((microtime(true) - $t0) * 1000);
         $payload = array_merge(['path' => $path, 'total_ms' => $ms], $extra);
+        // Same line as before, now trace-decorated, and it doubles as the
+        // closing `ai.turn.end` line with the per-turn LLM/tool totals.
         if ($ms >= 3000) {
-            Log::warning('ai.chat.timing', $payload);
+            AiTrace::warning('ai.chat.timing', $payload);
         } else {
-            Log::info('ai.chat.timing', $payload);
+            AiTrace::info('ai.chat.timing', $payload);
         }
+        AiTrace::finish($payload);
     }
 
     /**
@@ -196,12 +205,12 @@ final class AiChatService
             try {
                 $retry = trim($this->openRouter->chat($this->finalAnswerPayload($payload), $lane));
                 if ($retry !== '') {
-                    Log::info('ai.chat.empty_reply_rescued', ['lane' => $lane]);
+                    AiTrace::info('ai.chat.empty_reply_rescued', ['lane' => $lane]);
 
                     return $retry;
                 }
             } catch (\Throwable $e) {
-                Log::warning('ai.chat.empty_reply_rescue_failed', ['lane' => $lane, 'message' => $e->getMessage()]);
+                AiTrace::warning('ai.chat.empty_reply_rescue_failed', ['lane' => $lane, 'message' => $e->getMessage()]);
             }
         }
 
@@ -210,7 +219,7 @@ final class AiChatService
 
             return trim($this->openRouter->chat($plain, 'answer'));
         } catch (\Throwable $e) {
-            Log::warning('ai.chat.empty_reply_rescue_failed', ['lane' => 'plain', 'message' => $e->getMessage()]);
+            AiTrace::warning('ai.chat.empty_reply_rescue_failed', ['lane' => 'plain', 'message' => $e->getMessage()]);
 
             return '';
         }
@@ -307,7 +316,7 @@ final class AiChatService
                 $streamed = $this->agent->run($payload, $trackedDelta, $onEvent);
                 $trackedDelta->flush();
             } catch (\Throwable $e) {
-                Log::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => $e->getMessage()]);
+                AiTrace::warning('ai.agent.loop_failed_fallback_to_direct', ['message' => AiTrace::preview($e->getMessage(), 300)]);
                 if (trim($emitted) !== '') {
                     // Partial answer already reached the client: keep it instead of
                     // streaming a second, duplicated answer on top of it.
@@ -414,7 +423,7 @@ final class AiChatService
 
             return $block;
         } catch (\Throwable $e) {
-            Log::warning('ai.chat.evidence_footer_failed', ['message' => $e->getMessage()]);
+            AiTrace::warning('ai.chat.evidence_footer_failed', ['message' => $e->getMessage()]);
             return '';
         }
     }
@@ -507,7 +516,7 @@ final class AiChatService
             // disputes a figure.
             foreach ($check['violations'] as $v) {
                 if (str_starts_with($v, 'unsupported_numbers')) {
-                    Log::warning('ai.chat.unsupported_numbers', [
+                    AiTrace::warning('ai.chat.unsupported_numbers', [
                         'violation' => $v,
                         'question'  => mb_substr($lastUser, 0, 200),
                         'reply'     => mb_substr($sanitizedReply, 0, 500),
@@ -518,7 +527,7 @@ final class AiChatService
             return ['reply' => $sanitizedReply, 'revised' => false, 'violations' => $check['violations']];
         }
 
-        Log::info('ai.chat.self_check_failed', [
+        AiTrace::info('ai.chat.self_check_failed', [
             'violations'    => $check['violations'],
             'target_lang'   => $check['target_lang'],
             'detected_lang' => $check['detected_lang'],
@@ -550,7 +559,7 @@ final class AiChatService
             // request's wall-clock budget is nearly gone: a slightly imperfect
             // answer now beats a timeout the user waits minutes for.
             if (! AiDeadline::hasAtLeast(20.0)) {
-                Log::warning('ai.chat.repair_skipped_budget', ['pass' => $pass]);
+                AiTrace::warning('ai.chat.repair_skipped_budget', ['pass' => $pass]);
                 break;
             }
 
@@ -634,12 +643,12 @@ INSTR;
                     return ['reply' => $revisedSanitized, 'revised' => true, 'violations' => $check['violations']];
                 }
 
-                Log::info('ai.chat.repair_pass_incomplete', ['pass' => $pass, 'remaining' => array_values($reHard)]);
+                AiTrace::info('ai.chat.repair_pass_incomplete', ['pass' => $pass, 'remaining' => array_values($reHard)]);
                 $draft       = $revisedSanitized;
                 $currentHard = $reHard;
                 $currentAll  = $reCheck['violations'];
             } catch (\Throwable $e) {
-                Log::warning('ai.chat.self_check_repair_failed', ['pass' => $pass, 'message' => $e->getMessage()]);
+                AiTrace::warning('ai.chat.self_check_repair_failed', ['pass' => $pass, 'message' => $e->getMessage()]);
                 break;
             }
         }
@@ -665,7 +674,7 @@ INSTR;
         try {
             $fast = $this->fastAnswers()->answer($messages, $locale);
         } catch (\Throwable $e) {
-            Log::warning('ai.chat.fast_answer_failed', ['message' => $e->getMessage()]);
+            AiTrace::warning('ai.chat.fast_answer_failed', ['message' => $e->getMessage()]);
 
             return null;
         }
@@ -673,7 +682,7 @@ INSTR;
             return null;
         }
 
-        Log::info('ai.chat.fast_answer', ['tool' => $fast['call']['name']]);
+        AiTrace::info('ai.chat.fast_answer', ['tool' => $fast['call']['name']]);
         // The footer builder expects the same {name,args,result} shape the
         // agent produces, so a playbook answer stays provenance-checkable.
         $this->lastPrefetchCalls = [$fast['call'] + ['result' => $fast['result']]];
@@ -747,7 +756,7 @@ INSTR;
         try {
             $data = $this->toolRegistry->call('treatments', $callArgs);
         } catch (\Throwable $e) {
-            Log::warning('ai.chat.deterministic_shortcut_failed', ['message' => $e->getMessage()]);
+            AiTrace::warning('ai.chat.deterministic_shortcut_failed', ['message' => $e->getMessage()]);
             return null;
         }
 
@@ -859,7 +868,7 @@ INSTR;
         try {
             $fullContext = $this->cachedContextBuild();
         } catch (\Throwable $e) {
-            \Log::warning('ai.context.build_failed', ['error' => $e->getMessage()]);
+            AiTrace::warning('ai.context.build_failed', ['error' => $e->getMessage()]);
             $fullContext = ['_unavailable' => true, 'reason' => 'context_build_failed'];
         }
 
@@ -887,7 +896,7 @@ INSTR;
                 $routed  = $this->router->slim($fullContext, $normalised);
                 $context = $routed['context'] ?? $fullContext;
             } catch (\Throwable $e) {
-                \Log::warning('ai.context.router_failed', ['error' => $e->getMessage()]);
+                AiTrace::warning('ai.context.router_failed', ['error' => $e->getMessage()]);
                 $context = $fullContext;
             }
         }
@@ -896,7 +905,7 @@ INSTR;
                 ? $this->agentSystemPrompt($locale, $context)
                 : $this->systemPrompt($locale, $context);
         } catch (\Throwable $e) {
-            \Log::warning('ai.context.system_prompt_failed', ['error' => $e->getMessage()]);
+            AiTrace::warning('ai.context.system_prompt_failed', ['error' => $e->getMessage()]);
             $system = 'You are Flehty Assistant. Live data is temporarily unavailable; answer from general knowledge and ask the user for specifics if needed.';
         }
 
@@ -953,19 +962,32 @@ INSTR;
         try {
             $calls = $this->planner->plan($normalised);
         } catch (\Throwable $e) {
-            \Log::warning('ai.prefetch.plan_failed', ['error' => $e->getMessage()]);
+            AiTrace::warning('ai.prefetch.plan_failed', ['error' => $e->getMessage()]);
             return null;
         }
         if ($calls === []) {
+            AiTrace::info('ai.prefetch.no_plan', []);
             return null;
         }
+
+        // The planned lookups with their resolved date window: this is where a
+        // wrong period ("deux mille vingt-six" -> null) becomes visible before
+        // the model ever answers "aucun enregistrement".
+        AiTrace::info('ai.prefetch.plan', [
+            'calls' => array_map(
+                static fn (array $c): string => $c['name'].AiTrace::preview($c['args'], 120),
+                $calls,
+            ),
+        ]);
+
+
 
         $blocks = [];
         foreach ($calls as $call) {
             try {
                 $result = $this->toolRegistry->call($call['name'], $call['args']);
             } catch (\Throwable $e) {
-                \Log::warning('ai.prefetch.tool_failed', ['tool' => $call['name'], 'error' => $e->getMessage()]);
+                AiTrace::warning('ai.prefetch.tool_failed', ['tool' => $call['name'], 'error' => $e->getMessage()]);
                 continue;
             }
 

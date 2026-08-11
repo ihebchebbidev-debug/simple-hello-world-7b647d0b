@@ -299,7 +299,7 @@ trait AiFarmTools
             $rows = $applyCrop($base())->orderBy('name')->limit(80)->get()->all();
         } else {
             $needle = mb_strtolower($plot);
-            $folded = self::foldText($plot);
+            $folded = self::farmFoldText($plot);
             $nameFold = self::sqlFold('name');
             $q = $applyCrop($base())->where(function ($w) use ($plot, $needle, $folded, $nameFold) {
                 if (self::looksLikeUuid($plot)) $w->where('id', $plot);
@@ -1412,7 +1412,7 @@ trait AiFarmTools
             'biostimulant' => ['biostimul', 'stimul', 'algue', 'extrait'],
         ];
 
-        $flat = self::foldText($needle);
+        $flat = self::farmFoldText($needle);
         foreach ($families as $terms) {
             foreach ($terms as $term) {
                 if (str_contains($flat, $term) || str_contains($term, $flat)) {
@@ -1486,7 +1486,7 @@ trait AiFarmTools
         return $expr;
     }
 
-    private static function foldText(string $s): string
+    private static function farmFoldText(string $s): string
     {
         $s = strtr(mb_strtolower(trim($s)), self::SEARCH_FOLD);
         return trim((string) preg_replace('/\s+/u', ' ', $s));
@@ -1498,10 +1498,10 @@ trait AiFarmTools
      *
      * @return array<int, string>
      */
-    private static function searchTokens(string $needle): array
+    private static function farmSearchTokens(string $needle): array
     {
         $tokens = [];
-        foreach (explode(' ', self::foldText($needle)) as $token) {
+        foreach (explode(' ', self::farmFoldText($needle)) as $token) {
             if ($token === '' || mb_strlen($token) < 2) continue;
             if (in_array($token, self::SEARCH_STOPWORDS, true)) continue;
             if (mb_strlen($token) > 4 && str_ends_with($token, 's')) {
@@ -1510,7 +1510,7 @@ trait AiFarmTools
             $tokens[] = $token;
         }
         if ($tokens === []) {
-            $flat = self::foldText($needle);
+            $flat = self::farmFoldText($needle);
             if ($flat !== '') $tokens[] = $flat;
         }
         return array_values(array_unique($tokens));
@@ -1524,7 +1524,7 @@ trait AiFarmTools
      */
     private static function whereMatchesAllTokens(mixed $where, array $columns, string $needle): void
     {
-        $tokens = self::searchTokens($needle);
+        $tokens = self::farmSearchTokens($needle);
         if ($tokens === []) return;
 
         foreach ($columns as $col) {
@@ -1549,7 +1549,7 @@ trait AiFarmTools
         foreach ($columns as $col) {
             $expr = self::sqlFold($col);
             foreach ($terms as $term) {
-                $folded = self::foldText($term);
+                $folded = self::farmFoldText($term);
                 if ($folded === '') continue;
                 $where->orWhereRaw($expr.' LIKE ?', ['%'.$folded.'%']);
             }
@@ -2291,7 +2291,7 @@ trait AiFarmTools
     {
         $query = trim((string) ($args['query'] ?? ''));
         if (mb_strlen($query) < 2) return ['error' => 'query_too_short'];
-        if (self::searchTokens($query) === []) {
+        if (self::farmSearchTokens($query) === []) {
             return ['error' => 'query_has_no_searchable_word', 'asked' => $query];
         }
 

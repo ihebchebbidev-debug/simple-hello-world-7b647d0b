@@ -137,14 +137,16 @@ final class NaturalDateParser
             return $this->pack($start, $end, "Q$q $year", 'quarter');
         }
 
-        // 6. Year alone: "2024"
-        if (preg_match('/^(\d{4})$/', $s, $m)) {
+        // 6. Year alone: "2024" — with the prepositions/qualifiers a question
+        //    carries around it ("en 2026", "pour l'année 2026", "year 2026").
+        if (preg_match('/^(?:(?:en|in|for|pour|durant|during|sur|of)\s+)?(?:l[\x{2019}\']?\s*)?(?:annee|année|year|campagne civile)?\s*(\d{4})$/u', $s, $m)) {
             $y = (int)$m[1];
             if ($y >= 1970 && $y <= 2100) {
                 $start = Carbon::create($y, 1, 1)->startOfYear();
                 return $this->pack($start, $start->copy()->endOfYear(), (string)$y, 'year');
             }
         }
+
 
         // 7. Month name with optional year / "last <month>" / "<month> dernier"
         //    Examples: "july", "juillet", "july 2024", "juillet 2024",
@@ -194,8 +196,53 @@ final class NaturalDateParser
         $s = trim($s, " \t\n\r\0\x0B.,;:!?\"'()[]");
         // collapse whitespace
         $s = (string) preg_replace('/\s+/', ' ', $s);
+        // spelled-out years ("deux mille vingt-six", "two thousand twenty six")
+        $s = self::digitizeSpelledYear($s);
         return $s;
     }
+
+    /**
+     * Rewrite a spelled-out year into digits so "en deux mille vingt-six"
+     * reaches the bare-year branch exactly like "2026" does. Only years in
+     * 2000-2099 are handled — the only ones a farm campaign can mean.
+     */
+    public static function digitizeSpelledYear(string $s): string
+    {
+        static $tens = [
+            'vingt' => 20, 'trente' => 30, 'quarante' => 40, 'cinquante' => 50,
+            'soixante' => 60, 'twenty' => 20, 'thirty' => 30, 'forty' => 40,
+            'fifty' => 50, 'sixty' => 60, 'seventy' => 70, 'eighty' => 80, 'ninety' => 90,
+        ];
+        static $units = [
+            'un' => 1, 'une' => 1, 'deux' => 2, 'trois' => 3, 'quatre' => 4, 'cinq' => 5,
+            'six' => 6, 'sept' => 7, 'huit' => 8, 'neuf' => 9, 'dix' => 10, 'onze' => 11,
+            'douze' => 12, 'treize' => 13, 'quatorze' => 14, 'quinze' => 15, 'seize' => 16,
+            'one' => 1, 'two' => 2, 'three' => 3, 'four' => 4, 'five' => 5, 'seven' => 7,
+            'eight' => 8, 'nine' => 9, 'ten' => 10, 'eleven' => 11, 'twelve' => 12,
+            'thirteen' => 13, 'fourteen' => 14, 'fifteen' => 15, 'sixteen' => 16,
+            'seventeen' => 17, 'eighteen' => 18, 'nineteen' => 19,
+        ];
+
+        $tensAlt  = implode('|', array_keys($tens));
+        $unitsAlt = implode('|', array_keys($units));
+        $pattern  = '/\b(?:deux\s+mille|two\s+thousand)(?:[\s-]+(?:('.$tensAlt.')(?:[\s-]+('.$unitsAlt.'))?|('.$unitsAlt.')))?\b/u';
+
+        return (string) preg_replace_callback($pattern, static function (array $m) use ($tens, $units): string {
+            $year = 2000;
+            if (($m[1] ?? '') !== '') {
+                $year += $tens[$m[1]];
+                if (($m[2] ?? '') !== '') {
+                    $year += $units[$m[2]];
+                }
+            } elseif (($m[3] ?? '') !== '') {
+                $year += $units[$m[3]];
+            }
+
+            return (string) $year;
+        }, $s);
+    }
+
+
 
     /** @return array{from:string,to:string,label:string,granularity:string} */
     private function pack(Carbon $from, Carbon $to, string $label, string $granularity): array

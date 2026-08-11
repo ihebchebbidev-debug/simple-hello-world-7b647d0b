@@ -447,6 +447,12 @@ final class AiQuestionPlanner
      */
     private function extractWindow(string $question, string $q): array
     {
+        // "deux mille vingt-six" → "2026", so every branch below (and the
+        // shared parser) sees the year the user actually said.
+        $question = NaturalDateParser::digitizeSpelledYear($question);
+        $q        = NaturalDateParser::digitizeSpelledYear($q);
+
+
         // Explicit range: "entre le 15/06/2026 et le 30/06/2026", "du X au Y".
         if (preg_match(
             '/\b(?:entre|between|du|de|from)\s+(?:le\s+)?([0-9]{1,4}[\/.\-][0-9]{1,2}[\/.\-][0-9]{2,4})\s*(?:et|au|to|and|jusqu\'au)\s+(?:le\s+)?([0-9]{1,4}[\/.\-][0-9]{1,2}[\/.\-][0-9]{2,4})/iu',
@@ -502,7 +508,23 @@ final class AiQuestionPlanner
             }
         }
 
+        // Bare civil year: "en 2026", "récolte 2026". A campaign span
+        // ("2025-2026") or an explicit campaign/season wording is a named
+        // window resolved by extractCampaign(), so it must NOT be narrowed to
+        // a civil year here.
+        $isCampaignWording = preg_match('/\b\d{4}\s*[\/\-]\s*\d{2,4}\b/u', $q) === 1
+            || $this->has($q, ['campagne', 'saison', 'season', 'campaign']);
+
+        if (! $isCampaignWording && preg_match('/\b(19|20)(\d{2})\b/u', $q, $m) === 1) {
+            $year = (int) ($m[1].$m[2]);
+            if ($year >= 1970 && $year <= 2100) {
+                return [$year.'-01-01', $year.'-12-31'];
+            }
+        }
+
+
         return [null, null];
+
     }
 
     /** @return array{from?: ?string, to?: ?string}|null */

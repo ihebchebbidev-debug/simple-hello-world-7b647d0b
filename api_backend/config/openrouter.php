@@ -47,6 +47,37 @@ $openrouterKeys = static function (string $base): array {
     return array_values(array_unique($collected));
 };
 
+/**
+ * Build a model fallback chain: drop blanks/non-strings, de-duplicate while
+ * preserving order, and keep the auto-router `openrouter/free` last so an
+ * env-pinned model never hides behind it.
+ *
+ * @param  array<int, mixed>  $entries
+ * @return array<int, string>
+ */
+$openrouterChain = static function (array $entries): array {
+    $chain = [];
+    foreach ($entries as $entry) {
+        if (! is_string($entry)) {
+            continue;
+        }
+        $entry = trim($entry);
+        if ($entry !== '' && ! in_array($entry, $chain, true)) {
+            $chain[] = $entry;
+        }
+    }
+
+    // Move the auto-router to the end if an explicit model follows it.
+    $router = array_search('openrouter/free', $chain, true);
+    if ($router !== false && $router !== count($chain) - 1) {
+        unset($chain[$router]);
+        $chain[] = 'openrouter/free';
+    }
+
+    return array_values($chain);
+};
+
+
 return [
     // Shared key pool — round-robin, with automatic quarantine on 401/402/429.
     // Set OPENROUTER_API_KEY plus OPENROUTER_API_KEY_2…_10, and/or a
@@ -87,13 +118,28 @@ return [
     // live right now) sits last as a self-healing safety net against the next
     // retirement wave. Re-run the same check periodically (fetch
     // openrouter.ai/api/v1/models and filter as above) and update these arrays.
-    'models' => [
-        'openai/gpt-oss-20b:free',
+    //
+    // `openai/gpt-oss-20b:free` is deliberately NOT in any lane: it is a
+    // reasoning-first model that regularly streams reasoning tokens and no
+    // answer text at all ("ai.openrouter.empty_stream … model emitted only
+    // reasoning tokens"). Every such attempt burns a slot of the wall-clock
+    // budget for nothing, which is what left the later attempts with a ~3 s
+    // clamped timeout and pushed the turn into "Je n'ai pas pu répondre".
+    // Keep the nemotron/gemma instruct models, which answer in plain text.
+    //
+    // Env overrides (OPENROUTER_MODEL, OPENROUTER_MODEL_FALLBACK,
+    // OPENROUTER_ANSWER_MODEL, OPENROUTER_ANSWER_MODEL_FALLBACK,
+    // OPENROUTER_PLANNER_MODEL(_FALLBACK), OPENROUTER_REPAIR_MODEL(_FALLBACK))
+    // are honoured and take the front of the chain, so the deployed .env can
+    // pin models without a code change; `openrouter/free` always stays last.
+    'models' => $openrouterChain([
+        env('OPENROUTER_MODEL'),
+        env('OPENROUTER_MODEL_FALLBACK'),
         'nvidia/nemotron-3-ultra-550b-a55b:free',
         'nvidia/nemotron-3-super-120b-a12b:free',
         'google/gemma-4-31b-it:free',
         'openrouter/free',
-    ],
+    ]),
 
     // Dedicated model lanes. Planner = best tool-calling/data-finding; answer =
     // concise final wording; repair = cheap language/format cleanup. Each lane
@@ -101,23 +147,30 @@ return [
     // round-trip once the ones ahead of it are dead — and each ends on
     // `openrouter/free`, an OpenRouter-managed auto-router over whatever free
     // tool-capable models are live right now, as a self-healing safety net.
-    'planner_models' => [
-        'openai/gpt-oss-20b:free',
+    'planner_models' => $openrouterChain([
+        env('OPENROUTER_PLANNER_MODEL', env('OPENROUTER_MODEL')),
+        env('OPENROUTER_PLANNER_MODEL_FALLBACK', env('OPENROUTER_MODEL_FALLBACK')),
+        'nvidia/nemotron-3-ultra-550b-a55b:free',
         'nvidia/nemotron-3-super-120b-a12b:free',
         'openrouter/free',
-    ],
+    ]),
 
-    'answer_models' => [
-        'openai/gpt-oss-20b:free',
+    'answer_models' => $openrouterChain([
+        env('OPENROUTER_ANSWER_MODEL'),
+        env('OPENROUTER_ANSWER_MODEL_FALLBACK'),
+        'nvidia/nemotron-3-super-120b-a12b:free',
+        'google/gemma-4-26b-a4b-it:free',
+        'openrouter/free',
+    ]),
+
+    'repair_models' => $openrouterChain([
+        env('OPENROUTER_REPAIR_MODEL'),
+        env('OPENROUTER_REPAIR_MODEL_FALLBACK'),
+        'nvidia/nemotron-3-nano-30b-a3b:free',
         'google/gemma-4-31b-it:free',
         'openrouter/free',
-    ],
+    ]),
 
-    'repair_models' => [
-        'nvidia/nemotron-3-nano-30b-a3b:free',
-        'openai/gpt-oss-20b:free',
-        'openrouter/free',
-    ],
 
     'base_url'    => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
     // Accuracy over latency: a listing answer ("les 12 traitements de P4") needs
