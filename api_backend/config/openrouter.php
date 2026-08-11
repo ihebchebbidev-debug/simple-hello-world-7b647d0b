@@ -184,7 +184,12 @@ return [
         // A real question rarely needs more than a handful of rounds — 24 only
         // ever gets exercised when a weak free model loops, which is exactly
         // what drives multi-minute replies. Capped lower; still generous.
-        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 8),
+        // Each round is a full non-streaming planner round-trip (model chain +
+        // retries), so this is the single biggest latency multiplier: 5 rounds
+        // still covers cross-checking a figure with a second tool, and the
+        // wall-clock deadline stops the loop earlier when time runs short.
+        'max_iterations'  => (int) env('OPENROUTER_AGENT_MAX_ITERATIONS', 5),
+
 
         'max_tool_result' => (int) env('OPENROUTER_AGENT_MAX_TOOL_RESULT_BYTES', 20000),
 
@@ -236,12 +241,20 @@ return [
     // data answers. Off by default — the farm operator asked for it to go.
     'evidence_footer' => (bool) env('AI_EVIDENCE_FOOTER', false),
 
-    // Maximum self-check repair rounds. Accuracy beats latency: each round
-    // re-validates the rewrite and keeps the best candidate seen. Each round
-    // is a full ~100s model round-trip on the free tier, so this is capped at
-    // 2 — a violation that survives two rewrites essentially never clears on
-    // a third with the same model.
-    'repair_passes' => (int) env('AI_REPAIR_PASSES', 2),
+    // Maximum self-check repair rounds ("the double check"). Each round is a
+    // FULL extra model round-trip on top of an answer the user already saw
+    // streaming, so it roughly doubles perceived latency. One pass clears
+    // essentially every violation that will ever clear with the same model;
+    // a second only ever added ~100s for the same text, so the default is 1.
+    'repair_passes' => (int) env('AI_REPAIR_PASSES', 1),
+
+    // Hard wall-clock budget (seconds) for one whole AI turn: model fallbacks,
+    // retries, recovery passes, agent rounds and repair passes all draw from
+    // this single pot (see AiDeadline). Once it runs low the pipeline stops
+    // escalating and answers with what it has instead of compounding retries
+    // into the 300-400s hangs that ended in a generic failure message.
+    'wall_budget' => (int) env('AI_WALL_BUDGET', 110),
+
 
 
 

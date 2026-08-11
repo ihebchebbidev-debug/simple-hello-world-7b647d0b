@@ -546,6 +546,14 @@ final class AiChatService
         $maxPasses      = max(1, (int) config('openrouter.repair_passes', 2));
 
         for ($pass = 1; $pass <= $maxPasses; $pass++) {
+            // A repair pass is a full extra model round-trip. Skip it when the
+            // request's wall-clock budget is nearly gone: a slightly imperfect
+            // answer now beats a timeout the user waits minutes for.
+            if (! AiDeadline::hasAtLeast(20.0)) {
+                Log::warning('ai.chat.repair_skipped_budget', ['pass' => $pass]);
+                break;
+            }
+
             $countFixes = '';
             $numericViolation = false;
             foreach ($currentAll as $v) {

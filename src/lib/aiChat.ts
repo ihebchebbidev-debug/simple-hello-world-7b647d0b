@@ -100,9 +100,17 @@ function isRetryableAiError(err: unknown): boolean {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Total wall-clock budget for one user question, client side. The backend keeps
+ * its own (slightly smaller) budget; this is the safety net so a hung request
+ * plus retries can never keep the user waiting for minutes.
+ */
+const CLIENT_BUDGET_MS = 150_000;
+
+/**
  * Public entry point: streams a reply and transparently retries transient
  * upstream hiccups (up to 2 extra attempts) as long as nothing has been
- * rendered yet, so the user sees a slightly slower answer rather than an error.
+ * rendered yet AND there is still time in the client budget — retrying a
+ * request that already burned two minutes only made the wait worse.
  */
 export async function streamAiChatMessage(
   body: AiChatRequest,
@@ -111,6 +119,8 @@ export async function streamAiChatMessage(
   onRevise?: ((finalReply: string) => void) | AiChatStreamCallbacks,
 ): Promise<AiChatResponse> {
   const delays = [600, 1600];
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
   for (let attempt = 0; ; attempt++) {
     let rendered = false;
     try {
@@ -125,11 +135,21 @@ export async function streamAiChatMessage(
       );
     } catch (err) {
       const aborted = signal?.aborted || (err as Error)?.name === 'AbortError';
-      if (aborted || rendered || attempt >= delays.length || !isRetryableAiError(err)) throw err;
+      const outOfBudget = elapsed() + 20_000 > CLIENT_BUDGET_MS;
+      if (
+        aborted ||
+        rendered ||
+        outOfBudget ||
+        attempt >= delays.length ||
+        !isRetryableAiError(err)
+      ) {
+        throw err;
+      }
       await sleep(delays[attempt]);
     }
   }
 }
+
 
 async function streamAiChatOnce(
   body: AiChatRequest,

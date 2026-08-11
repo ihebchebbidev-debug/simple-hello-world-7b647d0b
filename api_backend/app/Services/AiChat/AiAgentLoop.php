@@ -24,6 +24,14 @@ use Throwable;
 final class AiAgentLoop
 {
     /**
+     * Wall-clock budget kept in reserve for the final streaming answer, so the
+     * planning rounds can never eat the whole request and leave nothing to
+     * answer with.
+     */
+    private const FINAL_ANSWER_RESERVE_SECONDS = 25.0;
+
+
+    /**
      * Raw JSON of every successful data-tool result from the last run().
      * Used by the post-generation validator to check that the numbers in
      * the reply actually came from the data.
@@ -79,6 +87,17 @@ final class AiAgentLoop
 
 
         for ($iter = 0; $iter < $maxIters; $iter++) {
+            // Wall-clock guard: stop planning while there is still enough budget
+            // left to write the final answer from the evidence already gathered.
+            // Without this reserve the loop consumed the entire request budget
+            // and the user got the generic failure after minutes of waiting.
+            if ($iter > 0 && ! AiDeadline::hasAtLeast(self::FINAL_ANSWER_RESERVE_SECONDS)) {
+                Log::warning('ai.agent.budget_reserve_reached', [
+                    'iteration' => $iter, 'tools_used' => array_values(array_unique($usedTools)),
+                ]);
+                break;
+            }
+
             // Keep the HTTP response alive while the (non-streaming) planning
             // round runs — proxies drop idle upstream connections after ~60s.
             if ($onEvent !== null) {
@@ -86,6 +105,7 @@ final class AiAgentLoop
             }
 
             $msg = $this->openRouter->chatRaw($transcript, $toolDefs, 'planner');
+
             $toolCalls = $msg['tool_calls'] ?? [];
 
 
@@ -248,11 +268,10 @@ final class AiAgentLoop
             $tracking->flush();
             $cleanReply = $sanitizer->sanitize($rawReply);
             
-            if ($sanitizer->isOnlyInternals($rawReply, $cleanReply)) {
-                $transcript[] = [
-                    'role'    => 'assistant',
-                    'content' => $rawReply,
-                ];
+            // A "internals only" reply deserves one retry — but only when the
+            // budget still allows it, otherwise return what we have.
+            if ($sanitizer->isOnlyInternals($rawReply, $cleanReply) && AiDeadline::hasAtLeast(10.0)) {
+                $transcript[] = ['role' => 'assistant', 'content' => $rawReply];
                 $transcript[] = [
                     'role'    => 'user',
                     'content' => '[internal] Tools are closed. Answer the question in plain prose based on the data already provided.',
@@ -261,8 +280,9 @@ final class AiAgentLoop
                 $tracking->flush();
                 return $sanitizer->sanitize($rawReply2);
             }
-            
+
             return $cleanReply;
+
         } catch (Throwable $e) {
             Log::warning('ai.agent.final_stream_failed', ['message' => $e->getMessage()]);
 
@@ -276,12 +296,13 @@ final class AiAgentLoop
             $fallback = $this->openRouter->chat($transcript, 'answer');
             $cleanFallback = $sanitizer->sanitize($fallback);
             
-            if ($sanitizer->isOnlyInternals($fallback, $cleanFallback)) {
+            if ($sanitizer->isOnlyInternals($fallback, $cleanFallback) && AiDeadline::hasAtLeast(10.0)) {
                 $transcript[] = ['role' => 'assistant', 'content' => $fallback];
                 $transcript[] = ['role' => 'user', 'content' => '[internal] Tools are closed. Answer the question in plain prose based on the data already provided.'];
                 $fallback = $this->openRouter->chat($transcript, 'answer');
                 $cleanFallback = $sanitizer->sanitize($fallback);
             }
+
             
             $onDelta($cleanFallback);
             return $cleanFallback;

@@ -1068,8 +1068,10 @@ trait AiFarmTools
 
         $total = (clone $q)->count();
         // Window-wide cost, not the sum of the (possibly truncated) listing.
+        // `select()` replaces the listing's columns; `selectRaw()` would append
+        // them next to SUM() and Postgres would reject the query (no GROUP BY).
         $windowCost = (float) ((clone $q)
-            ->selectRaw('COALESCE(SUM(po.quantity_applied * po.price_at_entry),0) AS c')
+            ->select(DB::raw('COALESCE(SUM(po.quantity_applied * po.price_at_entry),0) AS c'))
             ->value('c') ?? 0);
 
         $order = strtolower((string) ($args['order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
@@ -1574,7 +1576,9 @@ trait AiFarmTools
 
         $total = (clone $q)->count();
         $m3 = self::m3Expr();
-        $windowTotal = (float) ((clone $q)->selectRaw("COALESCE(SUM($m3),0) AS t")->value('t') ?? 0);
+        // select() (replaces the listing columns), never selectRaw() (appends
+        // them beside SUM() → Postgres GROUP BY error, whole tool call lost).
+        $windowTotal = (float) ((clone $q)->select(DB::raw("COALESCE(SUM($m3),0) AS t"))->value('t') ?? 0);
         $order = strtolower((string) ($args['order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
         // A "détail du 15 au 30 juin" question must not silently drop rows,
         // so an explicit window defaults to the full cap rather than 10.
@@ -1649,13 +1653,17 @@ trait AiFarmTools
 
         // Window-wide aggregates FIRST. Summing only the listed rows made the
         // totals silently wrong as soon as the listing hit `limit`.
-        $totals = (clone $q)->selectRaw(
+        // `select()` (not `selectRaw()`) on purpose: selectRaw APPENDS to the
+        // listing's column list, so Postgres saw plot_id/operation_date next to
+        // COUNT/SUM with no GROUP BY and failed the whole tool call — which is
+        // what pushed the agent into extra rounds and retries.
+        $totals = (clone $q)->select(DB::raw(
             'COUNT(*) AS n,
              COALESCE(SUM(quantity_harvested),0) AS kg,
              COALESCE(SUM(num_workers * days_worked * daily_rate_at_entry),0) AS cost,
              MIN(operation_date) AS first_date,
              MAX(operation_date) AS last_date',
-        )->first();
+        ))->first();
 
         $count = (int) ($totals->n ?? 0);
         $sumKg = (float) ($totals->kg ?? 0);
@@ -2159,10 +2167,18 @@ trait AiFarmTools
             }
 
             if ($wants('duplicates') && Schema::hasColumn($table, $qtyCol)) {
-                $dupCol = $entityFk !== null && Schema::hasColumn($table, $entityFk) ? "op.$entityFk" : "'-'";
+                // Only group by a REAL column: Postgres rejects a string literal
+                // in GROUP BY ("non-integer constant in GROUP BY"), which used to
+                // fail this whole audit for tables with no product/entity FK.
+                $hasEntity = $entityFk !== null && Schema::hasColumn($table, $entityFk);
+                $dupCol    = $hasEntity ? "op.$entityFk" : null;
                 $dups = $scope($table)
-                    ->selectRaw("op.plot_id, op.operation_date, $dupCol as entity, op.$qtyCol as qty, COUNT(*) as n")
-                    ->groupByRaw("op.plot_id, op.operation_date, $dupCol, op.$qtyCol")
+                    ->select(DB::raw(
+                        'op.plot_id, op.operation_date'
+                        .($dupCol !== null ? ", $dupCol as entity" : '')
+                        .", op.$qtyCol as qty, COUNT(*) as n",
+                    ))
+                    ->groupByRaw('op.plot_id, op.operation_date'.($dupCol !== null ? ", $dupCol" : '').", op.$qtyCol")
                     ->havingRaw('COUNT(*) > 1')
                     ->orderByDesc('n')
                     ->limit(5)

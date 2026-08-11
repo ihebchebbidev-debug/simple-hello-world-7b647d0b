@@ -7,6 +7,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AiFeedback;
 use App\Services\AiChat\AiChatService;
+use App\Services\AiChat\AiDeadline;
+
 use App\Support\AiTranscriptLogger;
 use App\Support\Http\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -156,9 +158,14 @@ final class AiChatController extends Controller
         $conversationId = $data['conversation_id'] ?? null;
         $subjectId = $request->user()?->id;
 
+        // Start the single wall-clock budget for this whole turn. Every retry,
+        // model fallback, agent round and repair pass draws from it.
+        AiDeadline::start();
+
         if ($request->boolean('stream')) {
             return $this->streamResponse($request, $data['messages'], $locale, $conversationId, $subjectId);
         }
+
 
         $startedAt = microtime(true);
 

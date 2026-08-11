@@ -22,6 +22,14 @@ use RuntimeException;
  */
 final class OpenRouterClient
 {
+    /**
+     * Minimum wall-clock budget (seconds) required to start a new upstream
+     * attempt. Below this, retrying is pointless: the attempt cannot finish
+     * before the request deadline and only delays the user's answer.
+     */
+    private const MIN_ATTEMPT_SECONDS = 6.0;
+
+
     /** Last upstream token usage — read by AiChatService for budget accounting. */
     private int $lastPromptTokens = 0;
     private int $lastCompletionTokens = 0;
@@ -80,6 +88,9 @@ final class OpenRouterClient
         $models     = $this->models($purpose);
         $lastError  = null;
         $this->lastStatus = 0;
+        // The first attempt always runs, even with no budget left: giving the
+        // user a late answer beats the generic "je n'ai pas pu répondre".
+        $startedAny = false;
 
         // Several recovery passes over the whole model chain: a transient outage
         // on every model at once is almost always over by the next pass, and a
@@ -88,12 +99,27 @@ final class OpenRouterClient
 
         for ($pass = 0; $pass < $passes; $pass++) {
             if ($pass > 0) {
+                // No budget left for a whole extra pass over the chain.
+                if (! AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
+                    break;
+                }
                 $this->sleepBackoff($pass, null);
             }
         foreach ($models as $model) {
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+                // Global wall-clock guard: never start another upstream attempt
+                // we don't have time to finish. Without this, model-chain x
+                // attempts x passes x agent rounds compounded into 300-400s.
+                if ($startedAny && ! AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
+                    $lastError ??= 'ai wall-clock budget exhausted';
+                    Log::warning('ai.openrouter.budget_exhausted', ['purpose' => $purpose, 'stage' => 'chatRaw']);
+                    break 3;
+                }
+                $startedAny = true;
+
 
                 $key = $this->keys->next($purpose);
+
                 $payload = ['messages' => $messages, 'stream' => false, 'model' => $model];
                 if ($tools !== null && $tools !== []) {
                     $payload['tools']       = $tools;
@@ -168,8 +194,9 @@ final class OpenRouterClient
 
         // Last resort: some providers reject the tool payload (or truncate on it)
         // while answering the exact same messages fine without tools. Better a
-        // tool-less answer than an error page.
-        if ($tools !== null && $tools !== []) {
+        // tool-less answer than an error page — but only when there is still
+        // budget for it, otherwise this doubles the worst-case wall time.
+        if ($tools !== null && $tools !== [] && AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
             try {
                 return $this->chatRaw($messages, null, $purpose);
             } catch (\Throwable) {
@@ -177,12 +204,12 @@ final class OpenRouterClient
             }
         }
 
+
         // Keep the empty-completion cause visible instead of relabelling it
         // "network" (classify(0)) — that mislabel is what surfaced to users as
         // a bogus "network error" when the provider simply returned nothing.
-        $code = ($this->lastStatus === 0 && is_string($lastError) && str_contains($lastError, 'empty completion'))
-            ? 'empty_reply'
-            : $this->classify($this->lastStatus);
+        $code = $this->errorCode($lastError, 'empty completion');
+
 
         throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
     }
@@ -196,15 +223,28 @@ final class OpenRouterClient
         $lastError  = null;
         $this->lastStatus = 0;
         $passes = $this->recoveryPasses();
+        // As in chatRaw: the first attempt always runs; only escalation is
+        // subject to the remaining wall-clock budget.
+        $startedAny = false;
 
         for ($pass = 0; $pass < $passes; $pass++) {
             if ($pass > 0) {
+                if (! AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
+                    break;
+                }
                 $this->sleepBackoff($pass, null);
             }
         foreach ($models as $model) {
             for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+                if ($startedAny && ! AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
+                    $lastError ??= 'ai wall-clock budget exhausted';
+                    Log::warning('ai.openrouter.budget_exhausted', ['purpose' => $purpose, 'stage' => 'chatStream']);
+                    break 3;
+                }
+                $startedAny = true;
 
                 $key = $this->keys->next($purpose);
+
                 try {
                     $response = $this->request(
                         $key,
@@ -285,8 +325,13 @@ final class OpenRouterClient
         // Last resort: the streaming transport itself can be broken (proxy,
         // provider SSE bug) while the plain JSON call answers fine. Emit the
         // whole answer as a single delta so the user still gets a real reply.
+        // Skipped once the budget is gone — see chatRaw's equivalent guard.
         try {
+            if (! AiDeadline::hasAtLeast(self::MIN_ATTEMPT_SECONDS)) {
+                throw new RuntimeException('budget_exhausted');
+            }
             $msg = $this->chatRaw($messages, null, $purpose);
+
             $content = trim((string) ($msg['content'] ?? ''));
             if ($content !== '') {
                 Log::warning('ai.openrouter.stream_fallback_nonstream', ['purpose' => $purpose]);
@@ -297,9 +342,8 @@ final class OpenRouterClient
             // fall through to the original error below
         }
 
-        $code = ($this->lastStatus === 0 && is_string($lastError) && str_contains($lastError, 'empty stream'))
-            ? 'empty_reply'
-            : $this->classify($this->lastStatus);
+        $code = $this->errorCode($lastError, 'empty stream');
+
 
         throw new RuntimeException($code.': '.($lastError ?? 'unknown error'));
     }
@@ -327,6 +371,13 @@ final class OpenRouterClient
         $reqTimeout     = (int) config('openrouter.request_timeout', 0);
         $streamIdle     = (int) config('openrouter.stream_idle_timeout', 300);
 
+        // Never let a single attempt outlive the request's wall-clock budget:
+        // a 60s attempt started with 10s left can only ever produce a timeout
+        // the user waits for. Streams also get their idle timeout clamped.
+        $reqTimeout = AiDeadline::clampTimeout($reqTimeout);
+        $streamIdle = AiDeadline::clampTimeout($streamIdle);
+        $connectTimeout = min($connectTimeout, max(3, $reqTimeout));
+
         $pending = Http::withHeaders([
             'Authorization' => 'Bearer '.$apiKey,
             'HTTP-Referer'  => (string) config('openrouter.referer'),
@@ -334,10 +385,7 @@ final class OpenRouterClient
             'Content-Type'  => 'application/json',
             'Accept'        => $stream ? 'text/event-stream' : 'application/json',
         ])->connectTimeout($connectTimeout)
-          // No wall-clock cap by default (0 = unlimited in Guzzle): the model is
-          // allowed to think for as long as it needs. Liveness is still enforced
-          // per-chunk via `read_timeout` on streams.
-          ->timeout(max(0, $reqTimeout));
+          ->timeout(max(1, $reqTimeout));
 
 
         if ($stream) {
@@ -348,6 +396,7 @@ final class OpenRouterClient
                 'read_timeout' => $streamIdle,
             ]);
         }
+
 
         return $pending->post($url, $body);
     }
@@ -456,19 +505,25 @@ final class OpenRouterClient
     }
 
     /**
-     * Attempts per model. Always at least enough to rotate through every
-     * configured key, so one quarantined/rate-limited key can never fail a
-     * request while a healthy key sits unused. The breaker is advisory: while
-     * open we still make a real attempt, just with a smaller budget.
+     * Attempts per model.
+     *
+     * This used to scale with the key pool (`keys->size() - 1`), so 4 keys meant
+     * 4 attempts per model x 3 models = 12 upstream calls for a SINGLE model
+     * round — and the agent makes up to 8 of those rounds. That multiplication
+     * is what pushed simple questions past 300s. Key rotation still happens
+     * (every attempt draws the next key), but the attempt count is now the
+     * configured retry budget, hard-capped, with the wall-clock deadline as the
+     * real backstop.
      */
     private function retryBudget(): int
     {
         $configured = max(0, (int) config('openrouter.max_retries', 2));
         if ($this->breaker->shouldTrip()) {
-            return 1;
+            return 0;
         }
-        return max($configured, max(0, $this->keys->size() - 1));
+        return min(2, $configured);
     }
+
 
     /** Full passes over the model chain before giving up. */
     private function recoveryPasses(): int
@@ -483,9 +538,29 @@ final class OpenRouterClient
     }
 
     /**
+     * Turn the last failure into a stable machine code.
+     *
+     * Two causes must never be relabelled "network" (what classify(0) yields):
+     * a provider that answered with nothing (`empty_reply`), and our own
+     * wall-clock budget running out (`timeout`) — the latter used to reach the
+     * user as a bogus network error.
+     */
+    private function errorCode(?string $lastError, string $emptyMarker): string
+    {
+        if (is_string($lastError) && str_contains($lastError, 'budget exhausted')) {
+            return 'timeout';
+        }
+        if ($this->lastStatus === 0 && is_string($lastError) && str_contains($lastError, $emptyMarker)) {
+            return 'empty_reply';
+        }
+        return $this->classify($this->lastStatus);
+    }
+
+    /**
      * Map the last HTTP status (0 = no response) to a stable machine code
      * so callers can render precise user messages instead of a generic error.
      */
+
     private function classify(int $status): string
     {
         return match (true) {
