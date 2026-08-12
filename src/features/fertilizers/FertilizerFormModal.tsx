@@ -12,17 +12,19 @@ export type FertilizerFormSubmit = {
   name: string; unit: string;
   n_percent: number; p_percent: number; k_percent: number;
   mg_percent: number; ca_percent: number; s_percent: number;
+  density_kg_per_l: number | null;
   is_active: boolean;
   /** Optional initial price (TND/unit) — posted to /prices on create. */
   initial_price?: number | null;
 };
 
-interface FormState { name: string; unit: string; n_percent: string; p_percent: string; k_percent: string; mg_percent: string; ca_percent: string; s_percent: string; is_active: boolean; initial_price: string; }
+interface FormState { name: string; unit: string; n_percent: string; p_percent: string; k_percent: string; mg_percent: string; ca_percent: string; s_percent: string; density_kg_per_l: string; is_active: boolean; initial_price: string; }
 
 const empty: FormState = {
   name: '', unit: 'kg',
   n_percent: '0', p_percent: '0', k_percent: '0',
   mg_percent: '0', ca_percent: '0', s_percent: '0',
+  density_kg_per_l: '',
   is_active: true,
   initial_price: '',
 };
@@ -51,6 +53,7 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
         mg_percent: String(initial.mg_percent ?? 0),
         ca_percent: String(initial.ca_percent ?? 0),
         s_percent: String(initial.s_percent ?? 0),
+        density_kg_per_l: initial.density_kg_per_l != null ? String(initial.density_kg_per_l) : '',
         is_active: initial.is_active,
         initial_price: '',
       });
@@ -67,6 +70,7 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
     mg_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
     ca_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
     s_percent: z.number().min(0, t('validation.gteZero')).max(100, t('validation.lte100')),
+    density_kg_per_l: z.number().min(0.1).max(3).nullable(),
     is_active: z.boolean(),
   }), [t]);
 
@@ -76,6 +80,9 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
     const fe: Partial<Record<keyof FormState, string>> = {};
     for (const k of ['n_percent', 'p_percent', 'k_percent', 'mg_percent', 'ca_percent', 's_percent'] as const) {
       if (!decimal2.test(values[k])) fe[k] = t('validation.max2dec');
+    }
+    if (values.density_kg_per_l && !decimal3.test(values.density_kg_per_l)) {
+      fe.density_kg_per_l = t('validation.max3dec', 'Up to 3 decimals');
     }
     if (values.initial_price && !decimal3.test(values.initial_price)) {
       fe.initial_price = t('validation.max3dec', 'Up to 3 decimals');
@@ -89,6 +96,7 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
       mg_percent: Number(values.mg_percent),
       ca_percent: Number(values.ca_percent),
       s_percent: Number(values.s_percent),
+      density_kg_per_l: values.density_kg_per_l ? Number(values.density_kg_per_l) : null,
       is_active: values.is_active,
     });
     if (!parsed.success) {
@@ -169,6 +177,14 @@ const FertilizerFormModal = ({ open, mode, initial, submitting = false, serverEr
               className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" />
           </Field>
         </div>
+
+        <Field label={t('fertilizers.density')} error={errors.density_kg_per_l}>
+          <input type="number" step="0.001" min="0.1" max="3" value={values.density_kg_per_l}
+            placeholder={t('fertilizers.densityPlaceholder')}
+            onChange={(e) => setValues((v) => ({ ...v, density_kg_per_l: e.target.value }))}
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" />
+          <p className="mt-1 text-[11px] text-muted-foreground">{t('fertilizers.densityHint')}</p>
+        </Field>
 
         {mode === 'create' && (
           <Field label={`${t('prices.newPriceLabel', 'Prix initial (TND)')} / ${values.unit || 'unité'} (${t('common.optional')})`} error={errors.initial_price}>

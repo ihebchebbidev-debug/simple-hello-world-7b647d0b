@@ -252,6 +252,9 @@ export const en = {
     formCreateTitle: 'New fertilizer',
     formEditTitle: 'Edit fertilizer',
     formCreateDesc: 'Add a fertilizer with its NPK composition.',
+    density: 'Density (kg/L)',
+    densityPlaceholder: 'e.g. 1.280',
+    densityHint: 'Liquids only. Required to convert a % into g/L or kg N/ha; leave empty if unknown.',
   },
 
   pesticides: {

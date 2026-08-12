@@ -27,6 +27,7 @@ final class FertilizerResource extends JsonResource
             'mg_percent' => (float) $fertilizer->mg_percent,
             'ca_percent' => (float) $fertilizer->ca_percent,
             's_percent' => (float) $fertilizer->s_percent,
+            'density_kg_per_l' => $fertilizer->density_kg_per_l !== null ? (float) $fertilizer->density_kg_per_l : null,
             'is_active' => (bool) $fertilizer->is_active,
             'created_at' => $fertilizer->created_at,
             'updated_at' => $fertilizer->updated_at,

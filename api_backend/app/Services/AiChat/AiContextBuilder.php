@@ -24,7 +24,7 @@ use Illuminate\Support\Facades\Schema;
  */
 final class AiContextBuilder
 {
-    private const KEY_PREFIX = 'ai_chat.ctx.v5';
+    private const KEY_PREFIX = 'ai_chat.ctx.v6';
 
     /** Per-section TTLs (seconds) — used as fallback if the stamp never changes. */
     private const TTL = [
@@ -853,7 +853,7 @@ final class AiContextBuilder
             // never fall back to guessing.
             $nutrients = ['n_percent', 'p_percent', 'k_percent', 'mg_percent', 'ca_percent', 's_percent'];
             $cols = array_values(array_filter(
-                array_merge(['name', 'unit'], $nutrients),
+                array_merge(['name', 'unit'], $nutrients, ['density_kg_per_l']),
                 fn ($c) => $this->hasColumn('fertilizers', $c),
             ));
             if (! in_array('name', $cols, true)) $cols = array_merge(['name'], $cols);
@@ -870,6 +870,9 @@ final class AiContextBuilder
                     'mg'   => (float) ($r->mg_percent ?? 0),
                     'ca'   => (float) ($r->ca_percent ?? 0),
                     's'    => (float) ($r->s_percent ?? 0),
+                    // null = not recorded: no % -> g/L or kg/ha conversion allowed.
+                    'density_kg_per_l' => isset($r->density_kg_per_l) && $r->density_kg_per_l !== null
+                        ? (float) $r->density_kg_per_l : null,
                 ])
                 ->all();
         }

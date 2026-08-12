@@ -8,6 +8,8 @@ export interface AdminFertilizer {
   mg_percent: number;
   ca_percent: number;
   s_percent: number;
+  /** kg/L — only set for liquids; null when not recorded. */
+  density_kg_per_l: number | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

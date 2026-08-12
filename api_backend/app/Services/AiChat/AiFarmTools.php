@@ -1913,9 +1913,11 @@ trait AiFarmTools
         $out  = [];
 
         if (($kind === 'any' || $kind === 'fertilizer') && Schema::hasTable('fertilizers')) {
+            $hasDensity = Schema::hasColumn('fertilizers', 'density_kg_per_l');
+            $cols = ['id', 'name', 'unit', 'n_percent', 'p_percent', 'k_percent', 'mg_percent', 'ca_percent', 's_percent', 'is_active'];
+            if ($hasDensity) $cols[] = 'density_kg_per_l';
             $rows = $match(
-                DB::table('fertilizers')
-                    ->select('id', 'name', 'unit', 'n_percent', 'p_percent', 'k_percent', 'mg_percent', 'ca_percent', 's_percent', 'is_active'),
+                DB::table('fertilizers')->select($cols),
                 ['name'],
             )->limit(5)->get();
             foreach ($rows as $r) {
@@ -1927,12 +1929,17 @@ trait AiFarmTools
                     'Mg%' => 'mg_percent', 'Ca%' => 'ca_percent', 'S%' => 's_percent'] as $label => $col) {
                     $composition[$label] = $r->{$col} !== null ? (float) $r->{$col} : 0.0;
                 }
+                $density = $hasDensity && $r->density_kg_per_l !== null ? (float) $r->density_kg_per_l : null;
                 $out[] = [
                     'kind'        => 'fertilizer',
                     'id'          => $r->id,
                     'name'        => $r->name,
                     'unit'        => $r->unit,
                     'composition' => $composition,
+                    'density_kg_per_l' => $density,
+                    'density_note' => $density === null
+                        ? 'Density not recorded: do NOT convert a mass percentage into g/L, kg/L or kg of nutrient per hectare for a product sold in litres. State that the density is missing.'
+                        : 'Density recorded: for a litre-based product, nutrient g/L = percentage x density x 10.',
                     'composition_note' => 'Percentages by weight of the product. A 0 means the catalogue records no content for that nutrient — list only the non-zero ones unless the user asked for a specific nutrient.',
                     'prices'      => $this->priceHistoryFor('fertilizer', (string) $r->id),
                 ];

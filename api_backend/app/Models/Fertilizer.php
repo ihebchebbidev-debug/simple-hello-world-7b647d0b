@@ -22,6 +22,7 @@ final class Fertilizer extends Model
         'mg_percent',
         'ca_percent',
         's_percent',
+        'density_kg_per_l',
         'is_active',
         'created_by',
         'updated_by',
@@ -36,6 +37,7 @@ final class Fertilizer extends Model
             'mg_percent' => 'decimal:2',
             'ca_percent' => 'decimal:2',
             's_percent' => 'decimal:2',
+            'density_kg_per_l' => 'decimal:3',
             'is_active' => 'boolean',
         ];
     }

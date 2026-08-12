@@ -252,6 +252,9 @@ export const fr = {
     formCreateTitle: 'Nouvel engrais',
     formEditTitle: "Modifier l'engrais",
     formCreateDesc: 'Ajoute un engrais avec sa composition NPK.',
+    density: 'Densité (kg/L)',
+    densityPlaceholder: 'Ex. 1,280',
+    densityHint: 'Produits liquides uniquement. Nécessaire pour convertir un % en g/L ou kg N/ha ; laisser vide si inconnue.',
   },
 
   pesticides: {

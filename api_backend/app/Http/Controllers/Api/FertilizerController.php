@@ -19,12 +19,14 @@ use App\Http\Requests\Fertilizer\StoreFertilizerRequest;
 use App\Http\Requests\Fertilizer\UpdateFertilizerRequest;
 use App\Http\Resources\FertilizerResource;
 use App\Models\Fertilizer;
+use App\Support\Concerns\HasSchemaAwareColumns;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 final class FertilizerController extends Controller
 {
+    use HasSchemaAwareColumns;
     use PaginatesResources;
     use RespondsWithResource;
 
@@ -54,8 +56,10 @@ final class FertilizerController extends Controller
 
     public function store(StoreFertilizerRequest $request): JsonResponse
     {
+        // `density_kg_per_l` is a recent column: drop it when the deployed
+        // schema predates the migration instead of failing the request.
         $fertilizer = Fertilizer::create([
-            ...$request->validated(),
+            ...$this->onlyExistingColumns('fertilizers', $request->validated()),
             'is_active' => $request->boolean('is_active', true),
             'created_by' => $request->user()?->id,
             'updated_by' => $request->user()?->id,
@@ -71,7 +75,7 @@ final class FertilizerController extends Controller
 
     public function update(UpdateFertilizerRequest $request, Fertilizer $fertilizer): JsonResponse
     {
-        $data = $request->validated();
+        $data = $this->onlyExistingColumns('fertilizers', $request->validated());
 
         // Capture the pre-edit composition so we only propagate genuine changes.
         $original = [
