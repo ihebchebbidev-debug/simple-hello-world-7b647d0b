@@ -216,4 +216,23 @@ final class AiQuestionPlannerTest extends TestCase
     {
         $this->assertNotNull($this->argsFor($this->plan('Y a-t-il des données non synchronisées depuis l\'application mobile ?'), 'sync_status'));
     }
+
+    public function test_bare_season_question_scopes_by_campaign_not_by_dates(): void
+    {
+        $args = $this->argsFor($this->plan('Quelle dose d\'azote (kg N/ha) sur B12 cette saison ?'), 'nutrient_per_ha');
+
+        $this->assertNotNull($args);
+        $this->assertSame('active', $args['campaign'] ?? null);
+        $this->assertArrayNotHasKey('from', $args);
+        $this->assertArrayNotHasKey('to', $args);
+    }
+
+    public function test_explicit_dates_still_win_over_a_named_campaign(): void
+    {
+        $args = $this->argsFor($this->plan('Eau sur P3 entre le 01/07/2026 et le 15/07/2026 pour la campagne 2025-2026 ?'), 'water_per_ha');
+
+        $this->assertNotNull($args);
+        $this->assertSame('2026-07-01', $args['from'] ?? null);
+        $this->assertSame('2026-07-15', $args['to'] ?? null);
+    }
 }

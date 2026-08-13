@@ -309,7 +309,15 @@ final class NaturalDateParser
     {
         try {
             if (! Schema::hasTable('campaigns')) return null;
-            $row = DB::table('campaigns')->where('is_active', true)->select('name', 'start_date', 'end_date')->first();
+            // Same ordering as AiFarmTools::resolveCampaign('active'): with
+            // several rows flagged active, both resolvers MUST agree on which
+            // one "cette saison" means, otherwise the planner scopes to one
+            // campaign while the answer names another.
+            $row = DB::table('campaigns')
+                ->where('is_active', true)
+                ->orderByDesc('start_date')
+                ->select('name', 'start_date', 'end_date')
+                ->first();
             if ($row === null || ! $row->start_date || ! $row->end_date) return null;
             return $this->pack(
                 Carbon::parse((string) $row->start_date),
@@ -324,11 +332,21 @@ final class NaturalDateParser
     {
         try {
             if (! Schema::hasTable('campaigns')) return null;
-            $row = DB::table('campaigns')
+            $active = DB::table('campaigns')
+                ->where('is_active', true)
+                ->orderByDesc('start_date')
+                ->select('start_date')
+                ->first();
+            $q = DB::table('campaigns')
                 ->where('is_active', false)
                 ->orderByDesc('start_date')
-                ->select('name', 'start_date', 'end_date')
-                ->first();
+                ->select('name', 'start_date', 'end_date');
+            // "la saison dernière" is the season BEFORE the current one, not
+            // simply the most recent inactive row (which may sit in the future).
+            if ($active !== null && $active->start_date) {
+                $q->where('start_date', '<', (string) $active->start_date);
+            }
+            $row = $q->first();
             if ($row === null || ! $row->start_date || ! $row->end_date) return null;
             return $this->pack(
                 Carbon::parse((string) $row->start_date),

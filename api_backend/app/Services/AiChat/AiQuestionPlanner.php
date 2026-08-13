@@ -81,10 +81,19 @@ final class AiQuestionPlanner
         // assistant answers all-time figures that contradict the Reports screen.
         $campaign = $this->extractCampaign($question, $q);
         if ($campaign !== null) {
-            // Tools give explicit from/to precedence, so passing both is safe and
-            // lets the answer name the campaign it actually scoped to.
             $window['campaign'] = $campaign;
+            // Tools give explicit from/to precedence over the campaign. When the
+            // window itself came from the season wording ("cette saison"), that
+            // precedence is harmful: the date window silently wins and rows
+            // explicitly attached to the campaign but dated just outside it are
+            // dropped — and the answer then names a season it did not scope to.
+            // Only a REAL date expression (a written date, a month, a rolling
+            // window) may override the campaign.
+            if (! $this->hasExplicitDateExpression($question, $q)) {
+                unset($window['from'], $window['to']);
+            }
         }
+
 
         $calls = [];
         $add = static function (string $name, array $args) use (&$calls): void {
@@ -445,6 +454,33 @@ final class AiQuestionPlanner
      *
      * @return array{0: ?string, 1: ?string}
      */
+    /**
+     * True when the question carries a date expression of its own — a written
+     * date, an explicit month/year, a rolling window or a day keyword. A bare
+     * "cette saison" / "campagne 2025-2026" is NOT one: it is a named window
+     * the tools resolve themselves.
+     */
+    private function hasExplicitDateExpression(string $question, string $q): bool
+    {
+        if (preg_match('/\b[0-9]{1,2}[\/.\-][0-9]{1,2}[\/.\-][0-9]{2,4}\b/u', $question) === 1) {
+            return true;
+        }
+        if (preg_match('/\b(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|january|february|march|april|may|june|july|august|september|october|november|december)\b/u', $q) === 1) {
+            return true;
+        }
+        if (preg_match('/\b(?:\d+\s*(?:derniers?|dernieres?|last)\s*(?:jours?|days?|semaines?|weeks?|mois|months?)|(?:derniers?|dernieres?|last)\s*\d+\s*(?:jours?|days?|semaines?|weeks?|mois|months?))\b/u', $q) === 1) {
+            return true;
+        }
+
+        return $this->has($q, [
+            "aujourd'hui", 'aujourd hui', 'today', 'hier', 'yesterday',
+            'ce mois', 'this month', 'mois dernier', 'last month',
+            'cette semaine', 'this week', 'semaine derniere', 'last week',
+            'a ce jour', "jusqu'a ce jour", 'to date', 'ytd',
+            'a la date', 'depuis le', 'entre le', 'du ', 'trimestre', 'quarter',
+        ]);
+    }
+
     private function extractWindow(string $question, string $q): array
     {
         // "deux mille vingt-six" → "2026", so every branch below (and the

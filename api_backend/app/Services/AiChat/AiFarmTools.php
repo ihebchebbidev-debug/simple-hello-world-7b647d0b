@@ -878,6 +878,9 @@ trait AiFarmTools
                 'irrigations'     => (int) ($a['ops'] ?? 0),
                 'total_m3'        => round($qty, 2),
                 'm3_per_ha'       => $perHa,
+                // 1 mm = 1 L/m² = 10 m³/ha. Computed here so the model never
+                // has to do the division itself (it got it wrong both ways).
+                'mm'              => $perHa === null ? null : round($perHa / 10, 2),
                 'cost_tnd'        => round((float) ($a['cost'] ?? 0), 2),
                 'first_date'      => $a['first_date'] ?? null,
                 'last_date'       => $a['last_date'] ?? null,
@@ -901,7 +904,7 @@ trait AiFarmTools
             'result_kind'      => 'aggregate',
             'applied_filters'  => $this->appliedFilters($args, $from, $to, $names),
             'computed_from'    => $source,
-            'unit'             => 'm3/ha',
+            'unit'             => 'm3/ha (mm also provided: 1 mm = 10 m3/ha)',
             'plots'            => array_slice($rows, 0, 40),
             'plot_count'       => count($rows),
             'total_m3'         => round($totalM3, 2),
@@ -916,6 +919,13 @@ trait AiFarmTools
             'per_ha'           => count($rows) === 1
                 ? ($rows[0]['m3_per_ha'] ?? null)
                 : self::perHa($totalM3, $totalHa),
+            'per_ha_mm'        => (static function () use ($rows, $totalM3, $totalHa) {
+                $v = count($rows) === 1 ? ($rows[0]['m3_per_ha'] ?? null) : self::perHa($totalM3, $totalHa);
+
+                return $v === null ? null : round($v / 10, 2);
+            })(),
+            'mm_rule'          => 'Millimetres are already computed: quote `per_ha_mm` (and each plot\'s `mm`) verbatim. '
+                .'Conversion is 1 mm = 10 m³/ha — never recompute or re-round it yourself.',
             'per_ha_method'    => count($rows) === 1 ? 'single_plot' : 'weighted (total m³ ÷ total ha)',
             'per_ha_rule'      => 'Quote `per_ha` and nothing else as THE m³/ha figure. `weighted_m3_per_ha` and '
                 .'`average_m3_per_ha` are provided for reconciliation only; mention `average_m3_per_ha` solely if '
