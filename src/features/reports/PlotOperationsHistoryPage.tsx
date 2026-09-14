@@ -111,6 +111,9 @@ const PlotOperationsHistoryPage = () => {
     harvest: t('dashboard.type.harvest'),
   };
 
+  // Harvest entries have no remarks field in the mobile app — hide the column.
+  const showRemarks = validType !== 'harvest';
+
   const valueOf = (r: OpRow) => {
     if (validType === 'irrigation') return `${r.water_quantity ?? 0} m3`;
     if (validType === 'fertilization') return `${r.quantity_applied ?? 0} (${r.fertilizer?.name ?? '—'})`;
@@ -167,13 +170,13 @@ const PlotOperationsHistoryPage = () => {
               <th>{t('table.date', 'Date')}</th>
               <th>{t('common.value', 'Value')}</th>
               {validType === 'phytosanitary' && <th>{t('table.pest', 'Target pest')}</th>}
-              <th>{t('table.remarks', 'Remarks')}</th>
+              {showRemarks && <th>{t('table.remarks', 'Remarks')}</th>}
             </tr>
           </thead>
           <tbody>
             {pg.pageRows.length === 0 ? (
               <tr>
-                <td colSpan={validType === 'phytosanitary' ? 4 : 3} className="text-center py-8">
+                <td colSpan={2 + (validType === 'phytosanitary' ? 1 : 0) + (showRemarks ? 1 : 0)} className="text-center py-8">
                   {list.isLoading ? t('common.loading') : t('common.noData', 'No data')}
                 </td>
               </tr>
@@ -187,7 +190,7 @@ const PlotOperationsHistoryPage = () => {
                 <td className="font-medium text-foreground whitespace-nowrap">{formatDateFr(r.operation_date)}</td>
                 <td>{valueOf(r)}</td>
                 {validType === 'phytosanitary' && <td>{r.target_pest || '—'}</td>}
-                <td className="text-muted-foreground truncate max-w-[260px]">{r.remarks || '—'}</td>
+                {showRemarks && <td className="text-muted-foreground truncate max-w-[260px]">{r.remarks || '—'}</td>}
               </tr>
             ))}
           </tbody>

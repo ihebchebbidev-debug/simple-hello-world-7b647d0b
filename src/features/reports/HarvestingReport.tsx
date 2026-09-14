@@ -85,7 +85,20 @@ const HarvestingReport = () => {
     );
   }, [rowsAfterCrop, search]);
 
+  // Footer totals: summed over every filtered row (not just the current page).
+  const totals = useMemo(() => {
+    const quantity = filteredRows.reduce((s, r) => s + r.total_quantity, 0);
+    const cost = filteredRows.reduce((s, r) => s + r.total_cost, 0);
+    const workers = filteredRows.reduce((s, r) => s + r.total_workers, 0);
+    return {
+      quantity: Math.round(quantity * 100) / 100,
+      workers: Math.round(workers * 100) / 100,
+      avgCostPerKg: quantity > 0 ? cost / quantity : 0,
+    };
+  }, [filteredRows]);
+
   const pagination = usePagination({
+
     rows: filteredRows,
     resetKey: `${search}|${filters.resetKey}`,
   });
@@ -157,7 +170,18 @@ const HarvestingReport = () => {
               onRetry={() => reportQuery.refetch()}
             />
           </tbody>
+          {filteredRows.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-border font-semibold text-foreground">
+                <td>{t('table.total', 'Total')}</td>
+                <td>{totals.workers.toLocaleString()}</td>
+                <td>{totals.quantity.toLocaleString()} kg</td>
+                <td>{totals.avgCostPerKg.toFixed(3)} dt</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
+
       </ReportTableCard>
     </div>
   );
