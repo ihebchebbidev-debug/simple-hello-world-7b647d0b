@@ -103,8 +103,14 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
     mutationFn: async () => {
       // Send only fields that belong to this op type to avoid validation noise.
       const payload: Record<string, unknown> = { operation_date: form.operation_date };
-      if (type === 'irrigation') payload.water_quantity = Number(form.water_quantity);
-      if (type === 'fertilization') payload.quantity_applied = Number(form.quantity_applied);
+      if (type === 'irrigation') {
+        payload.water_quantity = Number(form.water_quantity);
+        payload.remarks = form.remarks || null;
+      }
+      if (type === 'fertilization') {
+        payload.quantity_applied = Number(form.quantity_applied);
+        payload.remarks = form.remarks || null;
+      }
       if (type === 'phytosanitary') {
         payload.quantity_applied = Number(form.quantity_applied);
         payload.water_volume_l = form.water_volume_l === '' || form.water_volume_l == null
@@ -117,6 +123,7 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
         payload.quantity_harvested = Number(form.quantity_harvested);
         payload.num_workers = Number(form.num_workers);
         payload.days_worked = Number(form.days_worked);
+        payload.remarks = form.remarks || null;
       }
       await api.put(`${baseUrl}/${id}`, payload);
     },
@@ -208,14 +215,25 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
           </div>
 
           {type === 'irrigation' && (
-            <div>
-              <label className="text-[11px] uppercase tracking-wider text-muted-foreground">m3</label>
-              <input
-                type="number" step="0.01" className={inputCls}
-                value={form.water_quantity}
-                onChange={(e) => setForm((p) => ({ ...p, water_quantity: e.target.value }))}
-              />
-            </div>
+            <>
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-muted-foreground">m3</label>
+                <input
+                  type="number" step="0.01" className={inputCls}
+                  value={form.water_quantity}
+                  onChange={(e) => setForm((p) => ({ ...p, water_quantity: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{t('table.remarks', 'Remarks')}</label>
+                <textarea
+                  rows={2}
+                  className={`${inputCls} h-auto py-2`}
+                  value={String(form.remarks ?? '')}
+                  onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))}
+                />
+              </div>
+            </>
           )}
 
           {type === 'fertilization' && (
@@ -227,6 +245,15 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
                   type="number" step="0.001" className={inputCls}
                   value={form.quantity_applied}
                   onChange={(e) => setForm((p) => ({ ...p, quantity_applied: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{t('table.remarks', 'Remarks')}</label>
+                <textarea
+                  rows={2}
+                  className={`${inputCls} h-auto py-2`}
+                  value={String(form.remarks ?? '')}
+                  onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))}
                 />
               </div>
             </>
@@ -291,6 +318,15 @@ const OperationDetailsModal = ({ open, type, id, onClose }: Props) => {
                   type="number" min="1" step="1" className={inputCls}
                   value={form.num_workers}
                   onChange={(e) => setForm((p) => ({ ...p, num_workers: e.target.value, days_worked: 1 }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{t('table.remarks', 'Remarks')}</label>
+                <textarea
+                  rows={2}
+                  className={`${inputCls} h-auto py-2`}
+                  value={String(form.remarks ?? '')}
+                  onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))}
                 />
               </div>
             </>

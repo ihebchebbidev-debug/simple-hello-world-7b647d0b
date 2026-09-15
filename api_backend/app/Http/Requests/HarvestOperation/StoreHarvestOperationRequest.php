@@ -23,6 +23,7 @@ final class StoreHarvestOperationRequest extends FormRequest
             'num_workers'        => ['required', 'integer', 'min:1'],
             'days_worked'        => ['required', 'numeric', 'gt:0', 'max:999.99', 'decimal:0,2'],
             'quantity_harvested' => ['required', 'numeric', 'gt:0', 'max:9999999.99', 'decimal:0,2'],
+            'remarks'            => ['sometimes', 'nullable', 'string', 'max:2000'],
             'posting_id'         => ['sometimes', 'nullable', 'uuid', 'exists:postings,id'],
         ];
     }

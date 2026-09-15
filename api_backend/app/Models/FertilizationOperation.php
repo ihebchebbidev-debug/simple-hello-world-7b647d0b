@@ -22,6 +22,7 @@ final class FertilizationOperation extends Model
         'fertilizer_id',
         'operation_date',
         'quantity_applied',
+        'remarks',
         'n_at_entry',
         'p_at_entry',
         'k_at_entry',

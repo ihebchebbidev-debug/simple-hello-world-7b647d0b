@@ -23,6 +23,7 @@ final class HarvestOperation extends Model
         'num_workers',
         'days_worked',
         'quantity_harvested',
+        'remarks',
         'daily_rate_at_entry',
         'posting_id',
         'created_by',

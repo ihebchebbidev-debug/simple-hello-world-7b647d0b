@@ -56,6 +56,7 @@ final class IrrigationOperationController extends Controller
             'campaign_id'    => $data['campaign_id'] ?? null,
             'operation_date' => $date,
             'water_quantity' => $data['water_quantity'],
+            'remarks'        => $data['remarks'] ?? null,
             'unit_at_entry'  => $this->prices->activeWaterUnit(),
             'price_at_entry' => $this->prices->priceFor('water', null, $date),
             'posting_id'     => $data['posting_id'] ?? null,

@@ -23,6 +23,7 @@ final class UpdateHarvestOperationRequest extends FormRequest
             'num_workers'          => ['sometimes', 'integer', 'min:1'],
             'days_worked'          => ['sometimes', 'numeric', 'gt:0', 'max:999.99', 'decimal:0,2'],
             'quantity_harvested'   => ['sometimes', 'numeric', 'gt:0', 'max:9999999.99', 'decimal:0,2'],
+            'remarks'              => ['sometimes', 'nullable', 'string', 'max:2000'],
             'daily_rate_at_entry'  => ['sometimes', 'numeric', 'min:0'],
         ];
     }

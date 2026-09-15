@@ -22,6 +22,7 @@ final class UpdateFertilizationOperationRequest extends FormRequest
             'fertilizer_id'    => ['sometimes', 'uuid', 'exists:fertilizers,id'],
             'operation_date'   => ['sometimes', 'date', 'date_format:Y-m-d'],
             'quantity_applied' => ['sometimes', 'numeric', 'gt:0', 'max:9999999.999', 'decimal:0,3'],
+            'remarks'          => ['sometimes', 'nullable', 'string', 'max:2000'],
             'n_at_entry'       => ['sometimes', 'numeric', 'min:0', 'max:100'],
             'p_at_entry'       => ['sometimes', 'numeric', 'min:0', 'max:100'],
             'k_at_entry'       => ['sometimes', 'numeric', 'min:0', 'max:100'],

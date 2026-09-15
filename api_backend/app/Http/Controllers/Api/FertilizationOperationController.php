@@ -78,6 +78,7 @@ final class FertilizationOperationController extends Controller
             'fertilizer_id'    => $fertilizer->id,
             'operation_date'   => $date,
             'quantity_applied' => $data['quantity_applied'],
+            'remarks'          => $data['remarks'] ?? null,
             'n_at_entry'       => $fertilizer->n_percent,
             'p_at_entry'       => $fertilizer->p_percent,
             'k_at_entry'       => $fertilizer->k_percent,

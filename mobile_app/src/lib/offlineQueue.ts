@@ -261,14 +261,22 @@ function buildPostings(item: OutboxRecord): Posting[] {
   const device_info = { platform, ua: typeof navigator !== 'undefined' ? navigator.userAgent : '' };
 
   switch (item.type) {
-    case 'irrigation':
+    case 'irrigation': {
+      const remarks = (p.remarks ?? null) as string | null;
       return [{
         client_id: item.id,
         operation_type: 'irrigation',
-        payload: { plot_id, operation_date: date, water_quantity: Number(p.water_quantity ?? p.water_quantity_m3 ?? 0) },
+        payload: {
+          plot_id,
+          operation_date: date,
+          water_quantity: Number(p.water_quantity ?? p.water_quantity_m3 ?? 0),
+          remarks,
+        },
         submitted_at, device_info,
       }];
-    case 'harvest':
+    }
+    case 'harvest': {
+      const remarks = (p.remarks ?? null) as string | null;
       return [{
         client_id: item.id,
         operation_type: 'harvest',
@@ -277,11 +285,14 @@ function buildPostings(item: OutboxRecord): Posting[] {
           num_workers: Number(p.num_workers ?? 0),
           days_worked: Number(p.days_worked ?? 1),
           quantity_harvested: Number(p.quantity_harvested ?? p.quantity_kg ?? 0),
+          remarks,
         },
         submitted_at, device_info,
       }];
+    }
     case 'fertilization': {
       const rows = (p.items as Array<Record<string, unknown>>) ?? [];
+      const remarks = (p.remarks ?? null) as string | null;
       return rows.map((it, idx) => ({
         client_id: `${item.id}:${idx}`,
         operation_type: 'fertilization' as const,
@@ -289,6 +300,7 @@ function buildPostings(item: OutboxRecord): Posting[] {
           plot_id, operation_date: date,
           fertilizer_id: it.fertilizer_id as string,
           quantity_applied: Number(it.quantity_applied ?? it.quantity ?? 0),
+          remarks,
         },
         submitted_at, device_info,
       }));

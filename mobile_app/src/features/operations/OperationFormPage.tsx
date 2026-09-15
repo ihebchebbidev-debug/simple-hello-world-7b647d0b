@@ -92,10 +92,11 @@ const OperationFormPage = ({ kind }: Props) => {
       };
       switch (kind) {
         case 'irrigation':
-          return { ...base, water_quantity: round3(Number(waterQty) * ratio) };
+          return { ...base, water_quantity: round3(Number(waterQty) * ratio), remarks: remarks || null };
         case 'fertilization':
           return {
             ...base,
+            remarks: remarks || null,
             items: fertItems
               .filter((it) => it.fertilizer_id && Number(it.quantity) > 0)
               .map((it) => ({
@@ -125,6 +126,7 @@ const OperationFormPage = ({ kind }: Props) => {
             quantity_harvested: round3(Number(harvestQty) * ratio),
             num_workers: Math.max(1, Math.round((Number(harvestWorkerDays) || 0) * ratio) || 1),
             days_worked: 1,
+            remarks: remarks || null,
           };
       }
       return base;
@@ -142,6 +144,7 @@ const OperationFormPage = ({ kind }: Props) => {
       plot_name: plot.name,
       operation_date: date,
       water_quantity: round3(water * plotRatio(plot)),
+      remarks: remarks || null,
     }));
   };
 
@@ -343,6 +346,19 @@ const OperationFormPage = ({ kind }: Props) => {
                 quantity={harvestQty} onQuantityChange={setHarvestQty}
                 workerDays={harvestWorkerDays} onWorkerDaysChange={setHarvestWorkerDays}
               />
+            )}
+
+            {kind !== 'phytosanitary' && (
+              <div>
+                <label className="label-md mb-2 block">{t('form.remarks')}</label>
+                <textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  rows={3}
+                  className="cl-input rounded-xl text-base py-3"
+                  placeholder={t('form.remarksPlaceholder')}
+                />
+              </div>
             )}
 
             {/* Per-plot split preview (phyto has its own inside PhytoFields). */}

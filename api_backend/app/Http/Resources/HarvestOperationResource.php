@@ -27,6 +27,7 @@ final class HarvestOperationResource extends JsonResource
             'num_workers'          => (int) $op->num_workers,
             'days_worked'          => (float) $op->days_worked,
             'quantity_harvested'   => (float) $op->quantity_harvested,
+            'remarks'              => $op->remarks,
             'daily_rate_at_entry'  => (float) $op->daily_rate_at_entry,
             'posting_id'           => $op->posting_id,
             'created_at'           => $op->created_at,

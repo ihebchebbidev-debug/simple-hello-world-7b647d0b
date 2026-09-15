@@ -25,6 +25,7 @@ final class IrrigationOperationResource extends JsonResource
                 : null,
             'operation_date' => $op->operation_date?->toDateString(),
             'water_quantity' => (float) $op->water_quantity,
+            'remarks'        => $op->remarks,
             'unit_at_entry'  => $op->unit_at_entry,
             'price_at_entry' => (float) $op->price_at_entry,
             'posting_id'     => $op->posting_id,

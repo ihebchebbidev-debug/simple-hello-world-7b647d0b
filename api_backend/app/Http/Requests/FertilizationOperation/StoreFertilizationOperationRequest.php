@@ -22,6 +22,7 @@ final class StoreFertilizationOperationRequest extends FormRequest
             'fertilizer_id'    => ['required', 'uuid', 'exists:fertilizers,id'],
             'operation_date'   => ['required', 'date', 'date_format:Y-m-d'],
             'quantity_applied' => ['required', 'numeric', 'gt:0', 'max:9999999.999', 'decimal:0,3'],
+            'remarks'          => ['sometimes', 'nullable', 'string', 'max:2000'],
             'posting_id'       => ['sometimes', 'nullable', 'uuid', 'exists:postings,id'],
         ];
     }

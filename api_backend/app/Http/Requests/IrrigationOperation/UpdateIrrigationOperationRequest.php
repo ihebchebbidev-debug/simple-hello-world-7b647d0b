@@ -21,6 +21,7 @@ final class UpdateIrrigationOperationRequest extends FormRequest
             'campaign_id'    => ['sometimes', 'nullable', 'uuid', 'exists:campaigns,id'],
             'operation_date' => ['sometimes', 'date', 'date_format:Y-m-d'],
             'water_quantity' => ['sometimes', 'numeric', 'gt:0', 'max:9999999.99', 'decimal:0,2'],
+            'remarks'        => ['sometimes', 'nullable', 'string', 'max:2000'],
             'unit_at_entry'  => ['sometimes', 'string', 'max:20'],
             'price_at_entry' => ['sometimes', 'numeric', 'min:0'],
         ];

@@ -58,6 +58,7 @@ final class HarvestOperationController extends Controller
             'num_workers'         => $data['num_workers'],
             'days_worked'         => $data['days_worked'],
             'quantity_harvested'  => $data['quantity_harvested'],
+            'remarks'             => $data['remarks'] ?? null,
             'daily_rate_at_entry' => $this->prices->priceFor('labor', null, $date),
             'posting_id'          => $data['posting_id'] ?? null,
             'created_by'          => $request->user()?->id,

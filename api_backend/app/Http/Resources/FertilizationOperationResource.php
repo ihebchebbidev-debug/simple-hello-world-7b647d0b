@@ -29,6 +29,7 @@ final class FertilizationOperationResource extends JsonResource
                 : null,
             'operation_date'   => $op->operation_date?->toDateString(),
             'quantity_applied' => (float) $op->quantity_applied,
+            'remarks'          => $op->remarks,
             'n_at_entry'       => (float) $op->n_at_entry,
             'p_at_entry'       => (float) $op->p_at_entry,
             'k_at_entry'       => (float) $op->k_at_entry,

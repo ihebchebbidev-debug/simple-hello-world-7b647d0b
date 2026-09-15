@@ -21,6 +21,7 @@ final class IrrigationOperation extends Model
         'campaign_id',
         'operation_date',
         'water_quantity',
+        'remarks',
         'unit_at_entry',
         'price_at_entry',
         'posting_id',
