@@ -13,7 +13,7 @@ import { Check, Loader2 } from 'lucide-react';
 import PageHeader from '@/components/PageHeader';
 import Skeleton from '@/components/Skeleton';
 import IrrigationFields from '@/components/forms/IrrigationFields';
-import FertilizationFields, { newFertItem, FERT_MAX_QTY, type FertItem } from '@/components/forms/FertilizationFields';
+import FertilizationFields, { newFertItem, type FertItem } from '@/components/forms/FertilizationFields';
 import PhytoFields, { newPestItem, type PestItem } from '@/components/forms/PhytoFields';
 import HarvestFields from '@/components/forms/HarvestFields';
 import RecentEntriesList from '@/components/RecentEntriesList';
@@ -154,9 +154,6 @@ const OperationFormPage = ({ kind }: Props) => {
     if (kind === 'irrigation' && !(Number(waterQty) > 0)) return t('form.invalid');
     if (kind === 'fertilization') {
       if (fertItems.every((i) => !i.fertilizer_id || !i.quantity)) return t('form.invalid');
-      if (fertItems.some((i) => Number(i.quantity) > FERT_MAX_QTY)) {
-        return t('form.fertOverMax', { max: FERT_MAX_QTY, defaultValue: `Quantity exceeds the maximum of ${FERT_MAX_QTY} kg` });
-      }
     }
     if (kind === 'phytosanitary') {
       if (!(Number(waterTotalL) > 0)) return t('form.invalid');
